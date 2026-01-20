@@ -2,14 +2,13 @@
 set -e # Exit immediately if any command fails
 
 # ==========================================
-# Applio macOS "Expert" Installer
-# Version: 12.0 (Golden Master / Production)
-# Target: Apple Silicon (M1/M2/M3) & Intel
-# Focus: Correctness, Data Safety, Compilation Fixes
+# Applio macOS installer
+# Version: 1.9
+# Target: Apple Silicon & Intel
 # ==========================================
 
 # --- Configuration ---
-INSTALL_DIR="Applio-Mac-Isolated"
+INSTALL_DIR="applio"
 PYTHON_VERSION="3.10"
 REPO_URL="https://github.com/IAHispano/Applio.git"
 
