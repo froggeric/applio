@@ -35,7 +35,8 @@ gradio==5.23.1
 # Miscellaneous utilities
 certifi>=2023.07.22
 antlr4-python3-runtime==4.8
-# tensorboardX # Excluded to reduce size unless critical, can re-enable if needed
+tensorboard
+tensorboardX
 edge-tts==7.2.0
 pypresence
 beautifulsoup4

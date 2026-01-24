@@ -30,6 +30,8 @@ HIDDEN_IMPORTS = [
     "gradio.themes",
     "torch",
     "numpy",
+    "tensorboard",
+    "tensorboardX",
     "passlib.handlers.bcrypt",
     "scipy.signal",
     "scipy.special.cython_special",
@@ -72,12 +74,16 @@ for lib in HIDDEN_IMPORTS:
 args = [
     ENTRY_POINT,
     "--name=Applio",
-    "--windowed", # No console
-    "--noconfirm",
+    '--windowed',
+    '--noconfirm',
     "--clean",
     f"--icon={ICON_FILE}",
     "--collect-all=torch",
     "--collect-all=torchaudio",
+    "--collect-all=gradio",      # Fix for missing templates/static files
+    "--collect-all=gradio_client", # Fix: [Errno 2] No such file or directory: '.../gradio_client/types.json'
+    "--collect-all=safehttpx",    # Fix: [Errno 2] No such file or directory: '.../safehttpx/version.txt'
+    "--collect-all=groovy",       # Fix: [Errno 2] No such file or directory: '.../groovy/version.txt'
     "--target-arch=arm64", # Pin to Apple Silicon
 ] + add_data_args + hidden_import_args
 
