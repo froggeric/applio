@@ -22,3 +22,9 @@ rvc/models
 env
 venv
 .venv
+venv_macos/
+
+# macOS Build Artifacts
+build/
+dist/
+Applio.spec
