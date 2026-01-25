@@ -10,8 +10,8 @@
             --bg-color: #0b0b0b;
             --text-color: #ffffff;
             --accent-color: #007aff;
-            --muted-text: #666666;
-            --detail-text: #444444;
+            --muted-text: #b0b0b0;
+            --detail-text: #808080;
             --progress-bg: rgba(255, 255, 255, 0.1);
             --bar-color: #ffffff;
         }
@@ -59,6 +59,7 @@
             letter-spacing: 4px;
             background: linear-gradient(180deg, #fff 0%, #666 100%);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
             opacity: 0.9;
         }
@@ -117,32 +118,36 @@
         }
 
         .stage-indicator {
-            font-size: 9px;
+            font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 2px;
-            color: var(--muted-text);
+            color: var(--accent-color);
             margin-bottom: 4px;
             font-weight: 700;
+            opacity: 1;
         }
 
         h1 {
-            font-size: 18px;
-            font-weight: 500;
+            font-size: 24px;
+            font-weight: 700;
             margin: 0 0 10px 0;
             color: var(--text-color);
-            letter-spacing: -0.2px;
+            letter-spacing: -0.5px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
         }
 
         #status-text {
-            font-size: 13px;
-            color: var(--muted-text);
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.9);
             margin: 0;
             transition: opacity 0.4s ease;
-            height: 18px;
+            height: 20px;
+            font-weight: 400;
+            letter-spacing: 0.3px;
         }
 
         #technical-detail {
-            font-size: 10px;
+            font-size: 11px;
             color: var(--detail-text);
             margin-top: 8px;
             font-family: "SF Mono", Menlo, monospace;
@@ -191,59 +196,55 @@
         const stageText = document.getElementById('stage-text');
         const techDetail = document.getElementById('technical-detail');
 
-        let lastStatus = "";
-        let lastStage = "";
+        let lastHeading = "";
+        let lastSubHeading = "";
         let lastDetail = "";
-
-        const STAGE_MAP = {
-            "1/4": "Stage 1: System Calibration",
-            "2/4": "Stage 2: Asset Synchronization",
-            "3/4": "Stage 3: Core Engine Boot",
-            "4/4": "Stage 4: Ready for Experience"
-        };
 
         async function pollStatus() {
             try {
                 const response = await fetch('/api/status');
                 const data = await response.json();
 
-                // 1. Progress Update (Always at least 2% for visibility)
+                // 1. Progress Update
                 const displayProgress = Math.max(2, data.progress);
                 progressBar.style.width = displayProgress + '%';
 
-                // 2. Stage Label
-                if (data.stage !== lastStage) {
-                    stageText.innerText = STAGE_MAP[data.stage] || "Process Initialization";
-                    lastStage = data.stage;
+                // 2. Headings & Titles (Dynamic from Backend)
+                if (data.heading !== lastHeading) {
+                    mainStatus.style.opacity = 0;
+                    setTimeout(() => {
+                        mainStatus.innerText = data.heading;
+                        mainStatus.style.opacity = 1;
+                    }, 200);
+                    lastHeading = data.heading;
                 }
 
-                // 3. Main Status Heading
-                if (data.stage === "1/4") mainStatus.innerText = "System Calibration";
-                else if (data.stage === "2/4") mainStatus.innerText = "Synchronizing AI Engine";
-                else if (data.stage === "3/4") mainStatus.innerText = "Warming Up Kernels";
-                else if (data.stage === "4/4") mainStatus.innerText = "Handoff Complete";
-
-                // 4. Sub-Status (Grouped Activity)
-                if (data.status !== lastStatus) {
+                if (data.sub_heading !== lastSubHeading) {
                     statusText.style.opacity = 0;
                     setTimeout(() => {
-                        statusText.innerText = data.status;
+                        statusText.innerText = data.sub_heading;
                         statusText.style.opacity = 1;
-                    }, 300);
-                    lastStatus = data.status;
+                    }, 200);
+                    lastSubHeading = data.sub_heading;
                 }
 
-                // 5. Technical Details (The "Real" Log Feed)
+                // 3. Technical Details
                 if (data.detail !== lastDetail) {
                     techDetail.innerText = data.detail;
                     lastDetail = data.detail;
                 }
+
+                // 4. Stage Indicator
+                if (data.stage) {
+                    stageText.innerText = data.stage;
+                }
+
             } catch (e) {
-                console.error("Link severed...");
+                // Silent fail
             }
         }
 
-        setInterval(pollStatus, 400);
+        setInterval(pollStatus, 200);
         pollStatus();
     </script>
 </body>

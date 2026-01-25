@@ -12,9 +12,36 @@ import webview
 # 0. Architectural & Environment Initialization
 # =================================================================
 
+# Native macOS Imports (Must be top-level for PyInstaller detection)
+try:
+    import AVFoundation
+    from Foundation import NSRunLoop, NSDate
+    import objc
+except ImportError:
+    logging.error("CRITICAL: PyObjC dependencies not found. Permissions check will fail.")
+    AVFoundation = None
+    NSRunLoop = None
+    NSDate = None
+
 # Performance tuning for Apple Silicon
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["PYTORCH_ENABLE_METAL_ACCELERATOR"] = "1"
+
+# GRADIO SECURITY & FILE ACCESS
+# We set this as early as possible to ensure all backend imports see it.
+# This prevents "File not allowed" errors for /var/folders temp files.
+# We include the root, temp folders, and private variants.
+os.environ["GRADIO_ALLOWED_PATHS"] = "/,/,/private/var/folders,/var/folders,/tmp,/private/tmp"
+os.environ["GRADIO_TEMP_DIR"] = os.path.expanduser("~/Library/Caches/Applio/gradio")
+os.makedirs(os.environ["GRADIO_TEMP_DIR"], exist_ok=True)
+
+# Early sounddevice probe
+try:
+    import sounddevice as sd
+    logging.info(f"PortAudio Version: {sd.get_portaudio_version()[1]}")
+except Exception as e:
+    logging.warning(f"Early sounddevice probe failed: {e}")
+
 
 # Redirect Cache Directories to User Library
 APP_SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/Applio")
@@ -94,7 +121,106 @@ def get_native_menu():
     ]
 
 # =================================================================
-# 3. App Core Class
+# 3. Permissions Architecture
+# =================================================================
+
+class PermissionsManager:
+    """
+    Centralized manager for macOS TCC (Transparency, Consent, and Control) permissions.
+    Uses native AVFoundation bindings (via pyobjc) to ensure the request is attributed
+    to the specific running process (Applio.app), not an external subprocess.
+    """
+    @staticmethod
+    def ensure_microphone():
+        """
+        Checks and requests microphone permission using native AVFoundation.
+        Returns: True if authorized (or eventually authorized), False otherwise.
+        """
+        try:
+            if AVFoundation is None:
+                raise ImportError("PyObjC not initialized")
+            
+            # 1. Check Status
+            media_type = AVFoundation.AVMediaTypeAudio
+            status = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(media_type)
+            
+            # AVAuthorizationStatusAuthorized = 3
+            if status == 3:
+                logging.info("[PERMISSIONS] Microphone already authorized.")
+                return True
+            
+            # AVAuthorizationStatusDenied = 2, Restricted = 1
+            if status in (1, 2):
+                logging.warning("[PERMISSIONS] Microphone access previously DENIED. User must enable in System Settings.")
+                return False
+                
+            # AVAuthorizationStatusNotDetermined = 0
+            if status == 0:
+                logging.info("[PERMISSIONS] Status not determined. Requesting access via native API...")
+                
+                # Request Access (Async Block)
+                # We use a mutable list to capture the result from the completion handler callback
+                result_holder = []
+                
+                def completion_handler(granted):
+                    logging.info(f"[PERMISSIONS] Completion handler fired: granted={granted}")
+                    result_holder.append(granted)
+                
+                # Force a dummy capture session to wake up TCC
+                try:
+                    session = AVFoundation.AVCaptureSession.alloc().init()
+                    input_device = AVFoundation.AVCaptureDevice.defaultDeviceWithMediaType_(media_type)
+                    if input_device:
+                        device_input = AVFoundation.AVCaptureDeviceInput.deviceInputWithDevice_error_(input_device, None)[0]
+                        if device_input and session.canAddInput_(device_input):
+                            session.addInput_(device_input)
+                            logging.info("[PERMISSIONS] Dummy session initialized to wake TCC.")
+                except Exception as e:
+                    logging.debug(f"[PERMISSIONS] Dummy session failed (expected if not yet authorized): {e}")
+
+                AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+                    media_type, completion_handler
+                )
+                
+                # Spin the RunLoop until the callback fires (Wait for user interaction)
+                start_time = time.time()
+                while not result_holder and (time.time() - start_time < 60): # Increased timeout
+                    NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.5))
+                
+                if result_holder and result_holder[0]:
+                    logging.info("[PERMISSIONS] User granted microphone access.")
+                    
+                    # FORCE PORTAUDIO REFRESH
+                    # Since we can't touch audio.py, we reset the subsystem here
+                    # so that when the backend starts, it scans fresh.
+                    try:
+                        import sounddevice as sd
+                        logging.info("[PERMISSIONS] Resetting sounddevice subsystem...")
+                        sd._terminate()
+                        sd._initialize()
+                    except Exception as e:
+                        logging.warning(f"[PERMISSIONS] Could not reset sounddevice: {e}")
+                        
+                    return True
+                else:
+                    logging.warning("[PERMISSIONS] User denied microphone access or timed out.")
+                    return False
+                    
+            return False
+            
+        except Exception as e:
+            logging.error(f"[PERMISSIONS] Native check failed (Exception): {e}")
+            return False
+
+    @staticmethod
+    def list_all():
+        """Logs the status of known permissions."""
+        # In a real native Swift app we'd use AVCaptureDevice.authorizationStatus
+        # In Python, we infer from functionality success.
+        pass
+
+# =================================================================
+# 4. App Core Class
 # =================================================================
 
 class ApplioApp:
@@ -104,8 +230,9 @@ class ApplioApp:
         self.loading_port = 5678
         self.window = None
         self.is_ready = False
-        self.status = "System Calibration..."
-        self.technical_detail = "Initializing environment variables..."
+        self.heading = "System Calibration"
+        self.sub_heading = "Initializing environment..."
+        self.technical_detail = "Allocating memory..."
         self.progress = 0
         self.stage = "1/4"
         self.log_file = os.path.expanduser("~/Library/Logs/Applio/applio_wrapper.log")
@@ -122,7 +249,8 @@ class ApplioApp:
                     self.end_headers()
                     import json
                     data = {
-                        "status": parent.status,
+                        "heading": parent.heading,
+                        "sub_heading": parent.sub_heading,
                         "progress": round(parent.progress, 1),
                         "stage": parent.stage,
                         "detail": parent.technical_detail
@@ -155,16 +283,26 @@ class ApplioApp:
         logging.info("Starting Granular Log Observer...")
         
         # Regex patterns for real activity
-        p_download = re.compile(r"Downloading.* (\d+)%")
-        p_download_file = re.compile(r"Downloading (.*)\.\.\.")
+        # High-level states
+        p_dl_percent = re.compile(r"Downloading.* (\d+)%")
+        p_dl_file = re.compile(r"Downloading (.*)\.\.\.")
         p_extract = re.compile(r"Extracting (.*)\.\.\.")
+        p_req = re.compile(r"Requirement already satisfied: (.*)")
+        p_pip_install = re.compile(r"Installing collected packages: (.*)")
+        
+        # Applio specific
         p_prereq = re.compile(r"run_prerequisites_script")
         p_init_app = re.compile(r"Initializing Gradio boot sequence")
+        p_load_model = re.compile(r"Loading (.*) model")
+        p_device = re.compile(r"Use (.*) acceleration")
+        p_server = re.compile(r"Running on local URL:.*")
         p_responsive = re.compile(r"Gradio backend is responsive")
+        
+        start_time = time.time()
 
         while True:
             if not os.path.exists(self.log_file):
-                time.sleep(1)
+                time.sleep(0.1)
                 continue
                 
             try:
@@ -173,55 +311,100 @@ class ApplioApp:
                     while True:
                         line = f.readline()
                         
-                        # ANTI-STALL CREEP: Ensure the bar always has life
-                        if not self.is_ready:
-                            if self.progress < 99:
-                                # Faster creep at high distance (Stage 1), slower at tail (Stage 3)
-                                creep = (100 - self.progress) / 1000 
-                                self.progress += creep
+                        # ANTI-STALL CREEP: Gentle pulse, no blocking
+                        if not self.is_ready and self.progress < 95:
+                             creep = (100 - self.progress) / 2000
+                             self.progress += creep
 
                         if not line:
-                            time.sleep(0.5)
+                            time.sleep(0.05)
                             continue
                         
-                        # REAL-TIME LOG MAPPING
-                        if p_download.search(line):
+                        line = line.strip()
+                        if not line: continue
+
+                        # --- LOGIC MAPPING ---
+                        
+                        # 1. Downloads
+                        if p_dl_percent.search(line):
                             self.stage = "2/4"
-                            self.status = "Synchronizing AI Voice Engine"
-                            match = p_download.search(line)
-                            new_val = int(match.group(1))
-                            if new_val > self.progress: self.progress = new_val
+                            self.heading = "Synchronizing Assets"
+                            match = p_dl_percent.search(line)
+                            val = int(match.group(1))
+                            if val > self.progress: self.progress = val
                             
-                        elif p_download_file.search(line):
+                        elif p_dl_file.search(line):
                             self.stage = "2/4"
-                            self.technical_detail = f"Fetching: {p_download_file.search(line).group(1)}"
-                            
+                            self.heading = "Synchronizing Assets"
+                            fname = p_dl_file.search(line).group(1)
+                            self.sub_heading = f"Fetching {os.path.basename(fname)}"
+                            self.technical_detail = f"Network Request: {fname}"
+
+                        # 2. Operations
                         elif p_extract.search(line):
                             self.stage = "2/4"
-                            self.technical_detail = f"Unpacking: {p_extract.search(line).group(1)}"
-                            
+                            self.heading = "Decompressing Resources"
+                            fname = p_extract.search(line).group(1)
+                            self.sub_heading = f"Unpacking {os.path.basename(fname)}"
+                            self.technical_detail = f"IO Operation: {fname}"
+
+                        elif p_pip_install.search(line):
+                             self.stage = "2/4"
+                             self.heading = "Building Environment"
+                             pkgs = p_pip_install.search(line).group(1)
+                             if len(pkgs) > 30: pkgs = pkgs[:27] + "..."
+                             self.sub_heading = f"Installing {pkgs}"
+                             self.technical_detail = line
+
+                        # 3. Initialization
                         elif p_prereq.search(line):
                             self.stage = "1/4"
-                            self.status = "Verifying Prerequisites"
-                            self.technical_detail = "Checking platform dependencies..."
+                            self.heading = "System Validation"
+                            self.sub_heading = "Checking Prerequisites..."
                             if self.progress < 10: self.progress = 10
 
+                        elif p_device.search(line):
+                             self.heading = "Hardware Optimization"
+                             device = p_device.search(line).group(1)
+                             self.sub_heading = f"Accelerating with {device}"
+                             self.technical_detail = f"Device allocation: {device}"
+
+                        # 4. Boot
                         elif p_init_app.search(line):
                             self.stage = "3/4"
-                            self.status = "Booting Inference Core"
-                            self.technical_detail = "Warming up Metal Performance Shaders..."
-                            if self.progress < 90: self.progress = 90
-                        
-                        elif p_responsive.search(line):
+                            self.heading = "Booting Inference Engine"
+                            self.sub_heading = "Loading Neural Networks..."
+                            self.technical_detail = "Initializing pytorch contexts..."
+                            if self.progress < 80: self.progress = 80
+                            
+                        elif p_load_model.search(line):
+                             self.heading = "Loading Models"
+                             model = p_load_model.search(line).group(1)
+                             self.sub_heading = f"Hydrating {model}..."
+                             self.technical_detail = f"Memory mapping {model}"
+
+                        # 5. Success
+                        elif p_server.search(line) or p_responsive.search(line) or "Gradio backend is responsive" in line:
                             self.stage = "4/4"
-                            self.status = "Initialization Complete"
-                            self.technical_detail = "Redirecting to Applio UI..."
+                            self.heading = "Initialization Complete"
+                            self.sub_heading = "Launching User Interface..."
                             self.progress = 100
                             self.is_ready = True
                             return
+                            
+                        # GENERIC FALLBACK: Show raw log activity
+                        else:
+                             clean = line
+                             if len(clean) > 8 and "it/s]" not in clean: 
+                                 if ":root:" in clean:
+                                     clean = clean.split(":root:", 1)[1].strip()
+                                 if len(clean) > 60: clean = clean[:57] + "..."
+                                 self.technical_detail = clean
+                                 if self.stage == "1/4" and self.sub_heading == "Initializing environment...":
+                                     self.sub_heading = "Configuring Runtime..."
             except Exception as e:
                 logging.error(f"Log observer error: {e}")
-                time.sleep(2)
+                time.sleep(1)
 
     def wait_for_backend(self, timeout=300):
         """Polls the Gradio backend for readiness."""
@@ -239,6 +422,26 @@ class ApplioApp:
             except Exception:
                 time.sleep(1)
         return False
+
+    def show_permission_denied_dialog(self):
+        """Show native alert when microphone permission is denied."""
+        try:
+            from AppKit import NSAlert, NSAlertFirstButtonReturn
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Microphone Access Denied")
+            alert.setInformativeText_(
+                "Applio needs microphone access to record audio for voice conversion.\n\n"
+                "Recording features will be disabled. To enable them, grant microphone "
+                "permission in System Settings > Privacy & Security > Microphone."
+            )
+            alert.addButtonWithTitle_("Continue Anyway")
+            alert.runModal()
+        except Exception as e:
+            logging.warning(f"Could not show permission dialog: {e}")
+
+    def trigger_mic_permission(self):
+        """Triggers the macOS TCC prompt early via PermissionsManager."""
+        return PermissionsManager.ensure_microphone()
 
     def start_backend(self):
         """Launches the actual Applio server."""
@@ -268,11 +471,10 @@ class ApplioApp:
         multiprocessing.freeze_support()
         sys.argv = [sys.argv[0]] # Clean arguments
 
-        # 1. Start Servers
+        # 1. Start Helpers (Loading Screen & Logs)
         threading.Thread(target=self.start_loading_server, daemon=True).start()
         threading.Thread(target=self.tail_logs, daemon=True).start()
-        threading.Thread(target=self.start_backend, daemon=True).start()
-        threading.Thread(target=self.monitor_transition, daemon=True).start()
+        # NOTE: We DO NOT start start_backend here yet. It must wait for permissions.
 
         # 2. Main Window
         self.window = webview.create_window(
@@ -288,7 +490,20 @@ class ApplioApp:
 
         self.window.events.closed += lambda: os._exit(0)
         
-        # 3. Start GUI
+        # 3. Trigger Permissions (Main Thread execution for valid TCC context)
+        # We do this AFTER window creation but BEFORE main loop start to ensure app context exists.
+        # Ideally, webview.start would handle this, but we need to guarantee the prompt.
+        logging.info("Executing Main Thread Permission Check...")
+        mic_granted = self.trigger_mic_permission()
+        if not mic_granted:
+            self.show_permission_denied_dialog()
+        
+        # 4. Now that permissions are settled, start the Backend
+        logging.info("Permissions settled. Launching Backend...")
+        threading.Thread(target=self.start_backend, daemon=True).start()
+        threading.Thread(target=self.monitor_transition, daemon=True).start()
+
+        # 5. Start GUI
         webview.start(menu=get_native_menu(), debug=False)
 
 if __name__ == "__main__":

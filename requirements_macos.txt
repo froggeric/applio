@@ -30,19 +30,21 @@ transformers==4.44.2
 
 # Visualization and UI
 matplotlib==3.7.2
-gradio==5.23.1
+gradio==6.4.0
 
 # Miscellaneous utilities
 certifi>=2023.07.22
 antlr4-python3-runtime==4.8
 tensorboard
 tensorboardX
-edge-tts==7.2.0
+edge-tts==7.2.7
 pypresence
 beautifulsoup4
 sounddevice
-webrtcvad
+webrtcvad-wheels
 
 # Packaging & Native UI
 pywebview>=5.0
 pyinstaller>=6.3.0
+pyobjc-framework-AVFoundation
+pyobjc-framework-Cocoa

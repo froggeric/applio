@@ -2,11 +2,21 @@ import PyInstaller.__main__
 import os
 import shutil
 
-# Clean up previous builds
-if os.path.exists("dist"):
-    shutil.rmtree("dist")
-if os.path.exists("build"):
-    shutil.rmtree("build")
+# Clean up previous builds with robustness against Spotlight locks
+def clean_dir(path):
+    if os.path.exists(path):
+        print(f"Cleaning {path}...")
+        for i in range(3):
+            try:
+                shutil.rmtree(path)
+                return
+            except Exception:
+                time.sleep(1)
+        os.system(f"rm -rf {path}")
+
+import time
+clean_dir("dist")
+clean_dir("build")
 
 # Define build parameters
 APP_NAME = "Applio"
@@ -82,7 +92,8 @@ args = [
     "--collect-all=gradio",      
     "--collect-all=gradio_client", 
     "--collect-all=safehttpx",    
-    "--collect-all=groovy",       
+    "--collect-all=groovy",
+    "--collect-all=sounddevice",
     "--target-arch=arm64",
     "--osx-bundle-identifier=com.iahispano.applio",
 ] + add_data_args + hidden_import_args
@@ -100,19 +111,39 @@ if os.path.exists(info_plist_path):
         with open(info_plist_path, 'rb') as f:
             plist = plistlib.load(f)
         
-        # Permissions
+        # Permissions & Usage Descriptions
         plist['NSMicrophoneUsageDescription'] = "Applio needs microphone access to record audio for voice conversion."
+        plist['NSCameraUsageDescription'] = "Applio needs camera access for visual processing."
+        plist['NSDesktopFolderUsageDescription'] = "Applio needs desktop access to save and load models."
+        plist['NSDocumentsFolderUsageDescription'] = "Applio needs documents access to save audio exports."
+        plist['NSDownloadsFolderUsageDescription'] = "Applio needs downloads access to retrieve models."
+        plist['NSAppleEventsUsageDescription'] = "Applio needs apple events access for automation."
         
         # Branding
         plist['CFBundleShortVersionString'] = "3.6.0"
         plist['CFBundleVersion'] = "3.6.0"
         plist['NSHumanReadableCopyright'] = "Copyright © 2026 IAHispano. All rights reserved."
         
+        # High-DPI support
+        plist['NSHighResolutionCapable'] = True
+        
         with open(info_plist_path, 'wb') as f:
             plistlib.dump(plist, f)
         print("Info.plist patched successfully.")
+        
+        # Codesign with entitlements
+        entitlements_path = "assets/entitlements.plist"
+        if os.path.exists(entitlements_path):
+            print("Signing application with entitlements...")
+            app_path = os.path.join("dist", f"{APP_NAME}.app")
+            # Deep sign the bundle
+            os.system(f"codesign --force --deep --sign - --entitlements {entitlements_path} {app_path}")
+            print("Application signed.")
+        else:
+            print(f"WARNING: Entitlements file not found at {entitlements_path}")
+            
     except Exception as e:
-        print(f"Failed to patch Info.plist: {e}")
+        print(f"Failed to patch Info.plist or sign app: {e}")
 else:
     print(f"WARNING: Info.plist not found at {info_plist_path}")
 
