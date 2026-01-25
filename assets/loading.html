@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Applio is Starting</title>
+    <style>
+        :root {
+            --bg-color: #0b0b0b;
+            --text-color: #ffffff;
+            --accent-color: #007aff;
+            --muted-text: #666666;
+            --detail-text: #444444;
+            --progress-bg: rgba(255, 255, 255, 0.1);
+            --bar-color: #ffffff;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .container {
+            text-align: center;
+            width: 85%;
+            max-width: 440px;
+            animation: containerIn 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes containerIn {
+            from {
+                opacity: 0;
+                transform: scale(0.98) translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .logo-container {
+            margin-bottom: 60px;
+        }
+
+        .logo-text {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: 4px;
+            background: linear-gradient(180deg, #fff 0%, #666 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            opacity: 0.9;
+        }
+
+        /* Progress System */
+        .progress-wrapper {
+            position: relative;
+            margin-bottom: 32px;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 4px;
+            /* Slightly taller for visibility */
+            background-color: var(--progress-bg);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 2%;
+            /* Initial stub */
+            background: var(--bar-color);
+            border-radius: 2px;
+            transition: width 0.8s cubic-bezier(0.23, 1, 0.32, 1);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+            position: relative;
+        }
+
+        /* Animated shimmer effect on top of the bar */
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite linear;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
+        }
+
+        .status-group {
+            min-height: 80px;
+        }
+
+        .stage-indicator {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--muted-text);
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+
+        h1 {
+            font-size: 18px;
+            font-weight: 500;
+            margin: 0 0 10px 0;
+            color: var(--text-color);
+            letter-spacing: -0.2px;
+        }
+
+        #status-text {
+            font-size: 13px;
+            color: var(--muted-text);
+            margin: 0;
+            transition: opacity 0.4s ease;
+            height: 18px;
+        }
+
+        #technical-detail {
+            font-size: 10px;
+            color: var(--detail-text);
+            margin-top: 8px;
+            font-family: "SF Mono", Menlo, monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            opacity: 0.8;
+        }
+
+        .footer {
+            position: absolute;
+            bottom: 40px;
+            font-size: 10px;
+            color: var(--detail-text);
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="logo-container">
+            <div class="logo-text">APPLIO</div>
+        </div>
+
+        <div class="progress-wrapper">
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+        </div>
+
+        <div class="status-group">
+            <div class="stage-indicator" id="stage-text">SYSTEM CALIBRATION</div>
+            <h1 id="main-status">Initializing</h1>
+            <p id="status-text">Starting backend architecture...</p>
+            <div id="technical-detail">Establishing environment variables...</div>
+        </div>
+    </div>
+
+    <div class="footer">ENGINE v3.6.0 | METAL ACCELERATED</div>
+
+    <script>
+        const progressBar = document.getElementById('progress-bar');
+        const mainStatus = document.getElementById('main-status');
+        const statusText = document.getElementById('status-text');
+        const stageText = document.getElementById('stage-text');
+        const techDetail = document.getElementById('technical-detail');
+
+        let lastStatus = "";
+        let lastStage = "";
+        let lastDetail = "";
+
+        const STAGE_MAP = {
+            "1/4": "Stage 1: System Calibration",
+            "2/4": "Stage 2: Asset Synchronization",
+            "3/4": "Stage 3: Core Engine Boot",
+            "4/4": "Stage 4: Ready for Experience"
+        };
+
+        async function pollStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // 1. Progress Update (Always at least 2% for visibility)
+                const displayProgress = Math.max(2, data.progress);
+                progressBar.style.width = displayProgress + '%';
+
+                // 2. Stage Label
+                if (data.stage !== lastStage) {
+                    stageText.innerText = STAGE_MAP[data.stage] || "Process Initialization";
+                    lastStage = data.stage;
+                }
+
+                // 3. Main Status Heading
+                if (data.stage === "1/4") mainStatus.innerText = "System Calibration";
+                else if (data.stage === "2/4") mainStatus.innerText = "Synchronizing AI Engine";
+                else if (data.stage === "3/4") mainStatus.innerText = "Warming Up Kernels";
+                else if (data.stage === "4/4") mainStatus.innerText = "Handoff Complete";
+
+                // 4. Sub-Status (Grouped Activity)
+                if (data.status !== lastStatus) {
+                    statusText.style.opacity = 0;
+                    setTimeout(() => {
+                        statusText.innerText = data.status;
+                        statusText.style.opacity = 1;
+                    }, 300);
+                    lastStatus = data.status;
+                }
+
+                // 5. Technical Details (The "Real" Log Feed)
+                if (data.detail !== lastDetail) {
+                    techDetail.innerText = data.detail;
+                    lastDetail = data.detail;
+                }
+            } catch (e) {
+                console.error("Link severed...");
+            }
+        }
+
+        setInterval(pollStatus, 400);
+        pollStatus();
+    </script>
+</body>
+
+</html>

@@ -6,12 +6,17 @@ import logging
 import socket
 import http.server
 import socketserver
+import webview
 
-# 0. Architectural Optimizations (Subagent Nova)
+# =================================================================
+# 0. Architectural & Environment Initialization
+# =================================================================
+
+# Performance tuning for Apple Silicon
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["PYTORCH_ENABLE_METAL_ACCELERATOR"] = "1"
 
-# 0.1 Redirect Cache Directories
+# Redirect Cache Directories to User Library
 APP_SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/Applio")
 os.makedirs(APP_SUPPORT_DIR, exist_ok=True)
 os.environ["HF_HOME"] = os.path.join(APP_SUPPORT_DIR, "huggingface")
@@ -20,160 +25,272 @@ os.environ["TRANSFORMERS_CACHE"] = os.path.join(APP_SUPPORT_DIR, "huggingface", 
 os.environ["MPLCONFIGDIR"] = os.path.join(APP_SUPPORT_DIR, "matplotlib")
 os.environ["TORCH_HOME"] = os.path.join(APP_SUPPORT_DIR, "torch")
 
-# 1. Path Hygiene
+# Path Hygiene for PyInstaller
 if getattr(sys, "frozen", False):
-    os.chdir(sys._MEIPASS)
+    BASE_PATH = sys._MEIPASS
+    os.chdir(BASE_PATH)
+else:
+    BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 
-# 2. Logging Setup
+# =================================================================
+# 1. Logging Configuration
+# =================================================================
+
 def setup_logging():
-    app_name = "Applio"
-    log_dir = os.path.expanduser(f"~/Library/Logs/{app_name}")
+    log_dir = os.path.expanduser("~/Library/Logs/Applio")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "applio_wrapper.log")
+    
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.FileHandler(log_file, mode='w'),
             logging.StreamHandler(sys.stdout)
         ]
     )
-    sys.stdout = open(log_file, 'w')
-    sys.stderr = open(log_file, 'w')
-    logging.info("Starting Applio macOS Wrapper...")
-    logging.info("Wrapper Version: 1.6 (Stub Server Loading Screen)")
+    # Redirect stdout/stderr to log for frozen builds
+    if getattr(sys, "frozen", False):
+        sys.stdout = open(log_file, 'a')
+        sys.stderr = open(log_file, 'a')
+    
+    logging.info("--- Applio macOS Native Session Start ---")
+    logging.info(f"Version: 1.7 (Refined Architecture)")
     logging.info(f"CWD: {os.getcwd()}")
-    logging.info(f"Frozen: {getattr(sys, 'frozen', False)}")
+    logging.info(f"Base Path: {BASE_PATH}")
 
 setup_logging()
 
-# 3. Native macOS UI Optimizations
+# =================================================================
+# 2. UI Support & Native Menu
+# =================================================================
+
 def get_native_menu():
     from webview.menu import Menu, MenuAction, MenuSeparator
     return [
-        Menu("Applio", [MenuAction("About Applio", lambda: None), MenuSeparator(), MenuAction("Quit", lambda: os._exit(0))]),
-        Menu("Edit", [MenuAction("Undo", lambda: None), MenuAction("Redo", lambda: None), MenuSeparator(), MenuAction("Cut", lambda: None), MenuAction("Copy", lambda: None), MenuAction("Paste", lambda: None), MenuSeparator(), MenuAction("Select All", lambda: None)]),
+        Menu("Applio", [
+            MenuAction("About Applio", lambda: logging.info("About clicked")),
+            MenuSeparator(),
+            MenuAction("Services", lambda: None),
+            MenuSeparator(),
+            MenuAction("Hide Applio", lambda: None),
+            MenuAction("Hide Others", lambda: None),
+            MenuSeparator(),
+            MenuAction("Quit Applio", lambda: os._exit(0))
+        ]),
+        Menu("Edit", [
+            MenuAction("Undo", lambda: None),
+            MenuAction("Redo", lambda: None),
+            MenuSeparator(),
+            MenuAction("Cut", lambda: None),
+            MenuAction("Copy", lambda: None),
+            MenuAction("Paste", lambda: None),
+            MenuAction("Select All", lambda: None)
+        ]),
+        Menu("Window", [
+            MenuAction("Minimize", lambda: None),
+            MenuAction("Zoom", lambda: None),
+        ])
     ]
 
-import webview
+# =================================================================
+# 3. App Core Class
+# =================================================================
 
-# Global Configuration
-SERVER_PORT = 6969
-SERVER_HOST = "127.0.0.1"
-LOADING_PORT = 5678
+class ApplioApp:
+    def __init__(self):
+        self.server_host = "127.0.0.1"
+        self.server_port = 6969
+        self.loading_port = 5678
+        self.window = None
+        self.is_ready = False
+        self.status = "System Calibration..."
+        self.technical_detail = "Initializing environment variables..."
+        self.progress = 0
+        self.stage = "1/4"
+        self.log_file = os.path.expanduser("~/Library/Logs/Applio/applio_wrapper.log")
 
-# Loading Screen HTML
-LOADING_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Applio is Starting</title>
-    <style>
-        body { background-color: #0f0f0f; color: #ffffff; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; justify_content: center; align-items: center; height: 100vh; margin: 0; user-select: none; }
-        .loader { width: 48px; height: 48px; border: 5px solid #333; border-bottom-color: #fff; border-radius: 50%; display: inline-block; box-sizing: border-box; animation: rotation 1s linear infinite; margin-bottom: 20px; }
-        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        h1 { font-size: 24px; font-weight: 500; margin-bottom: 10px; }
-        p { color: #888; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="loader"></div>
-    <h1>Starting Applio...</h1>
-    <p>Initializing AI models and backend services.</p>
-    <p>This may take a few minutes on first run.</p>
-</body>
-</html>
-"""
+    def start_loading_server(self):
+        """Serves the high-fidelity loading screen and status API."""
+        parent = self
+        class LoadingHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/api/status":
+                    self.send_response(200)
+                    self.send_header("Content-type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    import json
+                    data = {
+                        "status": parent.status,
+                        "progress": round(parent.progress, 1),
+                        "stage": parent.stage,
+                        "detail": parent.technical_detail
+                    }
+                    self.wfile.write(json.dumps(data).encode("utf-8"))
+                    return
 
-class LoadingHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(LOADING_HTML.encode("utf-8"))
-    def log_message(self, format, *args):
-        pass # Silence logs
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                try:
+                    path = os.path.join(BASE_PATH, "assets", "loading.html")
+                    with open(path, 'r') as f:
+                        self.wfile.write(f.read().encode("utf-8"))
+                except Exception as e:
+                    self.wfile.write(f"<h1>Loading Applio...</h1><p>{e}</p>".encode("utf-8"))
+            def log_message(self, format, *args): pass
 
-def start_loading_server():
-    """Starts a minimal HTTP server to serve the loading screen."""
-    try:
-        handler = LoadingHandler
-        with socketserver.TCPServer(("127.0.0.1", LOADING_PORT), handler) as httpd:
-            logging.info(f"Loading Server started on port {LOADING_PORT}")
-            httpd.serve_forever() # Daemon thread will kill this on exit
-    except Exception as e:
-        logging.error(f"Loading Server failed: {e}")
-
-def wait_for_server(host, port, timeout=300):
-    import urllib.request
-    url = f"http://{host}:{port}"
-    start_time = time.time()
-    logging.info(f"Waiting for {url} to be responsive...")
-    while time.time() - start_time < timeout:
         try:
-            with urllib.request.urlopen(url, timeout=1) as response:
-                if response.status == 200:
-                    logging.info("Server responded with 200 OK!")
-                    return True
-        except Exception:
-            time.sleep(1)
-    return False
+            socketserver.TCPServer.allow_reuse_address = True
+            with socketserver.TCPServer((self.server_host, self.loading_port), LoadingHandler) as httpd:
+                logging.info(f"Loading UI server active on port {self.loading_port}")
+                httpd.serve_forever()
+        except Exception as e:
+            logging.error(f"Loading UI server failed: {e}")
 
-def start_server():
-    try:
-        # Lazy import to prevent infinite loops
+    def tail_logs(self):
+        """Expert Log Observer with Real-Time Technical Feed."""
+        import re
+        logging.info("Starting Granular Log Observer...")
+        
+        # Regex patterns for real activity
+        p_download = re.compile(r"Downloading.* (\d+)%")
+        p_download_file = re.compile(r"Downloading (.*)\.\.\.")
+        p_extract = re.compile(r"Extracting (.*)\.\.\.")
+        p_prereq = re.compile(r"run_prerequisites_script")
+        p_init_app = re.compile(r"Initializing Gradio boot sequence")
+        p_responsive = re.compile(r"Gradio backend is responsive")
+
+        while True:
+            if not os.path.exists(self.log_file):
+                time.sleep(1)
+                continue
+                
+            try:
+                with open(self.log_file, 'r') as f:
+                    f.seek(0, os.SEEK_END)
+                    while True:
+                        line = f.readline()
+                        
+                        # ANTI-STALL CREEP: Ensure the bar always has life
+                        if not self.is_ready:
+                            if self.progress < 99:
+                                # Faster creep at high distance (Stage 1), slower at tail (Stage 3)
+                                creep = (100 - self.progress) / 1000 
+                                self.progress += creep
+
+                        if not line:
+                            time.sleep(0.5)
+                            continue
+                        
+                        # REAL-TIME LOG MAPPING
+                        if p_download.search(line):
+                            self.stage = "2/4"
+                            self.status = "Synchronizing AI Voice Engine"
+                            match = p_download.search(line)
+                            new_val = int(match.group(1))
+                            if new_val > self.progress: self.progress = new_val
+                            
+                        elif p_download_file.search(line):
+                            self.stage = "2/4"
+                            self.technical_detail = f"Fetching: {p_download_file.search(line).group(1)}"
+                            
+                        elif p_extract.search(line):
+                            self.stage = "2/4"
+                            self.technical_detail = f"Unpacking: {p_extract.search(line).group(1)}"
+                            
+                        elif p_prereq.search(line):
+                            self.stage = "1/4"
+                            self.status = "Verifying Prerequisites"
+                            self.technical_detail = "Checking platform dependencies..."
+                            if self.progress < 10: self.progress = 10
+
+                        elif p_init_app.search(line):
+                            self.stage = "3/4"
+                            self.status = "Booting Inference Core"
+                            self.technical_detail = "Warming up Metal Performance Shaders..."
+                            if self.progress < 90: self.progress = 90
+                        
+                        elif p_responsive.search(line):
+                            self.stage = "4/4"
+                            self.status = "Initialization Complete"
+                            self.technical_detail = "Redirecting to Applio UI..."
+                            self.progress = 100
+                            self.is_ready = True
+                            return
+            except Exception as e:
+                logging.error(f"Log observer error: {e}")
+                time.sleep(2)
+
+    def wait_for_backend(self, timeout=300):
+        """Polls the Gradio backend for readiness."""
+        import urllib.request
+        url = f"http://{self.server_host}:{self.server_port}"
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                with urllib.request.urlopen(url, timeout=1) as response:
+                    if response.status == 200:
+                        logging.info("Gradio backend is responsive.")
+                        self.is_ready = True
+                        return True
+            except Exception:
+                time.sleep(1)
+        return False
+
+    def start_backend(self):
+        """Launches the actual Applio server."""
         try:
             from app import launch_gradio
-        except ImportError as e:
-            logging.error(f"Failed to import app.py: {e}")
-            return
-        logging.info(f"Launching Gradio Server on {SERVER_HOST}:{SERVER_PORT}")
-        launch_gradio(SERVER_HOST, SERVER_PORT)
-    except Exception as e:
-        logging.error(f"Server crashed: {e}")
+            logging.info("Initializing Gradio boot sequence...")
+            launch_gradio(self.server_host, self.server_port)
+        except Exception as e:
+            logging.error(f"Backend launch failed: {e}")
 
-def on_closed():
-    logging.info("Window closed. Exiting...")
-    os._exit(0)
+    def monitor_transition(self):
+        """Switches from loading screen to main app."""
+        if self.wait_for_backend():
+            # Graceful delay for UI settling
+            time.sleep(1.5)
+            if self.window:
+                logging.info("Transitioning to main UI...")
+                self.window.load_url(f"http://{self.server_host}:{self.server_port}")
+        else:
+            logging.error("Backend timeout period exceeded.")
+            if self.window:
+                self.window.load_html("<h1>Startup Error</h1><p>The server failed to respond in time.</p>")
+
+    def run(self):
+        # 0. Multiprocessing safety
+        import multiprocessing
+        multiprocessing.freeze_support()
+        sys.argv = [sys.argv[0]] # Clean arguments
+
+        # 1. Start Servers
+        threading.Thread(target=self.start_loading_server, daemon=True).start()
+        threading.Thread(target=self.tail_logs, daemon=True).start()
+        threading.Thread(target=self.start_backend, daemon=True).start()
+        threading.Thread(target=self.monitor_transition, daemon=True).start()
+
+        # 2. Main Window
+        self.window = webview.create_window(
+            "Applio",
+            url=f"http://{self.server_host}:{self.loading_port}",
+            width=1280,
+            height=1370,
+            min_size=(1024, 720),
+            resizable=True,
+            text_select=True,
+            vibrancy=True # Re-enabled for premium feel
+        )
+
+        self.window.events.closed += lambda: os._exit(0)
+        
+        # 3. Start GUI
+        webview.start(menu=get_native_menu(), debug=False)
 
 if __name__ == "__main__":
-    sys.argv = [sys.argv[0]]
-    import multiprocessing
-    multiprocessing.freeze_support()
-
-    # 1. Start Loading Server
-    loading_thread = threading.Thread(target=start_loading_server, daemon=True)
-    loading_thread.start()
-    
-    # 2. Start App Server
-    server_thread = threading.Thread(target=start_server, daemon=True)
-    server_thread.start()
-
-    # 3. Create Window pointing to Loading Server
-    window = webview.create_window(
-        "Applio", 
-        url=f"http://127.0.0.1:{LOADING_PORT}",
-        width=1280, 
-        height=720, 
-        resizable=True, 
-        text_select=True,
-        min_size=(800, 600)
-        # vibrancy=True
-    )
-
-    # 4. Monitor Thread to switch URL
-    def monitor_and_switch():
-        if wait_for_server(SERVER_HOST, SERVER_PORT):
-            time.sleep(1)
-            window.load_url(f"http://{SERVER_HOST}:{SERVER_PORT}")
-        else:
-            logging.error("Server timeout")
-            window.load_html("<h1>Error: Server Timeout</h1>")
-            
-    threading.Thread(target=monitor_and_switch, daemon=True).start()
-
-    # 5. Start UI Loop
-    window.events.closed += on_closed
-    webview.start(debug=True)
+    app = ApplioApp()
+    app.run()

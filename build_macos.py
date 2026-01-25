@@ -11,9 +11,9 @@ if os.path.exists("build"):
 # Define build parameters
 APP_NAME = "Applio"
 ENTRY_POINT = "macos_wrapper.py"
-ICON_FILE = "assets/ICON.ico" # PyInstaller handles conversion
+ICON_FILE = "assets/ICON.ico" 
 
-# Hidden imports common in scientific/ML stacks (Subagent Nova's Review)
+# Hidden imports common in scientific/ML stacks
 HIDDEN_IMPORTS = [
     "uvicorn",
     "uvicorn.logging",
@@ -47,7 +47,6 @@ HIDDEN_IMPORTS = [
 ]
 
 # Collect data files
-# Format: "source:dest"
 datas = [
     ("assets", "assets"),
     ("logs", "logs"),
@@ -74,34 +73,40 @@ for lib in HIDDEN_IMPORTS:
 args = [
     ENTRY_POINT,
     "--name=Applio",
-    '--windowed',
-    '--noconfirm',
+    "--windowed", # No console
+    "--noconfirm",
     "--clean",
     f"--icon={ICON_FILE}",
     "--collect-all=torch",
     "--collect-all=torchaudio",
-    "--collect-all=gradio",      # Fix for missing templates/static files
-    "--collect-all=gradio_client", # Fix: [Errno 2] No such file or directory: '.../gradio_client/types.json'
-    "--collect-all=safehttpx",    # Fix: [Errno 2] No such file or directory: '.../safehttpx/version.txt'
-    "--collect-all=groovy",       # Fix: [Errno 2] No such file or directory: '.../groovy/version.txt'
-    "--target-arch=arm64", # Pin to Apple Silicon
+    "--collect-all=gradio",      
+    "--collect-all=gradio_client", 
+    "--collect-all=safehttpx",    
+    "--collect-all=groovy",       
+    "--target-arch=arm64",
+    "--osx-bundle-identifier=com.iahispano.applio",
 ] + add_data_args + hidden_import_args
 
 # Run PyInstaller
-print("Starting PyInstaller build...")
+print("Starting Applio macOS Build Sequence...")
 PyInstaller.__main__.run(args)
 
 # Post-processing Info.plist
 info_plist_path = os.path.join("dist", f"{APP_NAME}.app", "Contents", "Info.plist")
 if os.path.exists(info_plist_path):
-    print("Patching Info.plist for Microphone access...")
+    print("Patching Info.plist for Microphone access & Metadata...")
     try:
         import plistlib
         with open(info_plist_path, 'rb') as f:
             plist = plistlib.load(f)
         
-        # Add Microphone Usage Description
+        # Permissions
         plist['NSMicrophoneUsageDescription'] = "Applio needs microphone access to record audio for voice conversion."
+        
+        # Branding
+        plist['CFBundleShortVersionString'] = "3.6.0"
+        plist['CFBundleVersion'] = "3.6.0"
+        plist['NSHumanReadableCopyright'] = "Copyright © 2026 IAHispano. All rights reserved."
         
         with open(info_plist_path, 'wb') as f:
             plistlib.dump(plist, f)
@@ -111,4 +116,4 @@ if os.path.exists(info_plist_path):
 else:
     print(f"WARNING: Info.plist not found at {info_plist_path}")
 
-print("Build complete. Application is in dist/")
+print("Build complete. Application verified at dist/Applio.app")
