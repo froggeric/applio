@@ -15,6 +15,7 @@
 *.zip
 *.png
 *.safetensors
+*.bak
 
 assets/audios
 assets/datasets
