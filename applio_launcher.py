@@ -34,6 +34,7 @@ import fcntl
 import time
 from pathlib import Path
 from collections import deque
+import weakref
 
 # Optional psutil for process verification
 try:
@@ -47,14 +48,14 @@ try:
     from AppKit import (
         NSApplication, NSApp, NSMenu, NSMenuItem, NSWindow,
         NSButton, NSTextField, NSProgressIndicator, NSScrollView,
-        NSTextView, NSMakeRect, NSTitledWindowMask, NSClosableWindowMask,
-        NSBackingStoreBuffered, NSCenterTextAlignment, NSRightTextAlignment, NSFont,
-        NSBezelBorder, NSApplicationActivationPolicyRegular,
+        NSTextView, NSTableView, NSTableColumn, NSMakeRect, NSTitledWindowMask, NSClosableWindowMask,
+        NSMiniaturizableWindowMask, NSBackingStoreBuffered, NSCenterTextAlignment,
+        NSRightTextAlignment, NSFont, NSBezelBorder, NSApplicationActivationPolicyRegular,
         NSAccessibilityAnnouncementRequestedNotification,
         NSCommandKeyMask, NSShiftKeyMask, NSBox, NSColor,
         NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
     )
-    from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL
+    from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange
     from PyObjCTools import AppHelper
 
     NATIVE_APIS_AVAILABLE = True
@@ -162,11 +163,20 @@ STATUS_CARD_HEIGHT = 72
 TRAINING_PANEL_HEIGHT = 80
 LOG_HEIGHT = 216
 
+# Dashboard dimensions
+DASHBOARD_WIDTH = 650
+DASHBOARD_HEIGHT = 720
+SIDEBAR_WIDTH = 180
+
 # Timing constants (seconds)
 FILE_POLL_INTERVAL = 0.5
 TIMER_TICK_INTERVAL = 0.5
 PHASE_TIMEOUT = 2.0
 FILE_LOCK_TIMEOUT = 5.0
+
+# Dashboard update intervals (seconds)
+SIDEBAR_UPDATE_INTERVAL = 3.0
+DETAIL_UPDATE_INTERVAL = 1.0
 
 # Limits
 MAX_LOG_LINES = 200  # Match deque maxlen for consistency
@@ -395,6 +405,245 @@ def get_active_processes():
             for ptype, info in state.get("processes", {}).items()
             if info and info.get("status") == "running"
         ]
+
+
+# =================================================================
+# 4.5. Process History Management
+# =================================================================
+
+HISTORY_MAX_ENTRIES = 50
+HISTORY_MAX_AGE_DAYS = 7
+_history_lock = threading.Lock()  # Thread-safe history access
+
+
+def _get_history_lock_path() -> str:
+    """Get path to history lock file."""
+    return get_history_file_path() + ".lock"
+
+
+def load_process_history() -> dict:
+    """Load process history from file with locking.
+    
+    Returns:
+        dict with 'version' and 'history' (list of entries)
+    
+    Handles:
+        - Missing file (returns empty history)
+        - Corrupted JSON (returns empty history)
+        - Invalid structure (validates and repairs)
+        - Lock timeout (returns cached/empty)
+    """
+    history_path = get_history_file_path()
+    if not os.path.exists(history_path):
+        return {"version": 1, "history": []}
+    
+    lock_path = _get_history_lock_path()
+    lock_file = None
+    try:
+        lock_file = open(lock_path, "a+")
+        if not _acquire_file_lock(lock_file, timeout=2.0):
+            logging.warning("[Launcher] Could not acquire history lock for reading")
+            return {"version": 1, "history": []}
+        try:
+            with open(history_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # Validate structure
+            if not isinstance(data, dict):
+                logging.warning("[Launcher] History file has invalid root structure, resetting")
+                return {"version": 1, "history": []}
+            
+            if "history" not in data:
+                data["history"] = []
+            elif not isinstance(data["history"], list):
+                logging.warning("[Launcher] History 'history' key is not a list, resetting")
+                data["history"] = []
+            
+            # Validate and clean individual entries
+            valid_history = []
+            for i, entry in enumerate(data.get("history", [])):
+                if not isinstance(entry, dict):
+                    logging.debug(f"[Launcher] Skipping invalid history entry at index {i}")
+                    continue
+                # Require minimal fields
+                if entry.get("type") and entry.get("started_at"):
+                    valid_history.append(entry)
+                else:
+                    logging.debug(f"[Launcher] Skipping incomplete history entry at index {i}")
+            
+            data["history"] = valid_history
+            return data
+            
+        except json.JSONDecodeError as e:
+            logging.warning(f"[Launcher] History file corrupted (JSON error): {e}")
+            # Create backup of corrupted file for debugging
+            try:
+                import shutil
+                backup_path = history_path + ".corrupted"
+                shutil.copy2(history_path, backup_path)
+                logging.info(f"[Launcher] Corrupted history backed up to {backup_path}")
+            except Exception:
+                pass
+            return {"version": 1, "history": []}
+        except IOError as e:
+            logging.warning(f"[Launcher] Error reading process history: {e}")
+            return {"version": 1, "history": []}
+        finally:
+            _release_file_lock(lock_file)
+    except IOError as e:
+        logging.warning(f"[Launcher] Error opening history lock: {e}")
+        return {"version": 1, "history": []}
+    finally:
+        if lock_file:
+            try:
+                lock_file.close()
+            except:
+                pass
+
+
+def save_process_history(history: dict) -> bool:
+    """Save process history to file with locking.
+    
+    Returns:
+        True if save succeeded, False otherwise.
+    
+    Handles:
+        - Directory creation errors
+        - Lock acquisition failures
+        - Write errors (atomic write via temp file)
+    """
+    history_path = get_history_file_path()
+    
+    # Ensure directory exists
+    try:
+        os.makedirs(os.path.dirname(history_path), exist_ok=True)
+    except OSError as e:
+        logging.error(f"[Launcher] Could not create history directory: {e}")
+        return False
+    
+    lock_path = _get_history_lock_path()
+    lock_file = None
+    try:
+        lock_file = open(lock_path, "a+")
+        if not _acquire_file_lock(lock_file, timeout=2.0):
+            logging.error("[Launcher] Could not acquire history lock for writing")
+            return False
+        try:
+            # Atomic write: write to temp file, then rename
+            temp_path = history_path + ".tmp"
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2)
+            os.rename(temp_path, history_path)
+            return True
+        except IOError as e:
+            logging.error(f"[Launcher] Error saving process history: {e}")
+            # Clean up temp file if it exists
+            try:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            except Exception:
+                pass
+            return False
+        finally:
+            _release_file_lock(lock_file)
+    except IOError as e:
+        logging.error(f"[Launcher] Error opening history lock: {e}")
+        return False
+    finally:
+        if lock_file:
+            try:
+                lock_file.close()
+            except:
+                pass
+
+
+def add_to_history(entry: dict) -> bool:
+    """Add a completed process to history (thread-safe).
+    
+    Args:
+        entry: dict with type, model_name, started_at, completed_at, status, etc.
+    
+    Returns:
+        True if added successfully.
+    
+    Validates entry has required fields before adding.
+    """
+    # Validate required fields
+    required_fields = ['type', 'started_at', 'completed_at']
+    for field in required_fields:
+        if field not in entry:
+            logging.warning(f"[Launcher] History entry missing required field: {field}")
+            return False
+    
+    with _history_lock:
+        try:
+            history = load_process_history()
+            
+            # Generate unique process ID
+            process_id = f"{entry.get('type', 'unknown')}-{entry.get('started_at', datetime.datetime.now().isoformat())}"
+            entry["process_id"] = process_id
+            
+            # Add to history
+            history["history"].insert(0, entry)
+            
+            # Enforce max entries
+            if len(history["history"]) > HISTORY_MAX_ENTRIES:
+                history["history"] = history["history"][:HISTORY_MAX_ENTRIES]
+            
+            success = save_process_history(history)
+            if success:
+                logging.debug(f"[Launcher] Added to history: {entry.get('type')} - {entry.get('model_name', 'unknown')}")
+            return success
+            
+        except Exception as e:
+            logging.error(f"[Launcher] Failed to add to history: {e}")
+            return False
+
+
+def cleanup_old_history() -> int:
+    """Remove entries older than HISTORY_MAX_AGE_DAYS (thread-safe).
+    
+    Returns:
+        Number of entries removed.
+    """
+    with _history_lock:
+        history = load_process_history()
+        cutoff = datetime.datetime.now() - datetime.timedelta(days=HISTORY_MAX_AGE_DAYS)
+        
+        original_count = len(history["history"])
+        history["history"] = [
+            h for h in history["history"]
+            if h.get("completed_at") and 
+            datetime.datetime.fromisoformat(h["completed_at"]) > cutoff
+        ]
+        
+        removed = original_count - len(history["history"])
+        if removed > 0:
+            save_process_history(history)
+            logging.info(f"[Launcher] Cleaned up {removed} old history entries")
+        
+        return removed
+
+
+def get_history_file_path() -> str:
+    """Get path to process_history.json."""
+    # Use same directory as active_processes.json
+    state_path = get_process_state_path()
+    return os.path.join(os.path.dirname(state_path), "process_history.json")
+
+
+def get_recent_processes(limit: int = 10) -> list:
+    """Get recent completed processes from history (thread-safe).
+    
+    Args:
+        limit: Maximum number of entries to return.
+    
+    Returns:
+        List of history entries, most recent first.
+    """
+    with _history_lock:
+        history = load_process_history()
+        return history.get("history", [])[:limit]
 
 
 # =================================================================
@@ -1495,6 +1744,922 @@ class ProgressWindowController:
 
 
 # =================================================================
+# 5.5. Process Dashboard Controller (Persistent Window)
+# =================================================================
+
+class ProcessDashboardController:
+    """Persistent dashboard window with idle/active/completed states.
+    
+    This window is always accessible from the Window menu and shows:
+    - Idle state: "No Active Processes" placeholder
+    - Active state: Process list + detail panel with logs
+    - Completed state: Process summary
+    
+    Key design decisions:
+    - Window never releases on close (setReleasedWhenClosed_(False))
+    - Close button hides window instead of destroying
+    - Uses weakref to prevent retain cycles in selectors
+    - Single instance managed by ApplioLauncher
+    """
+    
+    def __init__(self, launcher):
+        """Initialize the dashboard controller.
+        
+        Args:
+            launcher: Reference to ApplioLauncher instance
+        """
+        if not NATIVE_APIS_AVAILABLE:
+            raise RuntimeError("Native APIs not available")
+        
+        self._launcher = launcher
+        self._current_state = "idle"  # idle, active, completed
+        self._selected_process = None
+        self._shutdown_event = threading.Event()
+        self._update_counter = 0  # For timer-based throttling
+        
+        # Window and UI elements (initialized in _create_window)
+        self.window = None
+        self._observer = None
+        self._terminate_observer = None
+        self._timer = None
+        
+        # Process list data
+        self._active_processes = []
+        self._recent_processes = []
+        
+        # UI element references
+        self.placeholder_view = None
+        self.idle_label = None
+        self.idle_subtitle = None
+        
+        # Sidebar UI elements (for active state)
+        self.sidebar_scroll = None
+        self.process_table = None
+        self.active_header = None
+        
+        # Detail panel UI elements (for selected process)
+        self.detail_panel = None
+        self.detail_name = None
+        self.detail_status = None
+        self.detail_progress = None
+        self.detail_progress_text = None
+        self.detail_log_scroll = None
+        self.detail_log_view = None
+        self.detail_eta = None
+        
+        # Create window
+        try:
+            self._create_window()
+            self._create_sidebar()  # Create sidebar (initially hidden)
+            self._create_detail_panel()  # Create detail panel (initially hidden)
+            self._create_idle_ui()  # Start in idle state
+        except Exception:
+            self._cleanup()
+            raise
+    
+    def _create_window(self):
+        """Create the persistent dashboard window."""
+        style = NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask
+        self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(0, 0, DASHBOARD_WIDTH, DASHBOARD_HEIGHT),
+            style,
+            NSBackingStoreBuffered,
+            False
+        )
+        self.window.setTitle_("Applio Dashboard")
+        self.window.center()
+        self.window.setReleasedWhenClosed_(False)  # CRITICAL: Never release
+        self.window.setDelegate_(self)  # Enable windowShouldClose_ delegate
+        
+        # Register for close notification to hide instead
+        notification_center = NSNotificationCenter.defaultCenter()
+        self._observer = notification_center.addObserver_selector_name_object_(
+            self,
+            "dashboardWindowWillClose:",
+            "NSWindowWillCloseNotification",
+            self.window
+        )
+        
+        # App termination observer
+        self._terminate_observer = notification_center.addObserver_selector_name_object_(
+            self,
+            "applicationWillTerminate:",
+            "NSApplicationWillTerminateNotification",
+            None
+        )
+        
+        # Set accessibility
+        self.window.setAccessibilityLabel_("Applio Dashboard")
+        self.window.setAccessibilityHelp_("Monitor active training and inference processes")
+    
+    def _create_sidebar(self):
+        """Create the process list sidebar (initially hidden).
+        
+        Shows active and recent processes in an NSTableView.
+        """
+        # Header height at top of sidebar
+        header_height = 24
+        
+        # Sidebar container (left side) - positioned below title bar with room for header
+        # Account for title bar height (~28px) and header (24px) in the frame
+        sidebar_frame = NSMakeRect(0, 0, SIDEBAR_WIDTH, DASHBOARD_HEIGHT - 28 - header_height)
+        self.sidebar_scroll = NSScrollView.alloc().initWithFrame_(sidebar_frame)
+        self.sidebar_scroll.setAutohidesScrollers_(True)
+        self.sidebar_scroll.setBorderType_(0)  # No border
+        self.sidebar_scroll.setHasVerticalScroller_(True)
+        self.sidebar_scroll.setAccessibilityLabel_("Process list sidebar")
+        self.sidebar_scroll.setAccessibilityHelp_("List of active and recent processes")
+        
+        # Create table view
+        self.process_table = NSTableView.alloc().init()
+        self.process_table.setDataSource_(self)
+        self.process_table.setDelegate_(self)
+        self.process_table.setHeaderView_(None)  # No header
+        self.process_table.setRowHeight_(36)
+        self.process_table.setSelectionHighlightStyle_(1)  # NSTableViewSelectionHighlightStyleSourceList
+        self.process_table.setAccessibilityLabel_("Process list")
+        self.process_table.setAllowsEmptySelection_(True)
+        self.process_table.setAllowsMultipleSelection_(False)
+        
+        # Create single column
+        column = NSTableColumn.alloc().initWithIdentifier_("process")
+        column.setWidth_(SIDEBAR_WIDTH - 20)
+        column.setEditable_(False)
+        self.process_table.addTableColumn_(column)
+        
+        # Set as document view
+        self.sidebar_scroll.setDocumentView_(self.process_table)
+        self.window.contentView().addSubview_(self.sidebar_scroll)
+        
+        # Initially hidden (shown when active)
+        self.sidebar_scroll.setHidden_(True)
+        
+        # Section header: "ACTIVE" - positioned at top, above sidebar
+        self.active_header = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(8, DASHBOARD_HEIGHT - 28 - header_height, SIDEBAR_WIDTH - 16, header_height)
+        )
+        self.active_header.setStringValue_("ACTIVE")
+        self.active_header.setFont_(NSFont.systemFontOfSize_weight_(11, NSFontWeightSemibold))
+        self.active_header.setTextColor_(NSColor.secondaryLabelColor())
+        self.active_header.setBezeled_(False)
+        self.active_header.setDrawsBackground_(False)
+        self.active_header.setEditable_(False)
+        self.active_header.setAlignment_(NSCenterTextAlignment)
+        self.window.contentView().addSubview_(self.active_header)
+        self.active_header.setHidden_(True)
+    
+    def _create_detail_panel(self):
+        """Create the detail panel for selected process.
+        
+        Shows process name, status, progress bar, log output, and ETA.
+        Positioned on the right side, occupying remaining width after sidebar.
+        """
+        panel_x = SIDEBAR_WIDTH
+        panel_width = DASHBOARD_WIDTH - SIDEBAR_WIDTH
+        
+        # Detail panel container
+        detail_frame = NSMakeRect(panel_x, 0, panel_width, DASHBOARD_HEIGHT - 28)
+        self.detail_panel = NSBox.alloc().initWithFrame_(detail_frame)
+        self.detail_panel.setBoxType_(NSBoxPrimary)
+        self.detail_panel.setBorderType_(0)  # No border
+        self.detail_panel.setContentView_(NSView.alloc().init())
+        self.detail_panel.setAccessibilityLabel_("Process detail panel")
+        self.window.contentView().addSubview_(self.detail_panel)
+        
+        # Process name label
+        name_y = DASHBOARD_HEIGHT - 28 - 40
+        self.detail_name = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(16, name_y, panel_width - 32, 24)
+        )
+        self.detail_name.setFont_(NSFont.systemFontOfSize_weight_(18, NSFontWeightSemibold))
+        self.detail_name.setBezeled_(False)
+        self.detail_name.setDrawsBackground_(False)
+        self.detail_name.setEditable_(False)
+        self.detail_name.setStringValue_("Select a process")
+        self.detail_name.setAccessibilityLabel_("Process name")
+        self.detail_panel.contentView().addSubview_(self.detail_name)
+        
+        # Status/phase label
+        status_y = name_y - 30
+        self.detail_status = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(16, status_y, panel_width - 32, 20)
+        )
+        self.detail_status.setFont_(NSFont.systemFontOfSize_(13))
+        self.detail_status.setTextColor_(NSColor.secondaryLabelColor())
+        self.detail_status.setBezeled_(False)
+        self.detail_status.setDrawsBackground_(False)
+        self.detail_status.setEditable_(False)
+        self.detail_status.setStringValue_("No process selected")
+        self.detail_status.setAccessibilityLabel_("Process status")
+        self.detail_panel.contentView().addSubview_(self.detail_status)
+        
+        # Progress bar
+        progress_y = status_y - 30
+        self.detail_progress = NSProgressIndicator.alloc().initWithFrame_(
+            NSMakeRect(16, progress_y, panel_width - 32, 20)
+        )
+        self.detail_progress.setStyle_(NSProgressIndicatorBarStyle)
+        self.detail_progress.setMinValue_(0)
+        self.detail_progress.setMaxValue_(100)
+        self.detail_progress.setIndeterminate_(False)
+        self.detail_progress.setDoubleValue_(0)
+        self.detail_progress.setAccessibilityLabel_("Progress indicator")
+        self.detail_panel.contentView().addSubview_(self.detail_progress)
+        
+        # Progress text (percentage)
+        progress_text_y = progress_y - 20
+        self.detail_progress_text = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(16, progress_text_y, panel_width - 32, 16)
+        )
+        self.detail_progress_text.setFont_(NSFont.systemFontOfSize_(12))
+        self.detail_progress_text.setAlignment_(NSCenterTextAlignment)
+        self.detail_progress_text.setBezeled_(False)
+        self.detail_progress_text.setDrawsBackground_(False)
+        self.detail_progress_text.setEditable_(False)
+        self.detail_progress_text.setStringValue_("0%")
+        self.detail_progress_text.setAccessibilityLabel_("Progress percentage")
+        self.detail_panel.contentView().addSubview_(self.detail_progress_text)
+        
+        # Log output (NSTextView in NSScrollView)
+        log_y = 60
+        log_height = DASHBOARD_HEIGHT - 28 - 220  # Leave room for header and ETA
+        log_frame = NSMakeRect(16, log_y, panel_width - 32, log_height)
+        self.detail_log_scroll = NSScrollView.alloc().initWithFrame_(log_frame)
+        self.detail_log_scroll.setBorderType_(NSBezelBorder)
+        self.detail_log_scroll.setHasVerticalScroller_(True)
+        self.detail_log_scroll.setAccessibilityLabel_("Log output")
+        
+        self.detail_log_view = NSTextView.alloc().init()
+        self.detail_log_view.setFont_(NSFont.fontWithName_size_("Menlo", 11))
+        self.detail_log_view.setEditable_(False)
+        self.detail_log_view.setString_("Select a process to view logs")
+        self.detail_log_view.setAccessibilityLabel_("Log output")
+        
+        self.detail_log_scroll.setDocumentView_(self.detail_log_view)
+        self.detail_panel.contentView().addSubview_(self.detail_log_scroll)
+        
+        # Estimated time remaining
+        eta_y = 20
+        self.detail_eta = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(16, eta_y, panel_width - 32, 20)
+        )
+        self.detail_eta.setFont_(NSFont.systemFontOfSize_(12))
+        self.detail_eta.setTextColor_(NSColor.secondaryLabelColor())
+        self.detail_eta.setBezeled_(False)
+        self.detail_eta.setDrawsBackground_(False)
+        self.detail_eta.setEditable_(False)
+        self.detail_eta.setStringValue_("Estimated time: --")
+        self.detail_eta.setAccessibilityLabel_("Time remaining")
+        self.detail_panel.contentView().addSubview_(self.detail_eta)
+        
+        # Initially hidden
+        self.detail_panel.setHidden_(True)
+    
+    def _update_detail_panel(self):
+        """Update detail panel with selected process info.
+        
+        Handles edge cases:
+        - Process ends mid-viewing (selected process no longer in active list)
+        - Log file deleted while viewing
+        - Null/missing UI elements
+        """
+        # Safety check: ensure window still exists
+        if not self.window:
+            return
+        
+        # Hide detail panel if no process selected
+        if not self._selected_process:
+            if hasattr(self, 'detail_panel') and self.detail_panel:
+                self.detail_panel.setHidden_(True)
+            return
+        
+        proc = self._selected_process
+        
+        # Ensure detail panel exists
+        if not hasattr(self, 'detail_panel') or not self.detail_panel:
+            return
+        
+        # Check if selected process is still valid (may have ended)
+        # Look up fresh process info from state
+        proc_type = proc.get("type", "Unknown")
+        fresh_procs = get_active_processes()
+        fresh_info = None
+        for p in fresh_procs:
+            if p.get("type") == proc_type:
+                fresh_info = p
+                break
+        
+        # If process ended mid-viewing, check if we have history info
+        if not fresh_info:
+            # Process no longer active - check if we should show "completed" status
+            recent = get_recent_processes(limit=5)
+            for r in recent:
+                if r.get("type") == proc_type and r.get("model_name") == proc.get("model_name"):
+                    # Found in history - show completion info
+                    fresh_info = r
+                    logging.info(f"[Dashboard] Process {proc_type} ended mid-viewing, showing from history")
+                    break
+        
+        # Use fresh info if available, otherwise fall back to original
+        if fresh_info:
+            proc = fresh_info
+        
+        try:
+            self.detail_panel.setHidden_(False)
+            
+            # Update name (with null check)
+            model_name = proc.get("model_name", "")
+            if hasattr(self, 'detail_name') and self.detail_name:
+                if model_name:
+                    self.detail_name.setStringValue_(f"{proc_type.capitalize()}: {model_name}")
+                else:
+                    self.detail_name.setStringValue_(proc_type.capitalize())
+            
+            # Update status (with null check)
+            status = proc.get("status", "running")
+            phase = proc.get("phase", "")
+            if hasattr(self, 'detail_status') and self.detail_status:
+                if phase:
+                    status_text = f"{status.title()} - {phase}"
+                else:
+                    status_text = status.title()
+                self.detail_status.setStringValue_(status_text)
+            
+            # Update progress (with null check and value validation)
+            progress = proc.get("progress", 0)
+            try:
+                progress_val = float(progress) if progress is not None else 0
+                progress_val = max(0, min(100, progress_val))  # Clamp to 0-100
+            except (ValueError, TypeError):
+                progress_val = 0
+            
+            if hasattr(self, 'detail_progress') and self.detail_progress:
+                self.detail_progress.setDoubleValue_(progress_val)
+            if hasattr(self, 'detail_progress_text') and self.detail_progress_text:
+                self.detail_progress_text.setStringValue_(f"{int(progress_val)}%")
+            
+            # Update ETA (with null check)
+            eta = proc.get("eta", "")
+            if hasattr(self, 'detail_eta') and self.detail_eta:
+                if eta:
+                    self.detail_eta.setStringValue_(f"Estimated time: {eta}")
+                else:
+                    self.detail_eta.setStringValue_("Estimated time: --")
+            
+            # Update log (last 20 lines) - handle file deletion
+            self._update_log_display(proc)
+            
+        except Exception as e:
+            logging.warning(f"[Dashboard] Error updating detail panel: {e}")
+    
+    def _update_log_display(self, proc: dict):
+        """Update log display with error handling for missing/deleted files.
+        
+        Args:
+            proc: Process info dict with log_path or log_file key
+        """
+        if not hasattr(self, 'detail_log_view') or not self.detail_log_view:
+            return
+        
+        log_path = proc.get("log_path") or proc.get("log_file")
+        
+        # Handle missing log path
+        if not log_path:
+            self.detail_log_view.setString_("No log file path available")
+            return
+        
+        # Handle deleted log file
+        if not os.path.exists(log_path):
+            self.detail_log_view.setString_(f"Log file no longer exists:\n{log_path}")
+            logging.debug(f"[Dashboard] Log file deleted: {log_path}")
+            return
+        
+        # Handle unreadable log file
+        if not os.access(log_path, os.R_OK):
+            self.detail_log_view.setString_(f"Log file not readable:\n{log_path}")
+            logging.warning(f"[Dashboard] Log file not readable: {log_path}")
+            return
+        
+        try:
+            # Read with size limit to prevent memory issues
+            max_size = 1024 * 1024  # 1MB max
+            file_size = os.path.getsize(log_path)
+            
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                if file_size > max_size:
+                    # Read only last portion of large files
+                    f.seek(file_size - max_size)
+                    content = f.read()
+                    # Skip partial first line
+                    first_newline = content.find('\n')
+                    if first_newline >= 0:
+                        content = content[first_newline + 1:]
+                else:
+                    content = f.read()
+                
+                lines = content.splitlines()
+                last_lines = lines[-20:] if len(lines) > 20 else lines
+                log_text = "\n".join(last_lines)
+                self.detail_log_view.setString_(log_text)
+                
+                # Scroll to show latest content (with null check)
+                if hasattr(self, 'detail_log_view') and self.detail_log_view:
+                    text_length = len(log_text)
+                    self.detail_log_view.scrollRangeToVisible_(
+                        NSRange(text_length, 0)
+                    )
+        except PermissionError as e:
+            logging.warning(f"[Dashboard] Permission denied reading log: {e}")
+            self.detail_log_view.setString_("Permission denied reading log file")
+        except OSError as e:
+            logging.warning(f"[Dashboard] OS error reading log: {e}")
+            self.detail_log_view.setString_("Error reading log file")
+        except Exception as e:
+            logging.warning(f"[Dashboard] Unexpected error reading log: {e}")
+            self.detail_log_view.setString_("Unexpected error reading log file")
+    
+    # =================================================================
+    # NSTableViewDataSource Protocol
+    # =================================================================
+    
+    def numberOfRowsInTableView_(self, tableView):
+        """Return number of rows (active + recent)."""
+        return len(self._active_processes) + len(self._recent_processes)
+    
+    def tableView_objectValueForTableColumn_row_(self, tableView, column, row):
+        """Return cell content for given row."""
+        if row < len(self._active_processes):
+            proc = self._active_processes[row]
+            status = proc.get("status", "running")
+            # Create status indicator
+            indicator = "●" if status == "running" else "⏸"
+            proc_type = proc.get("type", "Unknown").capitalize()
+            model_name = proc.get("model_name", "")
+            return f"{indicator} {proc_type}: {model_name}"
+        else:
+            # Recent process
+            recent_idx = row - len(self._active_processes)
+            if recent_idx < len(self._recent_processes):
+                proc = self._recent_processes[recent_idx]
+                proc_type = proc.get("type", "Unknown").capitalize()
+                model_name = proc.get("model_name", "")
+                return f"✓ {proc_type}: {model_name}"
+        return ""
+    
+    # =================================================================
+    # NSTableViewDelegate Protocol
+    # =================================================================
+    
+    def tableViewSelectionDidChange_(self, notification):
+        """Handle row selection."""
+        row = self.process_table.selectedRow()
+        if row < 0:
+            self._selected_process = None
+            self._update_detail_panel()
+            return
+        
+        if row < len(self._active_processes):
+            proc = self._active_processes[row]
+            self._selected_process = proc
+            logging.info(f"[Dashboard] Selected active process: {proc.get('type')}")
+        else:
+            idx = row - len(self._active_processes)
+            if idx < len(self._recent_processes):
+                proc = self._recent_processes[idx]
+                self._selected_process = proc
+                logging.info(f"[Dashboard] Selected recent process: {proc.get('type')}")
+        
+        # Update detail panel with selected process info
+        self._update_detail_panel()
+    
+    def refresh_process_list(self):
+        """Refresh the process list from current state.
+        
+        Handles errors gracefully - on error, keeps existing data.
+        """
+        try:
+            self._active_processes = get_active_processes()
+        except Exception as e:
+            logging.warning(f"[Dashboard] Could not refresh active processes: {e}")
+            # Keep existing data on error
+        
+        try:
+            self._recent_processes = get_recent_processes(limit=5)
+        except Exception as e:
+            logging.warning(f"[Dashboard] Could not refresh recent processes: {e}")
+            # Keep existing data on error
+        
+        if hasattr(self, 'process_table') and self.process_table:
+            try:
+                self.process_table.reloadData()
+            except Exception as e:
+                logging.warning(f"[Dashboard] Could not reload table: {e}")
+    
+    def _create_idle_ui(self):
+        """Create the idle state UI (placeholder).
+        
+        This shows when no processes are active.
+        """
+        # Calculate center area for placeholder content
+        content_width = DASHBOARD_WIDTH - 2 * PADDING
+        content_height = 200
+        center_y = (DASHBOARD_HEIGHT - content_height) // 2
+        
+        # Create container box with subtle styling
+        self.placeholder_view = NSBox.alloc().initWithFrame_(
+            NSMakeRect(PADDING, center_y, content_width, content_height)
+        )
+        self.placeholder_view.setBoxType_(1)  # NSBoxCustom
+        self.placeholder_view.setBorderType_(2)  # NSBezelBorder
+        self.placeholder_view.setTransparent_(False)
+        self.placeholder_view.setWantsLayer_(True)
+        self.placeholder_view.layer().setCornerRadius_(12)
+        self.placeholder_view.layer().setBackgroundColor_(
+            NSColor.controlBackgroundColor().cgColor()
+        )
+        self.placeholder_view.setAccessibilityLabel_("Idle state container")
+        self.window.contentView().addSubview_(self.placeholder_view)
+        
+        # Idle message label
+        label_y = content_height - 50
+        self.idle_label = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(0, label_y, content_width, 36)
+        )
+        self.idle_label.setStringValue_("No Active Processes")
+        self.idle_label.setBezeled_(False)
+        self.idle_label.setDrawsBackground_(False)
+        self.idle_label.setEditable_(False)
+        self.idle_label.setFont_(NSFont.boldSystemFontOfSize_(24))
+        self.idle_label.setTextColor_(NSColor.labelColor())
+        self.idle_label.setAlignment_(NSCenterTextAlignment)
+        self.idle_label.setAccessibilityLabel_("No active processes message")
+        self.placeholder_view.addSubview_(self.idle_label)
+        
+        # Subtitle label
+        subtitle_y = label_y - 50
+        self.idle_subtitle = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(20, subtitle_y, content_width - 40, 40)
+        )
+        self.idle_subtitle.setStringValue_("Start training or inference from the main window\nto monitor progress here.")
+        self.idle_subtitle.setBezeled_(False)
+        self.idle_subtitle.setDrawsBackground_(False)
+        self.idle_subtitle.setEditable_(False)
+        self.idle_subtitle.setFont_(NSFont.systemFontOfSize_(13))
+        self.idle_subtitle.setTextColor_(NSColor.secondaryLabelColor())
+        self.idle_subtitle.setAlignment_(NSCenterTextAlignment)
+        self.idle_subtitle.setAccessibilityLabel_("Instructions for starting processes")
+        self.placeholder_view.addSubview_(self.idle_subtitle)
+        
+        # Open Main Window button
+        button_width = 160
+        button_height = 28
+        button_x = (content_width - button_width) // 2
+        button_y = 20
+        self.open_main_window_btn = NSButton.alloc().initWithFrame_(
+            NSMakeRect(button_x, button_y, button_width, button_height)
+        )
+        self.open_main_window_btn.setTitle_("Open Main Window")
+        self.open_main_window_btn.setBezelStyle_(1)  # NSRoundedBezelStyle
+        self.open_main_window_btn.setTarget_(self)
+        self.open_main_window_btn.setAction_("openMainWindow:")
+        self.open_main_window_btn.setAccessibilityLabel_("Open main window button")
+        self.open_main_window_btn.setAccessibilityHelp_("Open the main Applio window to start training or inference")
+        self.placeholder_view.addSubview_(self.open_main_window_btn)
+        
+        # Placeholder is initially visible
+        self.placeholder_view.setHidden_(False)
+    
+    # =================================================================
+    # Update Coordinator (Single Timer Pattern)
+    # =================================================================
+    
+    def _start_update_timer(self):
+        """Start the single coordinated update timer.
+        
+        Uses the faster DETAIL_UPDATE_INTERVAL for detail panel updates,
+        and throttles sidebar refreshes to SIDEBAR_UPDATE_INTERVAL.
+        
+        Logs timer start for debugging.
+        """
+        # Stop any existing timer first (prevents duplicates from rapid show/hide)
+        if self._timer:
+            self._stop_update_timer()
+        
+        # Guard against starting during shutdown
+        if self._shutdown_event.is_set():
+            logging.debug("[Dashboard] Not starting timer - shutdown in progress")
+            return
+        
+        # Create timer with coordinator callback
+        # Use DETAIL_UPDATE_INTERVAL (faster) as base, throttle sidebar in callback
+        self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            DETAIL_UPDATE_INTERVAL,
+            self,
+            "coordinatedUpdate:",
+            None,
+            True
+        )
+        logging.debug(f"[Dashboard] Update timer started (interval: {DETAIL_UPDATE_INTERVAL}s)")
+    
+    def coordinatedUpdate_(self, timer):
+        """Single coordinated update method called by timer.
+        
+        This method dispatches all periodic updates from a single timer,
+        preventing timer collisions and ensuring consistent state.
+        Sidebar updates are throttled to SIDEBAR_UPDATE_INTERVAL.
+        
+        Safety: All UI updates check for existence before operating.
+        """
+        # Guard against updates after shutdown
+        if self._shutdown_event.is_set():
+            return
+        
+        # Guard against missing window (shouldn't happen, but defensive)
+        if not self.window:
+            return
+        
+        # Throttle sidebar updates using counter
+        if not hasattr(self, '_update_counter'):
+            self._update_counter = 0
+        self._update_counter += 1
+        
+        try:
+            # Always update detail panel if visible and process selected
+            # Multiple safety checks before UI operations
+            should_update_detail = (
+                self._selected_process is not None and
+                hasattr(self, 'detail_panel') and 
+                self.detail_panel is not None and
+                not self.detail_panel.isHidden() and
+                hasattr(self, 'window') and
+                self.window is not None
+            )
+            
+            if should_update_detail:
+                self._update_detail_panel()
+            
+            # Throttled sidebar refresh (every Nth call)
+            # With DETAIL_UPDATE_INTERVAL=1.0 and SIDEBAR_UPDATE_INTERVAL=3.0,
+            # refresh every 3rd call (every 3 seconds)
+            throttle_factor = int(SIDEBAR_UPDATE_INTERVAL / DETAIL_UPDATE_INTERVAL)
+            if self._update_counter % throttle_factor == 0:
+                if self._current_state == "active":
+                    self.refresh_process_list()
+                    
+        except Exception as e:
+            # Log but don't crash - timer will continue
+            logging.warning(f"[Dashboard] Update error (non-fatal): {e}")
+    
+    def _stop_update_timer(self):
+        """Stop the update timer."""
+        if self._timer:
+            self._timer.invalidate()
+            self._timer = None
+            logging.debug("[Dashboard] Update timer stopped")
+    
+    def openMainWindow_(self, sender):
+        """Handle 'Open Main Window' button click.
+        
+        Signals the wrapper process to show its window via runtime_paths.json.
+        """
+        import json
+        
+        logging.info("[Dashboard] Open Main Window button clicked")
+        
+        # Signal wrapper via runtime_paths.json
+        config_locations = [
+            os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+            os.path.expanduser("~/.applio/runtime_paths.json"),
+        ]
+        
+        for config_path in config_locations:
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r") as f:
+                        config = json.load(f)
+                    
+                    # Set flag to show main window
+                    config["show_main_window"] = True
+                    
+                    temp_path = config_path + ".tmp"
+                    with open(temp_path, "w") as f:
+                        json.dump(config, f, indent=2)
+                    os.rename(temp_path, config_path)
+                    
+                    logging.info(f"[Dashboard] Signaled wrapper to show main window via {config_path}")
+                    break
+                except Exception as e:
+                    logging.warning(f"[Dashboard] Failed to signal wrapper: {e}")
+    
+    def show(self):
+        """Show or bring the dashboard window to front.
+        
+        Restarts the update timer if in active state.
+        Handles multiple rapid show/hide cycles gracefully.
+        """
+        if not self.window:
+            logging.warning("[Dashboard] show() called but window is None")
+            return
+        
+        # Check for rapid show/hide - if window is already visible, just bring to front
+        if self.window.isVisible():
+            self.window.makeKeyAndOrderFront_(None)
+            return
+        
+        logging.info(f"[Dashboard] Showing window (state: {self._current_state})")
+        self.window.makeKeyAndOrderFront_(None)
+        
+        # Restart timer if in active state
+        if self._current_state == "active":
+            self._start_update_timer()
+    
+    def hide(self):
+        """Hide the dashboard window without destroying.
+        
+        Stops the update timer to save resources.
+        """
+        if not self.window:
+            logging.warning("[Dashboard] hide() called but window is None")
+            return
+        
+        logging.info("[Dashboard] Hiding window")
+        self.window.orderOut_(None)
+        
+        # Stop timer when hidden (no need to update)
+        self._stop_update_timer()
+    
+    def dashboardWindowWillClose_(self, notification):
+        """Handle window close - hide instead of destroy."""
+        # This is called when user clicks the close button
+        # We intercept and hide instead
+        self._stop_update_timer()
+        self.hide()
+    
+    def windowShouldClose_(self, sender):
+        """Delegate method - intercept close to hide instead."""
+        self._stop_update_timer()
+        self.hide()
+        return False  # Prevent actual close
+    
+    def applicationWillTerminate_(self, notification):
+        """Clean up on app termination."""
+        logging.info("[Dashboard] Application terminating, cleaning up")
+        self._cleanup()
+    
+    def _cleanup(self):
+        """Clean up resources.
+        
+        Safe to call multiple times. All operations are idempotent.
+        """
+        # Set shutdown flag first to stop any pending operations
+        self._shutdown_event.set()
+        
+        logging.debug("[Dashboard] Starting cleanup")
+        
+        # Stop timer (uses consistent method)
+        try:
+            self._stop_update_timer()
+        except Exception as e:
+            logging.warning(f"[Dashboard] Error stopping timer during cleanup: {e}")
+        
+        # Remove observers with error handling
+        try:
+            if self._observer:
+                NSNotificationCenter.defaultCenter().removeObserver_(self._observer)
+                self._observer = None
+        except Exception as e:
+            logging.warning(f"[Dashboard] Error removing window observer: {e}")
+        
+        try:
+            if self._terminate_observer:
+                NSNotificationCenter.defaultCenter().removeObserver_(self._terminate_observer)
+                self._terminate_observer = None
+        except Exception as e:
+            logging.warning(f"[Dashboard] Error removing terminate observer: {e}")
+        
+        # Clear references to help GC
+        self._selected_process = None
+        self._active_processes = []
+        self._recent_processes = []
+        
+        logging.debug("[Dashboard] Cleanup complete")
+    
+    def transition_to_idle(self):
+        """Transition dashboard to idle state.
+        
+        Called when no active processes remain.
+        Logs the transition for debugging.
+        """
+        old_state = self._current_state
+        self._current_state = "idle"
+        self._selected_process = None
+        
+        logging.info(f"[Dashboard] State transition: {old_state} -> idle")
+        
+        # Update window title (with null check)
+        if self.window:
+            self.window.setTitle_("Applio Dashboard")
+        
+        # Stop timer in idle state (no updates needed)
+        self._stop_update_timer()
+        
+        # Show placeholder, hide sidebar and detail panel (all with null checks)
+        if hasattr(self, 'placeholder_view') and self.placeholder_view:
+            self.placeholder_view.setHidden_(False)
+        if hasattr(self, 'sidebar_scroll') and self.sidebar_scroll:
+            self.sidebar_scroll.setHidden_(True)
+        if hasattr(self, 'active_header') and self.active_header:
+            self.active_header.setHidden_(True)
+        if hasattr(self, 'detail_panel') and self.detail_panel:
+            self.detail_panel.setHidden_(True)
+    
+    def transition_to_active(self, processes: list):
+        """Transition dashboard to active state.
+        
+        Args:
+            processes: List of active process dicts
+        
+        Logs the transition and validates input.
+        """
+        old_state = self._current_state
+        self._current_state = "active"
+        
+        # Validate input
+        if not processes:
+            logging.warning("[Dashboard] transition_to_active called with empty list, going idle")
+            self.transition_to_idle()
+            return
+        
+        self._active_processes = processes
+        
+        # Load recent processes with error handling
+        try:
+            self._recent_processes = get_recent_processes(limit=5)
+        except Exception as e:
+            logging.warning(f"[Dashboard] Could not load recent processes: {e}")
+            self._recent_processes = []
+        
+        self._selected_process = None  # Clear selection on transition
+        
+        logging.info(f"[Dashboard] State transition: {old_state} -> active ({len(processes)} processes)")
+        
+        # Update window title (with null check)
+        if self.window:
+            self.window.setTitle_(f"Applio Dashboard ({len(processes)} active)")
+        
+        # Hide placeholder, show sidebar (all with null checks)
+        if hasattr(self, 'placeholder_view') and self.placeholder_view:
+            self.placeholder_view.setHidden_(True)
+        
+        if hasattr(self, 'sidebar_scroll') and self.sidebar_scroll:
+            self.sidebar_scroll.setHidden_(False)
+            if hasattr(self, 'process_table') and self.process_table:
+                self.process_table.reloadData()
+        
+        if hasattr(self, 'active_header') and self.active_header:
+            self.active_header.setHidden_(False)
+        
+        # Detail panel hidden initially (shown when process selected)
+        if hasattr(self, 'detail_panel') and self.detail_panel:
+            self.detail_panel.setHidden_(True)
+        
+        # Start update timer for active monitoring
+        self._start_update_timer()
+    
+    def update_process_list(self):
+        """Refresh the process list and update dashboard state.
+        
+        Handles:
+        - Process list refresh errors
+        - State transitions (idle <-> active)
+        - Null checks for UI elements
+        """
+        try:
+            self._active_processes = get_active_processes()
+        except Exception as e:
+            logging.warning(f"[Dashboard] Could not get active processes: {e}")
+            self._active_processes = []
+        
+        try:
+            self._recent_processes = get_recent_processes(limit=5)
+        except Exception as e:
+            logging.warning(f"[Dashboard] Could not get recent processes: {e}")
+            self._recent_processes = []
+        
+        # Update state based on process count
+        if self._active_processes:
+            if self._current_state != "active":
+                self.transition_to_active(self._active_processes)
+        else:
+            if self._current_state == "active":
+                self.transition_to_idle()
+    
+    def get_state(self) -> str:
+        """Get current dashboard state."""
+        return self._current_state
+
+
+# =================================================================
 # 6. Main Launcher Class
 # =================================================================
 
@@ -1506,6 +2671,7 @@ class ApplioLauncher:
         self.progress_window = None
         self.progress_menu_item = None  # Reference to update state
         self._menu_update_timer = None
+        self._dashboard_controller = None  # Persistent dashboard window
         self._setup_signal_handlers()
 
     def start(self):
@@ -1517,6 +2683,14 @@ class ApplioLauncher:
         state, cleaned = validate_process_state(state)
         if cleaned:
             save_process_state(state)
+
+        # 1.5. Clean up old history entries (run once on startup)
+        try:
+            removed = cleanup_old_history()
+            if removed > 0:
+                logging.info(f"[Launcher] Cleaned up {removed} old history entries")
+        except Exception as e:
+            logging.warning(f"[Launcher] History cleanup failed: {e}")
 
         active = get_active_processes()
 
@@ -1687,7 +2861,7 @@ class ApplioLauncher:
         window_item.setSubmenu_(window_menu)
         main_menu.addItem_(window_item)
 
-        # Progress Monitor (Cmd+Shift+P) - enabled only when processes active
+        # Progress Monitor (Cmd+Shift+P) - always enabled, shows dashboard
         # Note: Using Cmd+Shift+P to avoid conflict with system Cmd+M (Minimize)
         self.progress_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Progress Monitor", "showProgressMonitor:", "P"
@@ -1695,8 +2869,8 @@ class ApplioLauncher:
         self.progress_menu_item.setKeyEquivalentModifierMask_(
             NSCommandKeyMask | NSShiftKeyMask
         )
-        self.progress_menu_item.setEnabled_(False)
-        self.progress_menu_item.setAccessibilityHelp_("Open the progress monitoring window for active training or inference processes")
+        self.progress_menu_item.setEnabled_(True)  # Always enabled - dashboard works in idle state
+        self.progress_menu_item.setAccessibilityHelp_("Open the progress monitoring dashboard to view active and recent processes")
         window_menu.addItem_(self.progress_menu_item)
 
         window_menu.addItem_(NSMenuItem.separatorItem())
@@ -1800,13 +2974,12 @@ class ApplioLauncher:
                     traceback.print_exc()
 
         active = get_active_processes()
-        has_active = len(active) > 0
-
-        # Enable/disable Progress Monitor menu item
-        self.progress_menu_item.setEnabled_(has_active)
+        
+        # Always enable Progress Monitor - shows dashboard even in idle state
+        self.progress_menu_item.setEnabled_(True)
 
         # Update title to show count
-        if has_active:
+        if active:
             self.progress_menu_item.setTitle_(f"Progress Monitor ({len(active)} active)")
         else:
             self.progress_menu_item.setTitle_("Progress Monitor")
@@ -1911,13 +3084,23 @@ class ApplioLauncher:
                 alert.runModal()
 
     def showProgressMonitor_(self, sender):
-        """Show progress monitor window for active processes."""
-        active = get_active_processes()
-        if active:
-            logging.info(f"[Launcher] Showing progress monitor for {len(active)} processes")
-            self._show_progress_window_for_processes(active)
-        else:
-            logging.info("[Launcher] No active processes to monitor")
+        """Show the progress monitor dashboard.
+        
+        Always shows the dashboard, even in idle state.
+        The dashboard transitions between idle/active states automatically.
+        """
+        logging.info("[Launcher] Progress Monitor menu item selected")
+        
+        # Create dashboard on first use
+        if not self._dashboard_controller:
+            self._create_dashboard()
+        
+        # Show the dashboard
+        if self._dashboard_controller:
+            # Update process list before showing
+            self._dashboard_controller.update_process_list()
+            self._dashboard_controller.show()
+            logging.info("[Launcher] Dashboard shown")
 
     def showMainWindow_(self, sender):
         """Show main Gradio window.
@@ -1928,6 +3111,23 @@ class ApplioLauncher:
         logging.info("[Launcher] Show Main Window requested (window managed by wrapper subprocess)")
         # The main window is controlled by the wrapper subprocess
         # We could send a signal or use IPC to tell it to show, but for now just log
+
+    def _create_dashboard(self):
+        """Create the ProcessDashboardController instance.
+        
+        Called lazily when Progress Monitor is first accessed.
+        """
+        if not NATIVE_APIS_AVAILABLE:
+            logging.warning("[Launcher] Cannot create dashboard - native APIs unavailable")
+            return
+        
+        try:
+            logging.info("[Launcher] Creating ProcessDashboardController")
+            self._dashboard_controller = ProcessDashboardController(self)
+            logging.info("[Launcher] ProcessDashboardController created successfully")
+        except Exception as e:
+            logging.error(f"[Launcher] Failed to create dashboard: {e}")
+            self._dashboard_controller = None
 
     def _show_progress_window_for_processes(self, processes):
         """Show progress window for the first active process."""

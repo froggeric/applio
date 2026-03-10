@@ -20,9 +20,11 @@ import json
 import datetime
 import fcntl
 import time as _time_module
+import threading
 
 _PROCESS_STATE_FILE = None
 _PROCESS_LOCK_TIMEOUT = 5.0
+_history_thread_lock = threading.Lock()  # Thread safety for history operations
 
 def _get_process_state_path():
     global _PROCESS_STATE_FILE
@@ -129,6 +131,66 @@ def _untrack_process(process_type):
         state["processes"][process_type] = None
         _write_process_state(state)
 
+# === Process History Tracking ===
+_HISTORY_MAX_ENTRIES = 50
+
+def _get_history_file_path():
+    """Get path to process_history.json."""
+    state_path = _get_process_state_path()
+    return os.path.join(os.path.dirname(state_path), "process_history.json")
+
+def _read_process_history():
+    """Read process history from file."""
+    path = _get_history_file_path()
+    if not os.path.exists(path):
+        return {"version": 1, "history": []}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {"version": 1, "history": []}
+
+def _write_process_history(history):
+    """Write process history to file."""
+    path = _get_history_file_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lock_path = path + ".lock"
+    try:
+        with open(lock_path, "a") as lock_file:
+            if not _acquire_file_lock(lock_file):
+                pass  # Proceed anyway
+            try:
+                temp = path + ".tmp"
+                with open(temp, "w", encoding="utf-8") as f:
+                    json.dump(history, f, indent=2)
+                os.rename(temp, path)
+            finally:
+                _release_file_lock(lock_file)
+    except IOError as e:
+        print(f"[ProcessTracking] Error saving history: {e}")
+
+def _add_to_history(entry):
+    """Add a completed process to history (thread-safe with validation)."""
+    # Validate required fields
+    required = ["type", "started_at", "completed_at"]
+    for field in required:
+        if not entry.get(field):
+            print(f"[ProcessTracking] Warning: Missing required field '{field}' in history entry")
+            return
+    
+    with _history_thread_lock:
+        history = _read_process_history()
+        # Generate unique process ID
+        process_id = f"{entry.get('type', 'unknown')}-{entry.get('started_at', datetime.datetime.now().isoformat())}"
+        entry["process_id"] = process_id
+        # Add to front of list
+        history["history"].insert(0, entry)
+        # Enforce max entries
+        if len(history["history"]) > _HISTORY_MAX_ENTRIES:
+            history["history"] = history["history"][:_HISTORY_MAX_ENTRIES]
+        _write_process_history(history)
+
+# === End Process History Tracking ===
 # === End Process Tracking ===
 
 '''
@@ -159,14 +221,23 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "preprocess.log")
 \1_log_file = open(_log_file_path, "w")
+\1_started_at = datetime.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command, stdout=_log_file, stderr=subprocess.STDOUT)
 \1    _track_process("preprocess", _proc.pid, model_name=model_name, log_file=_log_file_path)
 \1    _proc.wait()
-\1    _update_process_status("preprocess", "completed")
 \1finally:
 \1    _log_file.close()
 \1    _untrack_process("preprocess")
+\1# Add to history on completion
+\1_add_to_history({
+\1    "type": "preprocess",
+\1    "model_name": model_name,
+\1    "started_at": _started_at,
+\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "status": "completed" if _proc.returncode == 0 else "failed",
+\1    "log_path": _log_file_path
+\1})
 \1if _proc.returncode != 0:
 \1    return f"Error: Preprocessing failed with code {_proc.returncode}"
 \3\4'''
@@ -197,14 +268,23 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "extract.log")
 \1_log_file = open(_log_file_path, "w")
+\1_started_at = datetime.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command_1, stdout=_log_file, stderr=subprocess.STDOUT)
 \1    _track_process("extract", _proc.pid, model_name=model_name, log_file=_log_file_path)
 \1    _proc.wait()
-\1    _update_process_status("extract", "completed")
 \1finally:
 \1    _log_file.close()
 \1    _untrack_process("extract")
+\1# Add to history on completion
+\1_add_to_history({
+\1    "type": "extract",
+\1    "model_name": model_name,
+\1    "started_at": _started_at,
+\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "status": "completed" if _proc.returncode == 0 else "failed",
+\1    "log_path": _log_file_path
+\1})
 \1if _proc.returncode != 0:
 \1    return f"Error: Feature extraction failed with code {_proc.returncode}"
 
@@ -236,14 +316,24 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "training.log")
 \1_log_file = open(_log_file_path, "w")
+\1_started_at = datetime.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command, stdout=_log_file, stderr=subprocess.STDOUT)
 \1    _track_process("training", _proc.pid, model_name=model_name, total_epoch=total_epoch, log_file=_log_file_path)
 \1    _proc.wait()
-\1    _update_process_status("training", "completed")
 \1finally:
 \1    _log_file.close()
 \1    _untrack_process("training")
+\1# Add to history on completion
+\1_add_to_history({
+\1    "type": "training",
+\1    "model_name": model_name,
+\1    "started_at": _started_at,
+\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "status": "completed" if _proc.returncode == 0 else "failed",
+\1    "log_path": _log_file_path,
+\1    "total_epoch": total_epoch
+\1})
 \1if _proc.returncode != 0:
 \1    return f"Error: Training failed with code {_proc.returncode}"
 \3\4
@@ -302,10 +392,19 @@ def patch_voice_conversion(content: str) -> tuple[str, bool]:
         return content, False
 
     replacement = r'''\1# Track TTS process
+\1_started_at = datetime.datetime.now().isoformat()
 \1_proc = subprocess.Popen(command_tts)
 \1_track_process("tts", _proc.pid)
 \1_proc.wait()
 \1_untrack_process("tts")
+\1# Add to history on completion
+\1_add_to_history({
+\1    "type": "tts",
+\1    "model_name": "TTS",
+\1    "started_at": _started_at,
+\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "status": "completed" if _proc.returncode == 0 else "failed"
+\1})
 \3\4'''
 
     new_content = re.sub(old_pattern, replacement, content)
