@@ -729,6 +729,54 @@ def _set_wrapper_window_visible(visible: bool):
     return False
 
 
+def _check_and_handle_show_main_window():
+    """
+    Check if dashboard requested to show main window.
+    
+    This is called periodically from a background thread.
+    If show_main_window flag is True, bring window to front.
+    """
+    global _main_window_ref
+    
+    if _main_window_ref is None:
+        return
+    
+    config_locations = [
+        os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+        os.path.expanduser("~/.applio/runtime_paths.json"),
+    ]
+    
+    for config_path in config_locations:
+        if not os.path.exists(config_path):
+            continue
+        
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            
+            if config.get("show_main_window") is True:
+                logging.info("[runtime_config] Detected show_main_window signal")
+                
+                # Reset the flag
+                config["show_main_window"] = False
+                temp_path = config_path + ".tmp"
+                with open(temp_path, "w") as f:
+                    json.dump(config, f, indent=2)
+                os.rename(temp_path, config_path)
+                
+                # Show the window (must be done on main thread)
+                # Use pywebview's show() method
+                try:
+                    _main_window_ref.show()
+                    logging.info("[runtime_config] Main window shown")
+                except Exception as e:
+                    logging.warning(f"[runtime_config] Failed to show window: {e}")
+                
+                return
+        except Exception as e:
+            logging.warning(f"[runtime_config] Error checking show_main_window: {e}")
+
+
 # Write config in frozen mode (ensures it's available for all subprocesses)
 if getattr(sys, "frozen", False):
     _write_runtime_config()
@@ -1510,6 +1558,16 @@ class ApplioApp:
             if self.window:
                 self.window.load_html("<h1>Startup Error</h1><p>The server failed to respond in time.</p>")
 
+    def _ipc_signal_checker(self):
+        """Background thread to check for IPC signals from dashboard."""
+        import time
+        while True:
+            time.sleep(2.0)  # Check every 2 seconds
+            try:
+                _check_and_handle_show_main_window()
+            except Exception as e:
+                logging.warning(f"[IPC] Error checking signals: {e}")
+
     def run(self):
         # 1. Start Helpers
         threading.Thread(target=self.start_loading_server, daemon=True).start()
@@ -1520,7 +1578,10 @@ class ApplioApp:
         threading.Thread(target=self.start_backend, daemon=True).start()
         threading.Thread(target=self.monitor_transition, daemon=True).start()
 
-        # 3. Main Window
+        # 3. Start IPC signal checker (for dashboard communication)
+        threading.Thread(target=self._ipc_signal_checker, daemon=True).start()
+
+        # 4. Main Window
         self.window = webview.create_window(
             "Applio",
             url=f"http://{self.server_host}:{self.loading_port}",
