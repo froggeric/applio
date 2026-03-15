@@ -578,6 +578,7 @@ def pre_build_patch():
         ("patches/patch_train_44100.py", "tabs/train/train.py", "tabs/train/train.py - 44100 Hz support", "file"),
         ("patches/patch_multiprocessing.py", "rvc/train/extract/extract.py", "extract.py - multiprocessing safety", "file"),
         ("patches/patch_extract_error_logging.py", "rvc/train/extract/extract.py", "extract.py - file-based error logging", "dir"),
+        ("patches/patch_preprocess_error_logging.py", "rvc/train/preprocess/preprocess.py", "preprocess.py - file-based error logging", "dir"),
         # Discriminator patch - must come FIRST before train patch
         ("patches/patch_refinegan_legacy_discriminator.py", "rvc/lib/algorithm/discriminators.py", "discriminators.py - DiscriminatorRLegacy support", "dir"),
         ("patches/patch_refinegan_legacy_train.py", "rvc/train/train.py", "train.py - RefineGAN-Legacy architecture detection (UPDATED)", "dir"),

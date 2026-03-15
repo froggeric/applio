@@ -18,9 +18,34 @@ import multiprocessing
 multiprocessing.freeze_support()
 
 # =================================================================
-# 1. Imports & Environment Setup
+# 0.5. Early Imports for Process Group Setup
 # =================================================================
 import os
+import logging
+
+# =================================================================
+# 0.6. Process Group Setup (MUST BE EARLY)
+# =================================================================
+def _setup_process_group():
+    """Establish this process as session leader for cascade termination.
+    
+    When the launcher terminates, all child processes in the session
+    will receive the signal, enabling graceful cascade shutdown.
+    """
+    try:
+        os.setsid()  # Create new session, become session leader
+        pgid = os.getpgid(0)
+        logging.info(f"[Launcher] Session leader established: PGID={pgid}")
+        return pgid
+    except OSError as e:
+        logging.warning(f"[Launcher] Could not create session: {e}")
+        return None
+
+_LAUNCHER_PGID = _setup_process_group()
+
+# =================================================================
+# 1. Imports & Environment Setup
+# =================================================================
 import sys
 import signal
 import subprocess
@@ -28,7 +53,6 @@ import threading
 import queue
 import json
 import re
-import logging
 import datetime
 import fcntl
 import time
@@ -184,6 +208,11 @@ MAX_INITIAL_LINES = 50
 MAX_QUEUE_ITEMS_PER_TICK = 20
 QUEUE_MAX_SIZE = 1000
 LOG_SCROLL_INTERVAL = 5
+
+# =================================================================
+# 2.5. IPC Notification Constants
+# =================================================================
+IPC_NOTIFICATION_NAME = "com.applio.wrapper.visibility"
 
 # Logging setup
 log_dir = os.path.expanduser("~/Library/Logs/Applio")
@@ -2672,7 +2701,10 @@ class ApplioLauncher:
         self.progress_menu_item = None  # Reference to update state
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
+        self._terminating = False  # Reentry protection for signal handlers
+        self._dist_center = None  # NSDistributedNotificationCenter reference
         self._setup_signal_handlers()
+        self._setup_ipc_observer()  # Setup distributed notification listener
 
     def start(self):
         """Main entry point."""
@@ -2715,6 +2747,45 @@ class ApplioLauncher:
         signal.signal(signal.SIGINT, self._handle_interrupt)
         signal.signal(signal.SIGTERM, self._handle_terminate)
 
+    def _setup_ipc_observer(self):
+        """Setup observer for wrapper window visibility changes via distributed notifications."""
+        try:
+            from Foundation import NSDistributedNotificationCenter
+            
+            self._dist_center = NSDistributedNotificationCenter.defaultCenter()
+            self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
+                self,
+                "wrapperVisibilityChanged:",
+                IPC_NOTIFICATION_NAME,
+                None,
+                4  # NSNotificationSuspensionBehaviorDeliverImmediately
+            )
+            logging.info("[Launcher] IPC observer registered for distributed notifications")
+        except ImportError:
+            logging.warning("[Launcher] NSDistributedNotificationCenter not available, using file-based IPC only")
+            self._dist_center = None
+
+    def wrapperVisibilityChanged_(self, notification):
+        """Handle wrapper window visibility change notification.
+        
+        Called when wrapper window is hidden (Keep Running mode).
+        """
+        try:
+            user_info = notification.userInfo()
+            if not user_info:
+                return
+            
+            visible = user_info.get("visible", True)
+            if not visible:
+                logging.info("[Launcher] Wrapper window hidden via IPC notification")
+                # Show progress window if there are active processes
+                active = get_active_processes()
+                if active:
+                    # Must run on main thread
+                    AppHelper.callAfter(self._show_progress_window_for_processes, active)
+        except Exception as e:
+            logging.warning(f"[Launcher] Error handling visibility change: {e}")
+
     def _handle_child_exit(self, signum, frame):
         """Handle child process exit."""
         try:
@@ -2727,16 +2798,65 @@ class ApplioLauncher:
             pass
 
     def _handle_interrupt(self, signum, frame):
-        """Handle interrupt signal."""
-        logging.info("[Launcher] Interrupt received, shutting down")
+        """Handle SIGINT (Ctrl+C) with cascade termination."""
+        if self._terminating:
+            return
+        self._terminating = True
+        logging.info("[Launcher] Interrupt received, initiating cascade shutdown")
+        self._terminate_children()
         self._cleanup()
         sys.exit(0)
 
     def _handle_terminate(self, signum, frame):
-        """Handle terminate signal."""
-        logging.info("[Launcher] Terminate received, shutting down")
+        """Handle SIGTERM with cascade termination."""
+        if self._terminating:
+            return
+        self._terminating = True
+        logging.info("[Launcher] Terminate received, initiating cascade shutdown")
+        self._terminate_children()
         self._cleanup()
         sys.exit(0)
+
+    def _terminate_children(self, timeout: float = 5.0):
+        """Terminate all child processes gracefully with escalation.
+        
+        Args:
+            timeout: Seconds to wait for graceful shutdown before SIGKILL
+        """
+        if _LAUNCHER_PGID is None:
+            return
+        
+        try:
+            # Step 1: SIGTERM to entire process group
+            logging.info(f"[Launcher] Sending SIGTERM to PGID {_LAUNCHER_PGID}")
+            os.killpg(_LAUNCHER_PGID, signal.SIGTERM)
+            
+            # Step 2: Wait for graceful shutdown
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                try:
+                    pid, _ = os.waitpid(-1, os.WNOHANG)
+                    if pid == 0:
+                        # Check if any children remain
+                        try:
+                            os.killpg(_LAUNCHER_PGID, 0)  # Check if group exists
+                            time.sleep(0.1)
+                        except ProcessLookupError:
+                            logging.info("[Launcher] All children terminated gracefully")
+                            return
+                except ChildProcessError:
+                    logging.info("[Launcher] All children terminated gracefully")
+                    return
+            
+            # Step 3: Escalate to SIGKILL
+            logging.warning("[Launcher] Graceful shutdown timeout, sending SIGKILL")
+            try:
+                os.killpg(_LAUNCHER_PGID, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # Already terminated
+            
+        except ProcessLookupError:
+            logging.info("[Launcher] No child processes to terminate")
 
     def _spawn_wrapper(self):
         """Spawn macos_wrapper.py as child process."""
@@ -3162,6 +3282,13 @@ class ApplioLauncher:
 
     def _cleanup(self):
         """Clean up on exit."""
+        # Remove IPC observer
+        if self._dist_center:
+            try:
+                self._dist_center.removeObserver_(self)
+            except Exception:
+                pass
+        
         # Stop menu update timer
         if self._menu_update_timer:
             self._menu_update_timer.invalidate()

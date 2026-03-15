@@ -31,6 +31,49 @@ import logging
 import urllib.request
 import urllib.error
 
+# =================================================================
+# 1.1. Activation Policy for Subprocess Mode
+# =================================================================
+# When running under the launcher, this process should NOT appear in the Dock.
+# This MUST be set BEFORE any NSApplication creation (including webview import).
+#
+# NSApplicationActivationPolicyAccessory (1):
+#   - No Dock icon
+#   - Window accessible via Cmd+Tab and click
+#   - Can be activated programmatically
+#
+# NSApplicationActivationPolicyRegular (0):
+#   - Normal Dock icon (default)
+#   - Standard macOS app behavior
+
+def _configure_activation_policy():
+    """Configure activation policy based on execution context.
+    
+    Only hide from Dock when running under launcher.
+    Standalone mode keeps normal Dock presence.
+    """
+    if not getattr(sys, "frozen", False):
+        # Development mode - keep both icons visible for debugging
+        return
+    
+    if not os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
+        # Standalone mode - normal Dock icon
+        return
+    
+    # Running under launcher - become accessory (hidden from Dock)
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        # Log to file (stdout may be redirected)
+        import logging
+        logging.info("[Wrapper] Activation policy set to Accessory (hidden from Dock)")
+    except ImportError:
+        pass  # PyObjC not available in development
+
+# Call BEFORE importing webview or other AppKit code
+_configure_activation_policy()
+
 # macOS native APIs for preferences and dialogs
 # These are conditional imports - only needed for GUI mode
 try:
@@ -87,6 +130,33 @@ VERSION = _get_version_info()
 GITHUB_REPO = "froggeric/applio-macOS-native-app"
 RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+# =================================================================
+# 1.9. IPC Notification Constants
+# =================================================================
+IPC_NOTIFICATION_NAME = "com.applio.wrapper.visibility"
+
+def _notify_launcher_visibility(visible: bool):
+    """Notify launcher of window visibility change via distributed notification.
+    
+    Uses NSDistributedNotificationCenter for fast cross-process IPC.
+    Latency: ~5-20ms vs ~2000ms for file polling.
+    
+    Args:
+        visible: True if window is visible, False if hidden
+    """
+    try:
+        from Foundation import NSDistributedNotificationCenter
+        center = NSDistributedNotificationCenter.defaultCenter()
+        center.postNotificationName_object_userInfo_deliverImmediately_(
+            IPC_NOTIFICATION_NAME,
+            None,
+            {"visible": visible},
+            True  # deliverImmediately
+        )
+        logging.info(f"[Wrapper] Notified launcher: visible={visible}")
+    except Exception as e:
+        logging.warning(f"[Wrapper] Failed to notify launcher: {e}")
 
 # =================================================================
 # 1.6. Process Tracking for Background Operations
@@ -358,7 +428,9 @@ def on_window_closing():
             # Hide the main window instead of closing
             if _main_window_ref:
                 _main_window_ref.hide()
-            # Notify launcher via runtime config so it shows progress window
+            # Notify launcher via IPC (fast)
+            _notify_launcher_visibility(False)
+            # Also write to file as fallback
             _set_wrapper_window_visible(False)
             logging.info("[Window] Main window hidden, processes continue in background")
             return False  # Cancel close, window is just hidden

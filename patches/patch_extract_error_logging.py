@@ -33,21 +33,21 @@ def patch_extract_py(base_path: str) -> bool:
 
     patched = False
 
-    # Pattern: The silent exception handler
+    # Pattern: The silent exception handler (8-space indentation for except)
     # Original:
-    #     except Exception as error:
-    #         print(
-    #             f"An error occurred extracting file {inp_path} on {self.device}: {error}"
-    #         )
+    #         except Exception as error:
+    #             print(
+    #                 f"An error occurred extracting file {inp_path} on {self.device}: {error}"
+    #             )
     #
     # Patched: Add file-based logging before the print
 
-    old_pattern = r'''except Exception as error:
+    old_pattern = r'''        except Exception as error:
             print\(
                 f"An error occurred extracting file \{inp_path\} on \{self\.device\}: \{error\}"
             \)'''
 
-    new_code = '''except Exception as error:
+    new_code = '''        except Exception as error:
             # Log to file for debugging (persists across multiprocessing spawn)
             import datetime
             error_log_path = os.path.expanduser("~/Library/Logs/Applio/extraction_errors.log")
