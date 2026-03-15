@@ -1450,6 +1450,93 @@ def _menu_callback_check_updates():
         # Fallback for non-macOS platforms
         _check_on_main_thread()
 
+# =================================================================
+# 2.5. Progress Monitor IPC Signal
+# =================================================================
+
+def _signal_show_progress_monitor():
+    """
+    Signal the launcher to show the Progress Monitor dashboard.
+    
+    Writes 'show_progress_monitor': True to runtime_paths.json.
+    The launcher's IPC checker detects this and shows the dashboard.
+    
+    Returns:
+        bool: True if signal was sent successfully, False otherwise.
+    """
+    import json
+    import fcntl
+    
+    config_locations = [
+        os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+        os.path.expanduser("~/.applio/runtime_paths.json"),
+    ]
+    
+    for config_path in config_locations:
+        config_dir = os.path.dirname(config_path)
+        
+        # Ensure directory exists
+        if not os.path.exists(config_dir):
+            try:
+                os.makedirs(config_dir, exist_ok=True)
+            except OSError as e:
+                logging.warning(f"[IPC] Could not create directory {config_dir}: {e}")
+                continue
+        
+        # Read existing config or start fresh
+        config = {}
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                logging.warning(f"[IPC] Could not read config at {config_path}: {e}")
+                config = {}
+        
+        try:
+            # Set the signal flag
+            config["show_progress_monitor"] = True
+            
+            # Write atomically with file locking
+            temp_path = config_path + ".tmp"
+            with open(temp_path, "w") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock
+                json.dump(config, f, indent=2)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Unlock
+            os.rename(temp_path, config_path)
+            
+            logging.info(f"[IPC] Signaled show_progress_monitor via {config_path}")
+            return True
+        except Exception as e:
+            logging.warning(f"[IPC] Failed to write config at {config_path}: {e}")
+    
+    return False
+
+
+def _show_progress_monitor_info():
+    """Show info dialog when Progress Monitor is not available.
+    
+    Called in standalone mode where there's no launcher to show the dashboard.
+    """
+    try:
+        from AppKit import NSAlert, NSAlertStyleInformational
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Progress Monitor")
+        alert.setInformativeText_(
+            "The Progress Monitor shows real-time training and inference progress.\n\n"
+            "To use this feature, launch Applio via the main application bundle.\n\n"
+            "In standalone mode, you can monitor progress via:\n"
+            "• Terminal output\n"
+            "• Log files in ~/Library/Logs/Applio/"
+        )
+        alert.setAlertStyle_(NSAlertStyleInformational)
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
+    except ImportError:
+        # Fallback for non-macOS platforms
+        print("Progress Monitor requires running under the Applio launcher.")
+
+
 def get_native_menu():
     from webview.menu import Menu, MenuAction, MenuSeparator
     def open_in_finder(subpath: str):
@@ -1499,6 +1586,12 @@ def get_native_menu():
             MenuAction("Select All", lambda: None)
         ]),
         Menu("Window", [
+            MenuAction("Progress Monitor", lambda: (
+                _signal_show_progress_monitor() 
+                if os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER") 
+                else _show_progress_monitor_info()
+            )),
+            MenuSeparator(),
             MenuAction("Minimize", lambda: None),
             MenuAction("Zoom", lambda: None),
         ])
@@ -1777,14 +1870,14 @@ class ApplioApp:
 
         logging.info("Starting Webview GUI...")
 
-        # Only create pywebview menu if NOT launched by launcher
-        # When launched by launcher, the launcher's native NSMenu will be visible
+        # Always create menu. Progress Monitor behavior differs:
+        # - Under launcher: signals launcher via IPC to show dashboard
+        # - Standalone: shows info dialog explaining the feature
         if os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
-            logging.info("Running under launcher - using launcher's native menu")
-            webview.start(debug=False)
+            logging.info("Running under launcher - menu will signal launcher via IPC")
         else:
             logging.info("Running standalone - creating pywebview menu")
-            webview.start(menu=get_native_menu(), debug=False)
+        webview.start(menu=get_native_menu(), debug=False)
 
 if __name__ == "__main__":
     app = ApplioApp()

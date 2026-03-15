@@ -79,8 +79,9 @@ try:
         NSCommandKeyMask, NSShiftKeyMask, NSBox, NSColor,
         NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
     )
-    from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange
+    from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
     from PyObjCTools import AppHelper
+    import objc
 
     NATIVE_APIS_AVAILABLE = True
 except ImportError:
@@ -2703,6 +2704,78 @@ class ProcessDashboardController:
 
 
 # =================================================================
+# 5.6. Menu Action Handler (NSObject Proxy)
+# =================================================================
+
+class MenuActionHandler(NSObject):
+    """NSObject proxy to handle menu item actions.
+    
+    Required because ApplioLauncher is a plain Python class and cannot
+    correctly respond to respondsToSelector: when used as an NSMenuItem target.
+    
+    Uses weakref to prevent retain cycles with ApplioLauncher.
+    """
+    
+    def initWithLauncher_(self, launcher):
+        """Initialize with weak reference to launcher.
+        
+        Args:
+            launcher: ApplioLauncher instance (stored as weak reference)
+        
+        Returns:
+            self (standard Objective-C init pattern)
+        """
+        self = objc.super(MenuActionHandler, self).init()
+        if self is not None:
+            self._launcher_ref = weakref.ref(launcher)
+        return self
+    
+    def _get_launcher(self):
+        """Safely get launcher reference.
+        
+        Returns:
+            ApplioLauncher instance or None if deallocated
+        """
+        if hasattr(self, '_launcher_ref'):
+            return self._launcher_ref()
+        return None
+    
+    # =================================================================
+    # Menu Action Methods (forward to launcher)
+    # =================================================================
+    
+    def showAbout_(self, sender):
+        """Show About dialog."""
+        launcher = self._get_launcher()
+        if launcher:
+            launcher.showAbout_(sender)
+    
+    def checkUpdates_(self, sender):
+        """Check for updates."""
+        launcher = self._get_launcher()
+        if launcher:
+            launcher.checkUpdates_(sender)
+    
+    def setDataLocation_(self, sender):
+        """Open dialog to set data location."""
+        launcher = self._get_launcher()
+        if launcher:
+            launcher.setDataLocation_(sender)
+    
+    def showProgressMonitor_(self, sender):
+        """Show the progress monitor dashboard."""
+        launcher = self._get_launcher()
+        if launcher:
+            launcher.showProgressMonitor_(sender)
+    
+    def showMainWindow_(self, sender):
+        """Show main Gradio window."""
+        launcher = self._get_launcher()
+        if launcher:
+            launcher.showMainWindow_(sender)
+
+
+# =================================================================
 # 6. Main Launcher Class
 # =================================================================
 
@@ -2717,6 +2790,7 @@ class ApplioLauncher:
         self._dashboard_controller = None  # Persistent dashboard window
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
+        self._menu_handler = None  # NSObject proxy for menu actions (initialized in _setup_menu)
         self._setup_signal_handlers()
         self._setup_ipc_observer()  # Setup distributed notification listener
 
@@ -2932,6 +3006,10 @@ class ApplioLauncher:
         # Ensure NSApplication is initialized
         app = NSApplication.sharedApplication()
 
+        # Create NSObject proxy for menu actions (plain Python classes can't be NSMenuItem targets)
+        if not self._menu_handler:
+            self._menu_handler = MenuActionHandler.alloc().initWithLauncher_(self)
+
         # Set app activation policy to show in Dock and menu bar
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
 
@@ -2951,6 +3029,7 @@ class ApplioLauncher:
         about_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "About Applio", "showAbout:", ""
         )
+        about_item.setTarget_(self._menu_handler)
         about_item.setAccessibilityHelp_("Show information about Applio version and credits")
         app_menu.addItem_(about_item)
 
@@ -2958,6 +3037,7 @@ class ApplioLauncher:
         update_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Check for Updates...", "checkUpdates:", ""
         )
+        update_item.setTarget_(self._menu_handler)
         update_item.setAccessibilityHelp_("Open the releases page to check for new versions")
         app_menu.addItem_(update_item)
 
@@ -2983,6 +3063,7 @@ class ApplioLauncher:
         data_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Set Data Location...", "setDataLocation:", ""
         )
+        data_item.setTarget_(self._menu_handler)
         data_item.setAccessibilityHelp_("Choose a folder to store Applio data including models and training files")
         file_menu.addItem_(data_item)
 
@@ -3000,6 +3081,7 @@ class ApplioLauncher:
         self.progress_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Progress Monitor", "showProgressMonitor:", "P"
         )
+        self.progress_menu_item.setTarget_(self._menu_handler)
         self.progress_menu_item.setKeyEquivalentModifierMask_(
             NSCommandKeyMask | NSShiftKeyMask
         )
@@ -3013,6 +3095,7 @@ class ApplioLauncher:
         main_window_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Show Main Window", "showMainWindow:", "w"
         )
+        main_window_item.setTarget_(self._menu_handler)
         # Cmd+Shift+W modifier
         main_window_item.setKeyEquivalentModifierMask_(1048576 | 131072)  # Command | Shift
         main_window_item.setAccessibilityHelp_("Bring the main Applio window to front (Command Shift W)")
@@ -3089,10 +3172,68 @@ class ApplioLauncher:
 
         return False
 
+    def _check_show_progress_monitor_signal(self):
+        """Check if wrapper requested to show Progress Monitor via IPC.
+        
+        Returns True if signal was detected and handled, False otherwise.
+        Resets the signal flag after detection to prevent repeated triggers.
+        """
+        import json
+        import fcntl
+        
+        config_locations = [
+            os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+            os.path.expanduser("~/.applio/runtime_paths.json"),
+        ]
+
+        for config_path in config_locations:
+            if not os.path.exists(config_path):
+                continue
+                
+            try:
+                with open(config_path, "r") as f:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # Shared lock for reading
+                    config = json.load(f)
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+                # Check if show_progress_monitor signal is set
+                if config.get("show_progress_monitor") is True:
+                    logging.info("[Launcher] Detected show_progress_monitor IPC signal")
+                    
+                    # Reset the signal flag
+                    config["show_progress_monitor"] = False
+                    temp_path = config_path + ".tmp"
+                    with open(temp_path, "w") as f:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock for writing
+                        json.dump(config, f, indent=2)
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    os.rename(temp_path, config_path)
+                    
+                    return True
+                    
+            except Exception as e:
+                logging.warning(f"[Launcher] Failed to check show_progress_monitor signal: {e}")
+
+        return False
+
     def _update_menu_state(self):
         """Update menu item states based on running processes."""
         if not self.progress_menu_item:
             return
+
+        # Check if wrapper requested to show Progress Monitor via IPC
+        if self._check_show_progress_monitor_signal():
+            logging.info("[Launcher] Showing dashboard via IPC signal from wrapper")
+            try:
+                # Create dashboard on first use
+                if not self._dashboard_controller:
+                    self._create_dashboard()
+                # Show the dashboard
+                if self._dashboard_controller:
+                    self._dashboard_controller.update_process_list()
+                    self._dashboard_controller.show()
+            except Exception as e:
+                logging.error(f"[Launcher] Failed to show dashboard via IPC: {e}")
 
         # Check if wrapper window was hidden - if so, show progress window
         if self._check_wrapper_window_hidden():
