@@ -160,6 +160,20 @@ if len(sys.argv) > 1:
             script_path = os.path.join(BASE_PATH, potential_script)
 
         if script_path:
+            # =================================================================
+            # 2.1. Subprocess Mode Activation Policy (CRITICAL)
+            # =================================================================
+            # When running as a subprocess (e.g., macos_wrapper.py), hide from Dock.
+            # This MUST happen BEFORE NSApplication is created by the script.
+            # NSApplicationActivationPolicyAccessory (1) = No Dock icon
+            if getattr(sys, "frozen", False) and NATIVE_APIS_AVAILABLE:
+                try:
+                    from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+                    app = NSApplication.sharedApplication()
+                    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+                except Exception:
+                    pass
+
             # Add script's directory to sys.path so relative imports work
             # This is needed because runpy.run_path doesn't add the script's dir to path
             script_dir = os.path.dirname(os.path.abspath(script_path))

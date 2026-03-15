@@ -74,6 +74,88 @@ def _configure_activation_policy():
 # Call BEFORE importing webview or other AppKit code
 _configure_activation_policy()
 
+# =================================================================
+# 1.2. PyWebView Activation Policy Patch (CRITICAL)
+# =================================================================
+# pywebview's cocoa.py line 59 unconditionally calls:
+#     app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular
+# This runs at class definition time when webview.platforms.cocoa is imported,
+# overriding our Accessory policy set above.
+#
+# Solution: Monkey-patch setActivationPolicy_ to ignore Regular (0) calls
+# when running under launcher, preserving our Accessory (1) policy.
+
+_PYWEBVIEW_POLICY_PATCHED = False
+_ORIGINAL_SET_ACTIVATION_POLICY = None
+
+def _patch_pywebview_activation_policy():
+    """Patch NSApplication.setActivationPolicy_ to ignore Regular policy when under launcher.
+    
+    This prevents pywebview from overriding our Accessory policy at import time.
+    The patch is applied before webview import and removed after import completes.
+    """
+    global _PYWEBVIEW_POLICY_PATCHED, _ORIGINAL_SET_ACTIVATION_POLICY
+    
+    if _PYWEBVIEW_POLICY_PATCHED:
+        return
+    
+    if not os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
+        return  # No need to patch in standalone mode
+    
+    if not getattr(sys, "frozen", False):
+        return  # No need in development mode
+    
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        
+        # Store original method
+        _ORIGINAL_SET_ACTIVATION_POLICY = NSApplication.setActivationPolicy_
+        
+        # Create wrapper that ignores Regular (0) policy
+        def _patched_setActivationPolicy(self, policy):
+            """Patched setActivationPolicy_ that preserves Accessory policy."""
+            # Get current policy
+            try:
+                current_policy = self.activationPolicy()
+            except:
+                current_policy = None
+            
+            # If we're under launcher and already Accessory, ignore Regular (0) calls
+            if (os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER") and 
+                current_policy == NSApplicationActivationPolicyAccessory and
+                policy == 0):  # NSApplicationActivationPolicyRegular
+                # Log and ignore - preserve Accessory policy
+                import logging
+                logging.info("[Wrapper] Blocked pywebview attempt to set Regular activation policy")
+                return
+            
+            # Otherwise, pass through to original
+            return _ORIGINAL_SET_ACTIVATION_POLICY(self, policy)
+        
+        # Apply the patch
+        NSApplication.setActivationPolicy_ = _patched_setActivationPolicy
+        _PYWEBVIEW_POLICY_PATCHED = True
+        
+    except ImportError:
+        pass
+
+def _unpatch_pywebview_activation_policy():
+    """Restore original setActivationPolicy_ method after webview import."""
+    global _PYWEBVIEW_POLICY_PATCHED, _ORIGINAL_SET_ACTIVATION_POLICY
+    
+    if not _PYWEBVIEW_POLICY_PATCHED or _ORIGINAL_SET_ACTIVATION_POLICY is None:
+        return
+    
+    try:
+        from AppKit import NSApplication
+        NSApplication.setActivationPolicy_ = _ORIGINAL_SET_ACTIVATION_POLICY
+        _ORIGINAL_SET_ACTIVATION_POLICY = None
+    except:
+        pass
+
+# Apply patch before any AppKit imports that might trigger webview
+_patch_pywebview_activation_policy()
+
 # macOS native APIs for preferences and dialogs
 # These are conditional imports - only needed for GUI mode
 try:
@@ -1061,6 +1143,30 @@ import socket
 import http.server
 import socketserver
 import webview
+
+# =================================================================
+# 5.1. Post-webview Activation Policy Cleanup
+# =================================================================
+# pywebview's cocoa.py called setActivationPolicy_(0) at import time.
+# Our monkey-patch should have blocked it, but let's ensure Accessory policy
+# is set and restore the original method.
+
+# Restore original setActivationPolicy_ method
+_unpatch_pywebview_activation_policy()
+
+# Ensure Accessory policy is set (safety net)
+if os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+        app = NSApplication.sharedApplication()
+        current_policy = app.activationPolicy()
+        if current_policy != NSApplicationActivationPolicyAccessory:
+            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+            logging.info("[Wrapper] Corrected activation policy to Accessory")
+        else:
+            logging.info("[Wrapper] Activation policy confirmed: Accessory")
+    except ImportError:
+        pass
 
 # =================================================================
 # 1.5. Copy bundled static resources to user's data location
