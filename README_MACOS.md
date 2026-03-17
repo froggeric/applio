@@ -127,40 +127,173 @@ Both `Applio.app` and `ApplioModelsInstaller.app` share the same preferences dom
 
 ## Model & Index Merger Tool
 
-The `merge_rvc.py` script is a standalone CLI tool for merging RVC voice models and FAISS indexes.
+The `merge_rvc.py` script is a standalone CLI tool for merging RVC voice models and FAISS indexes. It creates a complete merged voice from two source models, with automatic output naming and full metadata tracking.
 
-### Usage
+### Quick Start
 
 ```bash
-# Merge two voice models (.pth files)
-python merge_rvc.py --model-a voice_a.pth --model-b voice_b.pth \
-    --ratio 0.6 --output merged.pth
+# Activate the environment
+source venv_macos/bin/activate
 
-# Merge two FAISS indexes (.index files)
-python merge_rvc.py --index-a voice_a.index --index-b voice_b.index \
-    --output merged.index
+# Simplest usage — auto-naming from model metadata, auto output directory
+python merge_rvc.py \
+    --model-a '/path/to/Sade/Sade.pth' \
+    --model-b '/path/to/Ani Lorak/AnilorakV2.pth' \
+    --index-a '/path/to/Sade/Sade.index' \
+    --index-b '/path/to/Ani Lorak/AnilorakV2.index'
 
-# Merge both models and indexes together
-python merge_rvc.py --model-a a.pth --model-b b.pth --ratio 0.5 \
-    --index-a a.index --index-b b.index \
-    --output merged.pth --index-output merged.index
-
-# Validate compatibility without creating output files
-python merge_rvc.py --model-a a.pth --model-b b.pth --ratio 0.5 --dry-run
+# This creates:
+#   ./Sade + Ani Lorak (0.50)/
+#   ├── Sade + Ani Lorak (0.50).pth
+#   ├── Sade + Ani Lorak (0.50).index
+#   └── metadata.json
 ```
 
-### Parameters
+### All Parameters
 
 | Parameter | Description |
 |-----------|-------------|
 | `--model-a` | Path to first model (.pth) |
 | `--model-b` | Path to second model (.pth) |
-| `--ratio` | Blend ratio (0.0-1.0), higher = more of model A (default: 0.5) |
-| `--output` | Output path for merged model (.pth) |
+| `--ratio` | Blend ratio (0.0–1.0), higher = more of model A (default: 0.5) |
+| `--name` | Custom name for the merged model (default: auto-derived from source metadata/folder) |
+| `--output-dir` | Output directory, created if needed (default: `./<merge_name>`) |
+| `--output` | Explicit output path for merged .pth (overrides `--output-dir`) |
 | `--index-a` | Path to first index (.index) |
 | `--index-b` | Path to second index (.index) |
-| `--index-output` | Output path for merged index (.index) |
-| `--dry-run` | Validate inputs without creating output files |
+| `--index-output` | Explicit output path for merged .index |
+| `--use-weighted` | Weight index concatenation by ratio (replicate dominant model's vectors) |
+| `--random-seed` | Seed for reproducible shuffling (default: 42) |
+| `--dry-run` | Validate compatibility without creating output files |
+
+### Auto-Naming
+
+When `--name` is not specified, the merge name is derived automatically:
+
+1. **Source metadata.json** — reads `metadata.json` next to each model file and extracts the `title` field, stripping parenthetical context like "(Israeli Singer)" and suffixes like "[RVC V2] [450 Epochs]"
+2. **Parent folder name** — falls back to the containing folder name (strips `-Weights`, `-Weights-2`, `_v2` suffixes)
+3. **Filename stem** — last resort, strips FAISS naming prefixes
+
+Examples:
+- Models with `metadata.json` titles "Sade" and "Ani Lorak (Ukrainian Singer)" → `"Sade + Ani Lorak (0.50)"`
+- Models with `metadata.json` titles "Hanan Ben Ari" and "Zucchero" → `"Hanan Ben Ari + Zucchero (0.50)"`
+- Models without metadata, folders "Hanan Ben Ari - Weights" and "Zucchero - Weights-2" → `"Hanan Ben Ari + Zucchero (0.50)"`
+
+### Output Directory Structure
+
+```
+Tina Daya/
+├── Tina Daya.pth          # Merged model (457 weight layers, ~55 MB)
+├── Tina Daya.index        # Merged FAISS index (768-dim vectors, ~450–570 MB)
+└── metadata.json          # Full merge provenance (see below)
+```
+
+The output directory is created automatically. If `--output-dir` is not set, the merge name is used as the folder name in the current working directory.
+
+### Merge Metadata
+
+A `metadata.json` is automatically written to the output directory containing full provenance:
+
+```json
+{
+  "title": "Tina Daya",
+  "type": "merged",
+  "merge": {
+    "ratio": 0.5,
+    "weighted_index": false,
+    "random_seed": 42,
+    "merged_at": "2026-03-17T16:38:38Z"
+  },
+  "source_a": {
+    "path": "/Volumes/ssd/ai/rvc/Sade/Sade.pth",
+    "size_bytes": 55193209,
+    "md5": "dc6f367b489d66724353dc916d223548",
+    "title": "Sade",
+    "author": {"name": "tatersalad6636"},
+    "description": "I doubled the epochs from 500 to 1000...",
+    "tags": ["RVC v2", "English", "Artist", "Singer"],
+    "torch_version": "v2",
+    "torch_f0": 1,
+    "torch_info": "1000epoch",
+    "torch_sr": "40k"
+  },
+  "source_b": {
+    "path": "/Volumes/ssd/ai/rvc/Ani Lorak/AnilorakV2.pth",
+    ...
+  },
+  "model": {
+    "layers": 457,
+    "sample_rate": "40000",
+    "f0": 1,
+    "version": "v2",
+    "vocoder": "HiFi-GAN",
+    "size_bytes": 55218763,
+    "md5": "c0ca5117a029c920947a61d920203169"
+  },
+  "index": {
+    "vectors": 146980,
+    "dimension": 768,
+    "mode": "equal",
+    "ratio": 0.5,
+    "size_bytes": 464303979
+  }
+}
+```
+
+The metadata includes:
+- **Merge parameters** — ratio, weighted mode, seed, timestamp
+- **Source provenance** — original file paths, sizes, MD5 checksums, plus data from source `metadata.json` files (title, author, description, tags, training info)
+- **Model stats** — layer count, sample rate, f0, version, vocoder, output file size/hash
+- **Index stats** — vector count, dimension, mode (equal/weighted), ratio, output file size
+
+### Usage Examples
+
+```bash
+# Custom name with automatic output directory
+python merge_rvc.py \
+    --model-a '/path/to/Sade/Sade.pth' \
+    --model-b '/path/to/Ani Lorak/AnilorakV2.pth' \
+    --name 'Tina Daya' \
+    --index-a '/path/to/Sade/Sade.index' \
+    --index-b '/path/to/Ani Lorak/AnilorakV2.index'
+# Creates: ./Tina Daya/Tina Daya.pth, Tina Daya.index, metadata.json
+
+# Custom output directory
+python merge_rvc.py \
+    --model-a a.pth --model-b b.pth --ratio 0.7 \
+    --name 'My Blend' --output-dir /Volumes/ssd/rvc/merged \
+    --index-a a.index --index-b b.index --use-weighted
+# Creates: /Volumes/ssd/rvc/merged/My Blend.pth, My Blend.index, metadata.json
+
+# Explicit output paths (no auto-naming, no metadata.json)
+python merge_rvc.py \
+    --model-a a.pth --model-b b.pth --ratio 0.5 \
+    --output /path/to/merged.pth \
+    --index-a a.index --index-b b.index \
+    --index-output /path/to/merged.index
+
+# Model only (no index merge)
+python merge_rvc.py \
+    --model-a a.pth --model-b b.pth --ratio 0.6 \
+    --name 'Blend 60-40'
+# Creates: ./Blend 60-40/Blend 60-40.pth, metadata.json
+
+# Weighted index merge (70% model A features in index)
+python merge_rvc.py \
+    --model-a a.pth --model-b b.pth --ratio 0.7 \
+    --index-a a.index --index-b b.index \
+    --use-weighted --name 'A Dominant'
+# Creates: ./A Dominant/A Dominant.pth, A Dominant.index, metadata.json
+
+# Dry run — validate compatibility without creating files
+python merge_rvc.py \
+    --model-a a.pth --model-b b.pth --ratio 0.5 --dry-run
+
+# Weighted dry run — preview replication counts
+python merge_rvc.py \
+    --index-a a.index --index-b b.index \
+    --use-weighted --ratio 0.8 --dry-run
+```
 
 ### Compatibility Requirements
 
@@ -175,25 +308,31 @@ Indexes must have matching dimensions (768 for standard RVC).
 
 ### How It Works
 
-**Model Merging:**
-- Weight interpolation between model checkpoints
+**Model Merging (.pth):**
+- Linear weight interpolation: `W_merged = ratio * W_A + (1 - ratio) * W_B`
 - Special handling for different speaker embedding dimensions (`emb_g.weight`)
+- All 457 layers merged in float32, stored as float16
 - Preserves model metadata (config, version, vocoder)
 
-**Index Merging:**
-- Reconstructs vectors from both FAISS indexes
-- Concatenates and shuffles vectors for better distribution
-- Applies KMeans clustering for large datasets (>200k vectors)
-- Trains new IVF index with appropriate cluster count
+**Index Merging (.index):**
+- Reconstructs all 768-dim HuBERT feature vectors from both FAISS indexes
+- **Equal mode** (default): concatenates vectors 1:1, shuffles deterministically
+- **Weighted mode** (`--use-weighted`): replicates dominant model's vectors with tiny noise (1e-6) to bias k-NN retrieval toward one voice
+- Subsamples large datasets (>190K vectors) to stay within memory limits
+- Builds new IVF,Flat index matching Applio's construction formula
+
+**Output metadata.json:**
+- Reads source `metadata.json` files for provenance (title, author, training info, tags)
+- Computes MD5 checksums of source and output files
+- Records all merge parameters and output statistics
 
 ### Dependencies
 
-- `torch` - Model loading/saving
-- `faiss-cpu` - Index manipulation
-- `numpy` - Array operations
-- `scikit-learn` - KMeans clustering
+- `torch` — Model loading/saving
+- `faiss-cpu` — Index manipulation
+- `numpy` — Array operations
 
-All dependencies are included in the Applio virtual environment.
+All dependencies are included in the Applio virtual environment. For full technical details, see `MERGE_ALGORITHM.md`.
 
 ## Code Signing & Notarization
 
