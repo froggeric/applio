@@ -125,6 +125,76 @@ Both `Applio.app` and `ApplioModelsInstaller.app` share the same preferences dom
 | **F0 Predictors** | - | rmvpe.pt, fcpe.pt |
 | **Embedders** | - | contentvec (pytorch_model.bin, config.json) |
 
+## Model & Index Merger Tool
+
+The `merge_rvc.py` script is a standalone CLI tool for merging RVC voice models and FAISS indexes.
+
+### Usage
+
+```bash
+# Merge two voice models (.pth files)
+python merge_rvc.py --model-a voice_a.pth --model-b voice_b.pth \
+    --ratio 0.6 --output merged.pth
+
+# Merge two FAISS indexes (.index files)
+python merge_rvc.py --index-a voice_a.index --index-b voice_b.index \
+    --output merged.index
+
+# Merge both models and indexes together
+python merge_rvc.py --model-a a.pth --model-b b.pth --ratio 0.5 \
+    --index-a a.index --index-b b.index \
+    --output merged.pth --index-output merged.index
+
+# Validate compatibility without creating output files
+python merge_rvc.py --model-a a.pth --model-b b.pth --ratio 0.5 --dry-run
+```
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `--model-a` | Path to first model (.pth) |
+| `--model-b` | Path to second model (.pth) |
+| `--ratio` | Blend ratio (0.0-1.0), higher = more of model A (default: 0.5) |
+| `--output` | Output path for merged model (.pth) |
+| `--index-a` | Path to first index (.index) |
+| `--index-b` | Path to second index (.index) |
+| `--index-output` | Output path for merged index (.index) |
+| `--dry-run` | Validate inputs without creating output files |
+
+### Compatibility Requirements
+
+Models must have matching:
+- Sample rate (e.g., both 48kHz)
+- Pitch guidance (f0 on/off)
+- Model version (v1 or v2)
+- Vocoder type (HiFi-GAN, RefineGAN, etc.)
+- Embedder model (if specified)
+
+Indexes must have matching dimensions (768 for standard RVC).
+
+### How It Works
+
+**Model Merging:**
+- Weight interpolation between model checkpoints
+- Special handling for different speaker embedding dimensions (`emb_g.weight`)
+- Preserves model metadata (config, version, vocoder)
+
+**Index Merging:**
+- Reconstructs vectors from both FAISS indexes
+- Concatenates and shuffles vectors for better distribution
+- Applies KMeans clustering for large datasets (>200k vectors)
+- Trains new IVF index with appropriate cluster count
+
+### Dependencies
+
+- `torch` - Model loading/saving
+- `faiss-cpu` - Index manipulation
+- `numpy` - Array operations
+- `scikit-learn` - KMeans clustering
+
+All dependencies are included in the Applio virtual environment.
+
 ## Code Signing & Notarization
 
 ### Prerequisites
@@ -387,6 +457,7 @@ This fork maintains minimal delta from upstream by patching at build time.
 | `build_macos.py` | Main build script (app, DMG, models installer) |
 | `macos_wrapper.py` | Native window wrapper with external data location, native dialogs |
 | `models_installer.py` | Standalone models installer (shares preferences with main app) |
+| `merge_rvc.py` | Standalone CLI tool for merging voice models and FAISS indexes |
 | `install_applio_mac.sh` | Standalone installation script |
 | `Applio.spec` | PyInstaller config (generated, gitignored) |
 | `ApplioModelsInstaller.spec` | Models installer PyInstaller config (generated) |
