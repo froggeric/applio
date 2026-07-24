@@ -2,6 +2,7 @@
 import os
 import shutil
 import sys
+import zipfile
 from multiprocessing import cpu_count
 
 import gradio as gr
@@ -276,27 +277,28 @@ def export_index(index_path):
 
 
 # Upload to Google Drive
-def upload_to_google_drive(pth_path, index_path):
-    def upload_file(file_path):
-        if file_path:
-            try:
-                gr.Info(f"Uploading {pth_path} to Google Drive...")
-                google_drive_folder = "/content/drive/MyDrive/ApplioExported"
-                if not os.path.exists(google_drive_folder):
-                    os.makedirs(google_drive_folder)
-                google_drive_file_path = os.path.join(
-                    google_drive_folder, os.path.basename(file_path)
-                )
-                if os.path.exists(google_drive_file_path):
-                    os.remove(google_drive_file_path)
-                shutil.copy2(file_path, google_drive_file_path)
-                gr.Info("File uploaded successfully.")
-            except Exception as error:
-                print(f"An error occurred uploading to Google Drive: {error}")
-                gr.Info("Error uploading to Google Drive")
-
-    upload_file(pth_path)
-    upload_file(index_path)
+def upload_to_google_drive(pth_path, index_path, model_name):
+    if not os.path.exists(os.path.join(models_path, model_name)):
+        return gr.Info("Model folder not found.")
+    if not pth_path or not os.path.exists(pth_path):
+        return gr.Info(".pth not found.")
+    try:
+        zip_path = f"{model_name}.zip"
+        gr.Info("Uploading...")
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            zipf.write(pth_path, os.path.basename(pth_path))
+            if index_path and os.path.exists(index_path):
+                zipf.write(index_path, os.path.basename(index_path))
+        drive_folder = "/content/drive/MyDrive/ApplioExported"
+        os.makedirs(drive_folder, exist_ok=True)
+        dest = os.path.join(drive_folder, zip_path)
+        if os.path.exists(dest):
+            os.remove(dest)
+        shutil.move(zip_path, dest)
+        gr.Info("Uploaded.")
+    except Exception as error:
+        print(f"An error occurred uploading to Google Drive: {error}")
+        gr.Info("Upload failed.")
 
 
 def auto_enable_checkpointing():
@@ -693,19 +695,19 @@ def train_tab():
                         value=auto_enable_checkpointing(),
                         interactive=True,
                     )
+                    shutdown_check = gr.Checkbox(
+                        label=i18n("Shutdown after finishing"),
+                        info=i18n(
+                            "Automatically shut down computer when training is finished."
+                        ),
+                        value=False,
+                        interactive=True,
+                    )
             with gr.Row():
                 custom_pretrained = gr.Checkbox(
                     label=i18n("Custom Pretrained"),
                     info=i18n(
                         "Utilizing custom pretrained models can lead to superior results, as selecting the most suitable pretrained models tailored to the specific use case can significantly enhance performance."
-                    ),
-                    value=False,
-                    interactive=True,
-                )
-                overtraining_detector = gr.Checkbox(
-                    label=i18n("Overtraining Detector"),
-                    info=i18n(
-                        "Detect overtraining to prevent the model from learning the training data too well and losing the ability to generalize to new data."
                     ),
                     value=False,
                     interactive=True,
@@ -740,19 +742,6 @@ def train_tab():
                             allow_custom_value=True,
                         )
 
-                with gr.Column(visible=False) as overtraining_settings:
-                    with gr.Accordion(i18n("Overtraining Detector Settings")):
-                        overtraining_threshold = gr.Slider(
-                            1,
-                            100,
-                            50,
-                            step=1,
-                            label=i18n("Overtraining Threshold"),
-                            info=i18n(
-                                "Set the maximum number of epochs you want your model to stop training if no improvement is detected."
-                            ),
-                            interactive=True,
-                        )
             index_algorithm = gr.Radio(
                 label=i18n("Index Algorithm"),
                 info=i18n(
@@ -788,32 +777,6 @@ def train_tab():
 
         with gr.Row():
             train_button = gr.Button(i18n("Start Training"))
-            train_button.click(
-                fn=enforce_terms,
-                inputs=[
-                    terms_checkbox,
-                    model_name,
-                    save_every_epoch,
-                    save_only_latest,
-                    save_every_weights,
-                    total_epoch,
-                    sampling_rate,
-                    batch_size,
-                    gpu,
-                    overtraining_detector,
-                    overtraining_threshold,
-                    pretrained,
-                    cleanup,
-                    index_algorithm,
-                    cache_dataset_in_gpu,
-                    custom_pretrained,
-                    g_pretrained_path,
-                    d_pretrained_path,
-                    vocoder,
-                    checkpointing,
-                ],
-                outputs=[train_output_info],
-            )
 
             stop_train_button = gr.Button(i18n("Stop Training"), visible=False)
             stop_train_button.click(
@@ -831,10 +794,10 @@ def train_tab():
 
     # Export Model section
     with gr.Accordion(i18n("Export Model"), open=False):
-        if not os.name == "nt":
+        if os.getenv("COLAB_RELEASE_TAG"):
             gr.Markdown(
                 i18n(
-                    "The button 'Upload' is only for google colab: Uploads the exported files to the ApplioExported folder in your Google Drive."
+                    "The 'Upload' button packages the model into a .zip file and saves it to the ApplioExported folder in your Google Drive."
                 )
             )
         with gr.Row():
@@ -871,40 +834,30 @@ def train_tab():
         with gr.Row():
             with gr.Column():
                 refresh_export = gr.Button(i18n("Refresh"))
-                if not os.name == "nt":
+                if os.getenv("COLAB_RELEASE_TAG"):
                     upload_exported = gr.Button(i18n("Upload"))
                     upload_exported.click(
                         fn=upload_to_google_drive,
-                        inputs=[pth_dropdown_export, index_dropdown_export],
+                        inputs=[pth_dropdown_export, index_dropdown_export, model_name],
                         outputs=[],
                     )
 
             def toggle_visible(checkbox):
-                return {"visible": checkbox, "__type__": "update"}
+                return gr.update(visible=checkbox)
 
             def toggle_pretrained(pretrained, custom_pretrained):
-                if custom_pretrained == False:
-                    return {"visible": pretrained, "__type__": "update"}, {
-                        "visible": False,
-                        "__type__": "update",
-                    }
+                if not custom_pretrained:
+                    return gr.update(visible=pretrained), gr.update(visible=False)
                 else:
-                    return {"visible": pretrained, "__type__": "update"}, {
-                        "visible": pretrained,
-                        "__type__": "update",
-                    }
+                    return gr.update(visible=pretrained), gr.update(visible=pretrained)
 
-            def enable_stop_train_button():
-                return {"visible": False, "__type__": "update"}, {
-                    "visible": True,
-                    "__type__": "update",
-                }
+            def enable_stop_train_button(terms_accepted):
+                if not terms_accepted:
+                    return gr.update(visible=True), gr.update(visible=False)
+                return gr.update(visible=False), gr.update(visible=True)
 
             def disable_stop_train_button():
-                return {"visible": True, "__type__": "update"}, {
-                    "visible": False,
-                    "__type__": "update",
-                }
+                return gr.update(visible=True), gr.update(visible=False)
 
             def download_prerequisites():
                 gr.Info(
@@ -1025,16 +978,36 @@ def train_tab():
                 inputs=[upload_pretrained],
                 outputs=[upload_pretrained],
             )
-            overtraining_detector.change(
-                fn=toggle_visible,
-                inputs=[overtraining_detector],
-                outputs=[overtraining_settings],
-            )
             train_button.click(
                 fn=enable_stop_train_button,
-                inputs=[],
+                inputs=[terms_checkbox],
                 outputs=[train_button, stop_train_button],
+            ).then(
+                fn=enforce_terms,
+                inputs=[
+                    terms_checkbox,
+                    model_name,
+                    save_every_epoch,
+                    save_only_latest,
+                    save_every_weights,
+                    total_epoch,
+                    sampling_rate,
+                    batch_size,
+                    gpu,
+                    pretrained,
+                    cleanup,
+                    index_algorithm,
+                    cache_dataset_in_gpu,
+                    custom_pretrained,
+                    g_pretrained_path,
+                    d_pretrained_path,
+                    vocoder,
+                    checkpointing,
+                    shutdown_check,
+                ],
+                outputs=[train_output_info],
             )
+
             train_output_info.change(
                 fn=disable_stop_train_button,
                 inputs=[],

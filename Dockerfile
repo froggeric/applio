@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.10-bullseye
+FROM python:3.12-trixie
 
 # Expose the required port
 EXPOSE 6969
@@ -32,4 +32,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Run the app
 ENTRYPOINT ["python3"]
-CMD ["app.py"]
+CMD ["app.py", "--server-name", "0.0.0.0", "--port", "6969"]

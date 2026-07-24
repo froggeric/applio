@@ -1,48 +1,31 @@
-# Core dependencies
-pip>=23.3; sys_platform == 'darwin'
-wheel; sys_platform == 'darwin'
-PyYAML; sys_platform == 'darwin'
-numpy==2.3.5
-requests>=2.31.0,<2.32.0
-tqdm
-wget
+numpy==2.4.6
+requests==2.34.2
+tqdm==4.68.4
+wget==3.2
 
-# Audio processing
-ffmpeg-python>=0.2.0
-faiss-cpu==1.13.2
+faiss-cpu==1.14.3
 librosa==0.11.0
-scipy==1.16.3
-soundfile==0.12.1
-noisereduce
-pedalboard
-stftpitchshift
-soxr
+scipy==1.18.0
+soundfile==0.14.0
+noisereduce==3.0.3
+pedalboard==0.9.24
+stftpitchshift==2.0
+soxr==1.1.0
 
-# Machine learning and deep learning
-omegaconf>=2.0.6; sys_platform == 'darwin'
-numba==0.63.1
-torch==2.7.1; sys_platform == 'darwin'
-torch==2.7.1+cu128; sys_platform == 'linux' or sys_platform == 'win32'
-torchaudio==2.7.1; sys_platform == 'darwin'
-torchaudio==2.7.1+cu128; sys_platform == 'linux' or sys_platform == 'win32'
-torchvision==0.22.1; sys_platform == 'darwin'
-torchvision==0.22.1+cu128; sys_platform == 'linux' or sys_platform == 'win32'
-torchcrepe
-torchfcpe
-einops
-transformers==4.44.2
+torch==2.11.0
+torchaudio==2.11.0
+torchcrepe==0.0.24
+torchfcpe==0.0.4
+einops==0.8.2
+transformers==5.13.1
 
-# Visualization and UI
-matplotlib==3.10.8
-tensorboard
-gradio==6.5.1
+matplotlib==3.11.0
+tensorboard==2.21.0
+gradio==6.20.0
 
-# Miscellaneous utilities
-certifi>=2023.07.22; sys_platform == 'darwin'
-antlr4-python3-runtime==4.8; sys_platform == 'darwin'
-tensorboardX
-edge-tts==7.2.7
-pypresence
-beautifulsoup4
-sounddevice
-webrtcvad-wheels
+edge-tts==7.2.8
+pypresence==4.6.2
+beautifulsoup4==4.15.0
+sounddevice==0.5.5
+webrtcvad-wheels==2.0.14
+psutil==7.2.2
