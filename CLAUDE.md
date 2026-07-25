@@ -202,9 +202,14 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 - When stuck after 3+ fix attempts: STOP and question the architecture (per systematic-debugging skill)
 - **Launch `macos_wrapper.py` from a foreground terminal**, not `nohup ... &` — pywebview's
   AppKit event loop needs an interactive GUI session and blocks/idles when backgrounded.
-- **`python app.py` smoke-test downloads ~2GB** of pretrained models into gitignored
-  `rvc/models/`; the next `build_macos.py` then bundles them (bloats `dist/Applio.app`
-  ~870M → ~1.6GB). Clean with `rm -rf rvc/models/*`.
+- **Local `rvc/models` must NOT be deleted.** The default `build_macos.py` is a *lite*
+  build: `clean_bundled_models()` strips model weights from `dist/Applio.app` (the bundle
+  only — shipped app stays ~870M) and never touches the local filesystem. So keeping the
+  ~1.8G of models in gitignored `rvc/models/` does NOT bloat the shipped app, and `rm -rf
+  rvc/models/*` only forces a costly ~2G re-download. Leave local models in place; the
+  bundle is re-stripped on every build. (A model-bundled build is `--models-installer`, a
+  separate app — there is no CLI flag to bundle models into the main app; `--lite` is
+  `store_true, default=True`, i.e. always on.)
 - **Corrupted `venv_macos` package:** if `import torch`/`pandas` fails with a partial-init /
   circular-import error, the installed wheel is corrupt → fix with
   `venv_macos/bin/python -m pip install --force-reinstall --no-deps <pkg>`.
