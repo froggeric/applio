@@ -48,18 +48,17 @@ import urllib.error
 
 def _configure_activation_policy():
     """Configure activation policy based on execution context.
-    
-    Only hide from Dock when running under launcher.
-    Standalone mode keeps normal Dock presence.
+
+    Under the launcher (dev OR frozen) -> Accessory (no Dock icon), so the
+    launcher is the single app/dock icon. Standalone (no launcher env, dev or
+    frozen) -> Regular. PyObjC is present in venv_macos too, so this works in
+    dev mode (previously dev kept both icons "for debugging", which prevented
+    validating the single-icon lifecycle without a full build).
     """
-    if not getattr(sys, "frozen", False):
-        # Development mode - keep both icons visible for debugging
-        return
-    
     if not os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
-        # Standalone mode - normal Dock icon
+        # Standalone mode (dev or frozen) - normal Dock icon
         return
-    
+
     # Running under launcher - become accessory (hidden from Dock)
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
@@ -69,7 +68,7 @@ def _configure_activation_policy():
         import logging
         logging.info("[Wrapper] Activation policy set to Accessory (hidden from Dock)")
     except ImportError:
-        pass  # PyObjC not available in development
+        pass  # PyObjC not available
 
 # Call BEFORE importing webview or other AppKit code
 _configure_activation_policy()
@@ -101,10 +100,8 @@ def _patch_pywebview_activation_policy():
     
     if not os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
         return  # No need to patch in standalone mode
-    
-    if not getattr(sys, "frozen", False):
-        return  # No need in development mode
-    
+
+    # Applies in both dev and frozen builds when under the launcher.
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
         
@@ -239,6 +236,60 @@ def _notify_launcher_visibility(visible: bool):
         logging.info(f"[Wrapper] Notified launcher: visible={visible}")
     except Exception as e:
         logging.warning(f"[Wrapper] Failed to notify launcher: {e}")
+
+
+IPC_QUIT_REQUEST_NAME = "com.applio.wrapper.quit_request"
+
+
+def _request_launcher_quit():
+    """Ask the launcher to quit the whole app (1.3 unified quit path).
+
+    Terminates this wrapper's own tracked jobs, then:
+      - Under the launcher: posts a distributed notification the launcher
+        observes (-> ApplioAppDelegate cascade -> killpg reaps us). Does NOT
+        os._exit immediately, so the launcher reaps us cleanly and avoids the
+        double-kill race. A safety-net thread force-exits after ~5 s if the
+        launcher is already dead.
+      - Standalone (no launcher): terminates + os._exit directly.
+    """
+    global _shutting_down
+    if _shutting_down:
+        return
+    _shutting_down = True
+
+    try:
+        terminated = ProcessController.terminate_all()
+        if terminated:
+            logging.info(f"[Wrapper] Terminated {terminated} active processes")
+    except Exception as e:
+        logging.warning(f"[Wrapper] Could not terminate processes: {e}")
+
+    if not os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
+        logging.info("[Wrapper] Standalone mode; exiting directly")
+        os._exit(0)
+        return
+
+    # Under launcher: ask it to cascade-quit (its killpg will reap us).
+    try:
+        from Foundation import NSDistributedNotificationCenter
+        center = NSDistributedNotificationCenter.defaultCenter()
+        center.postNotificationName_object_userInfo_deliverImmediately_(
+            IPC_QUIT_REQUEST_NAME, None, {}, True
+        )
+        logging.info("[Wrapper] Posted quit request to launcher")
+    except Exception as e:
+        logging.warning(f"[Wrapper] Failed to post quit request: {e}")
+
+    # Safety net: force-exit if the launcher doesn't reap us in time.
+    import threading
+    import time
+
+    def _force_exit():
+        time.sleep(5.0)
+        logging.warning("[Wrapper] Launcher did not reap us within 5s; force-exiting")
+        os._exit(0)
+
+    threading.Thread(target=_force_exit, daemon=True).start()
 
 # =================================================================
 # 1.6. Process Tracking for Background Operations
@@ -520,18 +571,14 @@ def on_window_closing():
         # CLOSE_QUIT - fall through to terminate and exit
         logging.info("[Window] User chose to terminate and quit")
 
-    # User confirmed quit or no active processes - terminate active processes gracefully
-    try:
-        # ProcessController is defined locally in this file (lines 193-265)
-        terminated = ProcessController.terminate_all()
-        if terminated:
-            logging.info(f"[Window] Terminated {terminated} active processes")
-    except Exception as e:
-        logging.warning(f"[Window] Could not terminate processes: {e}")
-
-    logging.info("[Window] Exiting")
-    _shutting_down = True
-    os._exit(0)
+    # Unified quit path (1.3): forward to the launcher, which owns the dock icon
+    # and the process-group cascade. The wrapper does NOT os._exit here — the
+    # launcher's killpg reaps us, avoiding the double-kill race where we
+    # self-exit before the launcher signals. _request_launcher_quit terminates
+    # our own tracked jobs first.
+    logging.info("[Window] Forwarding quit to launcher")
+    _request_launcher_quit()
+    return False  # keep the window up until the launcher reaps the process
 
 
 # =================================================================
@@ -918,13 +965,31 @@ def _check_and_handle_show_main_window():
                     json.dump(config, f, indent=2)
                 os.rename(temp_path, config_path)
                 
-                # Show the window (must be done on main thread)
-                # Use pywebview's show() method
+                # Show the window on the main thread (1.8): this runs in the
+                # _ipc_signal_checker daemon thread; touching the NSWindow from a
+                # background thread violates AppKit's contract and can silently
+                # no-op. AppHelper.callAfter is already the established pattern
+                # in this file (see _show_on_main_thread / _check_on_main_thread).
+                def _show_main_window():
+                    try:
+                        _main_window_ref.show()
+                        # The window lives in THIS Accessory process; the user
+                        # clicked the launcher's dock icon / Show Main Window,
+                        # so force-activate to actually raise it above whatever
+                        # had focus (the launcher itself has no window).
+                        try:
+                            from AppKit import NSApp
+                            NSApp.activateIgnoringOtherApps_(True)
+                        except Exception:
+                            pass
+                        logging.info("[runtime_config] Main window shown")
+                    except Exception as e:
+                        logging.warning(f"[runtime_config] Failed to show window: {e}")
+
                 try:
-                    _main_window_ref.show()
-                    logging.info("[runtime_config] Main window shown")
-                except Exception as e:
-                    logging.warning(f"[runtime_config] Failed to show window: {e}")
+                    AppHelper.callAfter(_show_main_window)
+                except Exception:
+                    _show_main_window()
                 
                 return
         except Exception as e:
@@ -1575,7 +1640,7 @@ def get_native_menu():
             MenuAction("Hide Applio", lambda: None),
             MenuAction("Hide Others", lambda: None),
             MenuSeparator(),
-            MenuAction("Quit Applio", lambda: os._exit(0))
+            MenuAction("Quit Applio", lambda: _request_launcher_quit())
         ]),
         Menu("Edit", [
             MenuAction("Undo", lambda: None),
@@ -1815,7 +1880,34 @@ class ApplioApp:
             logging.info("Initializing Gradio boot sequence...")
             launch_gradio(self.server_host, self.server_port)
         except Exception as e:
+            # Don't swallow silently (1.6): a bind failure (port already in use)
+            # would otherwise leave the loading screen hung forever. Surface a
+            # real error to the user, then quit.
             logging.error(f"Backend launch failed: {e}")
+            msg = f"Applio failed to start its backend.\n\n{e}"
+            if isinstance(e, OSError):
+                msg = (f"Applio could not bind port {self.server_port}. Another "
+                       f"instance may already be running.\n\n{e}")
+            self._report_fatal_error(msg)
+
+    def _report_fatal_error(self, message):
+        """Show a fatal-error alert on the main thread, then quit."""
+        def _show_and_quit():
+            try:
+                from AppKit import NSAlert
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_("Applio failed to start")
+                alert.setInformativeText_(message)
+                alert.addButtonWithTitle_("OK")
+                alert.runModal()
+            except Exception as ae:
+                logging.warning(f"[Wrapper] Could not show fatal alert: {ae}")
+            _request_launcher_quit()
+
+        try:
+            AppHelper.callAfter(_show_and_quit)
+        except Exception:
+            _request_launcher_quit()
 
     def monitor_transition(self):
         """Switches from loading screen to main app."""
@@ -1858,7 +1950,7 @@ class ApplioApp:
             "Applio",
             url=f"http://{self.server_host}:{self.loading_port}",
             width=1280,
-            height=1370,
+            height=900,
             min_size=(1024, 720),
             resizable=True,
             text_select=True,
