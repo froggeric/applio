@@ -1,11 +1,30 @@
+# Make sure the config file exists
+import os
+import shutil
+import sys
+
+# We need the CWD for finding the config file, but while we're at it, add it to sys.path
+now_dir = os.getcwd()
+sys.path.append(now_dir)
+
+# TODO: This path is regenerated all over the place in Applio
+# should probably be in a static module for everything to reference
+CONFIG_PATH = os.path.join(now_dir, "assets", "config.json")
+
+# The base config file to start from
+CONFIG_TEMPLATE_PATH = os.path.join(now_dir, "assets", "config_template.json")
+
+if not os.path.exists(CONFIG_PATH):
+    print("Config file not found. Creating fresh from template.")
+    shutil.copy(CONFIG_TEMPLATE_PATH, CONFIG_PATH)
+
 # Plataform config
 from rvc.lib.platform import platform_config
 
 platform_config()
 
+import types
 import gradio as gr
-import sys
-import os
 import pathlib
 import logging
 
@@ -19,9 +38,35 @@ MAX_PORT_ATTEMPTS = 10
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-# Add current directory to sys.path
-now_dir = os.getcwd()
-sys.path.append(now_dir)
+# Suppress ConnectionResetError on Windows when a remote peer forcibly closes the
+# connection during asyncio shutdown (WinError 10054 / ProactorBasePipeTransport).
+if sys.platform == "win32":
+    import asyncio.proactor_events as _pe
+
+    _orig_ccl = _pe._ProactorBasePipeTransport._call_connection_lost
+
+    def _ccl_patched(self, exc):
+        try:
+            _orig_ccl(self, exc)
+        except ConnectionResetError:
+            pass
+
+    _pe._ProactorBasePipeTransport._call_connection_lost = _ccl_patched
+
+# Fix Gradio NoneType error when entering an invalid value
+gr.Number.preprocess = types.MethodType(
+    lambda self, payload: (
+        None
+        if payload is None
+        or (self.minimum is not None and payload < self.minimum)
+        or (self.maximum is not None and payload > self.maximum)
+        else self.round_to_precision(payload, self.precision)
+    ),
+    gr.Number,
+)
+
+# detect gradio
+GRADIO_6 = int(gr.__version__.split(".")[0]) >= 6
 
 # Zluda hijack
 import rvc.lib.zluda
@@ -37,6 +82,7 @@ from tabs.voice_blender.voice_blender import voice_blender_tab
 from tabs.plugins.plugins import plugins_tab
 from tabs.settings.settings import settings_tab
 from tabs.realtime.realtime import realtime_tab
+from tabs.tensorboard.tensorboard import tensorboard_tab
 
 # Run prerequisites
 from core import run_prerequisites_script
@@ -74,6 +120,25 @@ client_mode = "--client" in sys.argv
 # Define Gradio interface
 with gr.Blocks(
     title="Applio",
+    **(
+        {
+            "theme": my_applio,
+            "css": "footer{display:none !important}",
+            "js": (
+                (
+                    "() => {\n"
+                    + pathlib.Path(
+                        os.path.join(now_dir, "tabs", "realtime", "main.js")
+                    ).read_text()
+                    + "\n}"
+                )
+                if client_mode
+                else None
+            ),
+        }
+        if not GRADIO_6
+        else {}
+    ),
 ) as Applio:
     gr.Markdown("# Applio")
     gr.Markdown(
@@ -83,7 +148,7 @@ with gr.Blocks(
     )
     gr.Markdown(
         i18n(
-            "[Support](https://discord.gg/urxFjYmYYh) — [GitHub](https://github.com/IAHispano/Applio)"
+            "[Support](https://discord.gg/wY7gmqTyEV) — [GitHub](https://github.com/IAHispano/Applio)"
         )
     )
     with gr.Tab(i18n("Inference")):
@@ -116,6 +181,9 @@ with gr.Blocks(
     with gr.Tab(i18n("Settings")):
         settings_tab()
 
+    with gr.Tab(i18n("TensorBoard")):
+        tensorboard_tab()
+
     gr.Markdown("""
     <div style="text-align: center; font-size: 0.9em; text-color: a3a3a3;">
     By using Applio, you agree to comply with ethical and legal standards, respect intellectual property and privacy rights, avoid harmful or prohibited uses, and accept full responsibility for any outcomes, while Applio disclaims liability and reserves the right to amend these terms.
@@ -131,16 +199,59 @@ def launch_gradio(server_name: str, server_port: int) -> None:
         server_name=server_name,
         server_port=server_port,
         prevent_thread_lock=client_mode,
-        theme=my_applio,
-        css="footer{display:none !important}",
-        js=(
-            pathlib.Path(
-                os.path.join(now_dir, "tabs", "realtime", "main.js")
-            ).read_text()
-            if client_mode
-            else None
+        **(
+            {
+                "theme": my_applio,
+                "css": "footer{display:none !important}",
+                "js": (
+                    pathlib.Path(
+                        os.path.join(now_dir, "tabs", "realtime", "main.js")
+                    ).read_text()
+                    if client_mode
+                    else None
+                ),
+            }
+            if GRADIO_6
+            else {}
         ),
     )
+
+    # Mount TensorBoard proxy so it's accessible from any origin
+    from rvc.lib.tools.launch_tensorboard import get_tb_url
+    import httpx
+    from fastapi import Request, Response
+
+    @app.api_route(
+        "/tensorboard/{path:path}",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+    )
+    @app.api_route(
+        "/tensorboard",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+    )
+    async def tb_proxy(request: Request, path: str = ""):
+        tb_url = get_tb_url()
+        if not tb_url:
+            return Response("TensorBoard not started", status_code=503)
+        url = f"{tb_url.rstrip('/')}/{path}"
+        if request.url.query:
+            url = f"{url}?{request.url.query}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.request(
+                method=request.method,
+                url=url,
+                headers={
+                    k: v
+                    for k, v in request.headers.items()
+                    if k.lower() not in ["host"]
+                },
+                content=await request.body(),
+            )
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type"),
+        )
 
     if client_mode:
         import time

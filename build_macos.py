@@ -84,15 +84,20 @@ import PyInstaller.__main__
 APP_NAME = "Applio"
 BUILD_NUMBER = 5  # Increment for each build
 
-# Read version from assets/config.json
+# Read version from the tracked assets/config_template.json first (the source of
+# truth at build time), falling back to a locally-generated assets/config.json.
+# config.json is gitignored and created at runtime by app.py, so reading it first
+# could embed a stale version from a developer's local file.
 def get_applio_version():
     import json
-    try:
-        with open("assets/config.json", "r") as f:
-            config = json.load(f)
-            return config.get("version", "3.6.0")
-    except:
-        return "3.6.0"
+    for config_file in ("assets/config_template.json", "assets/config.json"):
+        try:
+            with open(config_file, "r") as f:
+                config = json.load(f)
+                return config.get("version", "3.6.0")
+        except Exception:
+            continue
+    return "3.6.0"
 
 APPLIO_VERSION = get_applio_version()
 ENTRY_POINT = "applio_launcher.py"
@@ -567,14 +572,13 @@ def pre_build_patch():
         ("patches/patch_dataset_paths.py", "core.py", "core.py + tabs/train/train.py - dataset path absolute resolution", "dir"),
         ("patches/patch_process_tracking.py", "core.py", "core.py - process tracking for subprocesses", "dir"),  # MUST be before subprocess_validation
         ("patches/patch_subprocess_validation.py", "core.py", "core.py - subprocess validation", "dir"),
-        ("patches/patch_preprocess_warning.py", "core.py", "core.py - preprocess warning", "dir"),
         ("patches/patch_custom_pretrained_paths.py", "core.py", "core.py - custom pretrained path resolution", "dir"),
         ("patches/patch_train_paths.py", "rvc/train/train.py", "rvc/train/train.py - file-based path resolution", "dir"),
         ("patches/patch_mute_paths.py", "rvc/train/extract/preparing_files.py", "preparing_files.py - mute file paths for frozen app", "dir"),
         ("patches/patch_pretrained_selector.py", "rvc/lib/tools/pretrained_selector.py", "pretrained_selector.py - BASE_PATH resolution", "dir"),
         ("patches/patch_f0_model_paths.py", "rvc/lib/predictors/f0.py", "f0.py - absolute model paths for frozen app", "dir"),
         # File-based patchers (pass full file path)
-        ("patches/patch_loading_html.py", "assets/loading.html", "assets/loading.html - dynamic version in footer", "file"),
+        ("patches/patch_loading_html.py", "assets/loading.html", "assets/loading.html - dynamic version in footer", "dir"),  # "dir" so patcher gets "assets" dir (patch_all expects dir/root, not the file path)
         ("patches/patch_train_44100.py", "tabs/train/train.py", "tabs/train/train.py - 44100 Hz support", "file"),
         ("patches/patch_multiprocessing.py", "rvc/train/extract/extract.py", "extract.py - multiprocessing safety", "file"),
         ("patches/patch_extract_error_logging.py", "rvc/train/extract/extract.py", "extract.py - file-based error logging", "dir"),

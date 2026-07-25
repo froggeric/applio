@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import sys
+import traceback
 
 import gradio as gr
 import regex as re
@@ -228,7 +229,7 @@ def change_choices(model):
     else:
         speakers = [0]
 
-    models_list = get_files("model")
+    models_list = sorted(get_files("model"))
     indexes_list = sorted(get_files("index"))
 
     audio_paths = [
@@ -241,8 +242,8 @@ def change_choices(model):
     ]
 
     return (
-        {"choices": sorted(models_list), "__type__": "update"},
-        {"choices": sorted(indexes_list), "__type__": "update"},
+        {"choices": models_list, "__type__": "update"},
+        {"choices": indexes_list, "__type__": "update"},
         {"choices": sorted(audio_paths), "__type__": "update"},
         {
             "choices": (
@@ -471,7 +472,7 @@ def get_speakers_id(model):
                 return list(range(speakers_id))
             else:
                 return [0]
-        except Exception as e:
+        except Exception:
             return [0]
     else:
         return [0]
@@ -1167,14 +1168,25 @@ def inference_tab():
                 message = "You must agree to the Terms of Use to proceed."
                 gr.Info(message)
                 return message, None
-            return run_infer_script(*args)
+            try:
+                return run_infer_script(*args)
+            except Exception:
+                traceback.print_exc()
+                return (
+                    "An error occurred during audio conversion. Please check the console logs for more details.",
+                    None,
+                )
 
         def enforce_terms_batch(terms_accepted, *args):
             if not terms_accepted:
                 message = "You must agree to the Terms of Use to proceed."
                 gr.Info(message)
-                return message, None
-            return run_batch_infer_script(*args)
+                return message
+            try:
+                return run_batch_infer_script(*args)
+            except Exception:
+                traceback.print_exc()
+                return "An error occurred during audio batch conversion. Please check the console logs for more details."
 
         terms_checkbox = gr.Checkbox(
             label=i18n("I agree to the terms of use"),
@@ -1822,7 +1834,12 @@ def inference_tab():
             return {"visible": True, "__type__": "update"}
         return {"visible": False, "__type__": "update"}
 
-    def enable_stop_convert_button():
+    def enable_stop_convert_button(terms_accepted):
+        if not terms_accepted:
+            return {"visible": True, "__type__": "update"}, {
+                "visible": False,
+                "__type__": "update",
+            }
         return {"visible": False, "__type__": "update"}, {
             "visible": True,
             "__type__": "update",
@@ -1866,9 +1883,6 @@ def inference_tab():
 
     def chorus_visible(checkbox):
         return update_visibility(checkbox, 6)
-
-    def bitcrush_visible(checkbox):
-        return update_visibility(checkbox, 1)
 
     def compress_visible(checkbox):
         return update_visibility(checkbox, 4)
@@ -1999,7 +2013,7 @@ def inference_tab():
         ],
     )
     bitcrush.change(
-        fn=bitcrush_visible,
+        fn=toggle_visible,
         inputs=[bitcrush],
         outputs=[bitcrush_bit_depth],
     )
@@ -2083,7 +2097,7 @@ def inference_tab():
         ],
     )
     bitcrush_batch.change(
-        fn=bitcrush_visible,
+        fn=toggle_visible,
         inputs=[bitcrush_batch],
         outputs=[bitcrush_bit_depth_batch],
     )
@@ -2252,6 +2266,10 @@ def inference_tab():
         outputs=[vc_output1, vc_output2],
     )
     convert_button_batch.click(
+        fn=enable_stop_convert_button,
+        inputs=[terms_checkbox_batch],
+        outputs=[convert_button_batch, stop_button],
+    ).then(
         fn=enforce_terms_batch,
         inputs=[
             terms_checkbox_batch,
@@ -2316,9 +2334,8 @@ def inference_tab():
             sid_batch,
         ],
         outputs=[vc_output3],
-    )
-    convert_button_batch.click(
-        fn=enable_stop_convert_button,
+    ).then(
+        fn=disable_stop_convert_button,
         inputs=[],
         outputs=[convert_button_batch, stop_button],
     )

@@ -1,10 +1,18 @@
-import os
-import sys
-import json
 import argparse
+import json
+import os
 import subprocess
+import sys
+import traceback
+
+
+def strtobool(val):
+    """Convert a string representation of truth to a bool."""
+    return val.lower() in ("yes", "true", "t", "y", "1")
+
+
 from functools import lru_cache
-from distutils.util import strtobool
+from datetime import datetime, timedelta
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -12,12 +20,12 @@ sys.path.append(now_dir)
 current_script_directory = os.path.dirname(os.path.realpath(__file__))
 logs_path = os.path.join(current_script_directory, "logs")
 
-from rvc.lib.tools.prerequisites_download import prequisites_download_pipeline
-from rvc.train.process.model_blender import model_blender
-from rvc.train.process.model_information import model_information
 from rvc.lib.tools.analyzer import analyze_audio
 from rvc.lib.tools.launch_tensorboard import launch_tensorboard_pipeline
 from rvc.lib.tools.model_download import model_download_pipeline
+from rvc.lib.tools.prerequisites_download import prequisites_download_pipeline
+from rvc.train.process.model_blender import model_blender
+from rvc.train.process.model_information import model_information
 
 python = sys.executable
 
@@ -121,8 +129,6 @@ def run_infer_script(
         "index_rate": index_rate,
         "protect": protect,
         "f0_method": f0_method,
-        "pth_path": pth_path,
-        "index_path": index_path,
         "split_audio": split_audio,
         "f0_autotune": f0_autotune,
         "f0_autotune_strength": f0_autotune_strength,
@@ -175,9 +181,7 @@ def run_infer_script(
         "sid": sid,
     }
     infer_pipeline = import_voice_converter()
-    infer_pipeline.convert_audio(
-        **kwargs,
-    )
+    infer_pipeline.convert_audio(**kwargs)
     return f"File {input_path} inferred successfully.", output_path.replace(
         ".wav", f".{export_format.lower()}"
     )
@@ -255,8 +259,6 @@ def run_batch_infer_script(
         "volume_envelope": volume_envelope,
         "protect": protect,
         "f0_method": f0_method,
-        "pth_path": pth_path,
-        "index_path": index_path,
         "split_audio": split_audio,
         "f0_autotune": f0_autotune,
         "f0_autotune_strength": f0_autotune_strength,
@@ -309,10 +311,7 @@ def run_batch_infer_script(
         "sid": sid,
     }
     infer_pipeline = import_voice_converter()
-    infer_pipeline.convert_audio_batch(
-        **kwargs,
-    )
-
+    infer_pipeline.convert_audio_batch(**kwargs)
     return f"Files from {input_folder} inferred successfully."
 
 
@@ -343,7 +342,6 @@ def run_tts_script(
     embedder_model_custom: str = None,
     sid: int = 0,
 ):
-
     tts_script_path = os.path.join("rvc", "lib", "tools", "tts.py")
 
     if os.path.exists(output_tts_path) and os.path.abspath(output_tts_path).startswith(
@@ -365,7 +363,9 @@ def run_tts_script(
             ],
         ),
     ]
-    subprocess.run(command_tts)
+    result = subprocess.run(command_tts, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip())
     infer_pipeline = import_voice_converter()
     infer_pipeline.convert_audio(
         pitch=pitch,
@@ -391,7 +391,7 @@ def run_tts_script(
         formant_shifting=None,
         formant_qfrency=None,
         formant_timbre=None,
-        post_process=None,
+        post_process=False,
         reverb=None,
         pitch_shift=None,
         limiter=None,
@@ -445,7 +445,10 @@ def run_preprocess_script(
             ],
         ),
     ]
-    subprocess.run(command)
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        return f"Preprocessing failed for model {model_name}. Please check the console logs for more details."
+
     return f"Model {model_name} preprocessed successfully."
 
 
@@ -460,7 +463,6 @@ def run_extract_script(
     embedder_model_custom: str = None,
     include_mutes: int = 2,
 ):
-
     model_path = os.path.join(logs_path, model_name)
     extract = os.path.join("rvc", "train", "extract", "extract.py")
 
@@ -482,9 +484,60 @@ def run_extract_script(
         ),
     ]
 
-    subprocess.run(command_1)
+    result = subprocess.run(command_1)
+    if result.returncode != 0:
+        return f"Feature extraction failed for model {model_name}. Please check the console logs for more details."
 
     return f"Model {model_name} extracted successfully."
+
+
+def shutdown_after_training():
+    os_name = sys.platform
+    shutdown_time = None
+
+    # Windows
+    if os_name == "win32":
+        delay_seconds = 300
+        shutdown_time = datetime.now() + timedelta(seconds=delay_seconds)
+        os.system(f"shutdown /s /t {delay_seconds}")
+
+    # MacOS
+    elif os_name == "darwin":
+        shutdown_time = datetime.now()
+        os.system("osascript -e 'tell app \"System Events\" to shut down'")
+
+    # Linux
+    elif os_name.startswith("linux"):
+        delay_minutes = 5
+        shutdown_time = datetime.now() + timedelta(minutes=delay_minutes)
+        os.system(f"shutdown -h +{delay_minutes}")
+
+    # Unknown
+    else:
+        print("Unsupported OS")
+        return os_name, None
+
+    return os_name, shutdown_time
+
+
+def append_data_shutdown_log(
+    model_name, total_epoch, batch_size, sample_rate, gpu, shutdown_time, os_name
+):
+    log_file = "training_shutdown_log.txt"
+
+    log_entry = (
+        f"[{datetime.now()}] "
+        f"Model: {model_name} | "
+        f"Epochs: {total_epoch} | "
+        f"Batch: {batch_size} | "
+        f"SR: {sample_rate} | "
+        f"GPU: {gpu} | "
+        f"OS: {os_name} | "
+        f"Shutdown at: {shutdown_time}\n"
+    )
+
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(log_entry)
 
 
 # Train
@@ -497,8 +550,6 @@ def run_train_script(
     sample_rate: int,
     batch_size: int,
     gpu: int,
-    overtraining_detector: bool,
-    overtraining_threshold: int,
     pretrained: bool,
     cleanup: bool,
     index_algorithm: str = "Auto",
@@ -508,8 +559,8 @@ def run_train_script(
     d_pretrained_path: str = None,
     vocoder: str = "HiFi-GAN",
     checkpointing: bool = False,
+    shutdown_check: bool = False,
 ):
-
     if pretrained == True:
         from rvc.lib.tools.pretrained_selector import pretrained_selector
 
@@ -542,16 +593,36 @@ def run_train_script(
                 save_only_latest,
                 save_every_weights,
                 cache_data_in_gpu,
-                overtraining_detector,
-                overtraining_threshold,
                 cleanup,
                 vocoder,
                 checkpointing,
             ],
         ),
     ]
-    subprocess.run(command)
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        return f"Training failed for model {model_name}. Please check the console logs for more details."
+
     run_index_script(model_name, index_algorithm)
+
+    if shutdown_check:
+        os_name, shutdown_datetime = shutdown_after_training()
+
+        append_data_shutdown_log(
+            model_name=model_name,
+            total_epoch=total_epoch,
+            batch_size=batch_size,
+            sample_rate=sample_rate,
+            gpu=gpu,
+            shutdown_time=shutdown_datetime,
+            os_name=os_name,
+        )
+
+        print(
+            f"Model {model_name} trained successfully. Shutdown scheduled at {shutdown_datetime}"
+        )
+        return f"Model {model_name} trained successfully. Shutdown scheduled at {shutdown_datetime}"
+
     return f"Model {model_name} trained successfully."
 
 
@@ -565,7 +636,10 @@ def run_index_script(model_name: str, index_algorithm: str):
         index_algorithm,
     ]
 
-    subprocess.run(command)
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        return f"Index generation failed for model {model_name}. Make sure you have enough GPU available to generate the Index file. Please check the console logs for more details."
+
     return f"Index file for {model_name} generated successfully."
 
 
@@ -590,8 +664,10 @@ def run_tensorboard_script():
 
 # Download
 def run_download_script(model_link: str):
-    model_download_pipeline(model_link)
-    return f"Model downloaded successfully."
+    result = model_download_pipeline(model_link)
+    if result == "Error" or result is None:
+        return "An error occurred downloading the model. Please check the console logs for more details."
+    return "Model downloaded successfully."
 
 
 # Prerequisites
@@ -2034,20 +2110,6 @@ def parse_arguments():
         help="Path to the pretrained discriminator model file.",
     )
     train_parser.add_argument(
-        "--overtraining_detector",
-        type=lambda x: bool(strtobool(x)),
-        choices=[True, False],
-        help="Enable overtraining detection.",
-        default=False,
-    )
-    train_parser.add_argument(
-        "--overtraining_threshold",
-        type=int,
-        help="Threshold for overtraining detection.",
-        choices=range(1, 101),
-        default=50,
-    )
-    train_parser.add_argument(
         "--cleanup",
         type=lambda x: bool(strtobool(x)),
         choices=[True, False],
@@ -2364,8 +2426,6 @@ def main():
                 sample_rate=args.sample_rate,
                 batch_size=args.batch_size,
                 gpu=args.gpu,
-                overtraining_detector=args.overtraining_detector,
-                overtraining_threshold=args.overtraining_threshold,
                 pretrained=args.pretrained,
                 custom_pretrained=args.custom_pretrained,
                 cleanup=args.cleanup,
@@ -2410,9 +2470,6 @@ def main():
             )
     except Exception as error:
         print(f"An error occurred during execution: {error}")
-
-        import traceback
-
         traceback.print_exc()
 
 

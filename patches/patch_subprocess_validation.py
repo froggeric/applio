@@ -31,9 +31,11 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
     # Idempotency marker - must match the comment in injected code
     idempotency_marker = "# Validate output was produced"
 
-    # Pattern to find the subprocess.run call and return statement
-    # Use \s* for flexible whitespace handling
-    old_pattern = r'subprocess\.run\(command\)\s*\n(\s*)return f"Model \{model_name\} preprocessed successfully\."'
+    # Re-anchored for upstream 3.6.3 + process_tracking: subprocess.run is now wrapped
+    # by patch_process_tracking (Popen + returncode check), and upstream already checks
+    # returncode. So this patch now injects ONLY the post-run output validation
+    # (model_info.json was produced) right before the success return.
+    old_pattern = r'\n([ \t]+)(return f"Model \{model_name\} preprocessed successfully\.")'
 
     # Check if already patched by looking for our idempotency marker
     if idempotency_marker in content:
@@ -44,30 +46,23 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
         print("[patch_subprocess_validation] preprocess pattern not found - code may have been modified")
         return content, False
 
-    # Replacement code that checks return code and validates output
+    # Replacement code that validates output was produced.
     # Note: The idempotency marker "# Validate output was produced" must match the check above
-    replacement = r'''result = subprocess.run(command)
-\1if result.returncode != 0:
-\1    return f"Error: Preprocessing failed with code {result.returncode}"
-
+    replacement = r'''
 \1# Validate output was produced
 \1model_dir = os.path.join(logs_path, model_name)
 \1model_info_path = os.path.join(model_dir, "model_info.json")
-
 \1if not os.path.exists(model_info_path):
 \1    return f"Error: model_info.json not found at {model_info_path}. Check that the dataset path '{dataset_path}' contains valid audio files."
-
 \1try:
 \1    with open(model_info_path, "r", encoding="utf-8") as f:
 \1        model_info = json.load(f)
 \1except (json.JSONDecodeError, IOError) as e:
 \1    return f"Error: could not read model_info.json: {e}."
-
 \1total_seconds = model_info.get("total_seconds", 0)
 \1if total_seconds <= 0:
 \1    return f"Error: no audio data was processed (total_seconds={total_seconds}). Check that the dataset path '{dataset_path}' contains valid audio files (WAV, MP3, FLAC, OGG)."
-
-\1return f"Model {model_name} preprocessed successfully."'''
+\1\2'''
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -86,9 +81,9 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
     # Idempotency marker - must match the comment in injected code
     idempotency_marker = "# Validate extracted files exist"
 
-    # Pattern to find the subprocess.run call and return statement
-    # Use \s* for flexible whitespace handling
-    old_pattern = r'subprocess\.run\(command_1\)\s*\n\s*\n(\s*)return f"Model \{model_name\} extracted successfully\."'
+    # Re-anchored for upstream 3.6.3 + process_tracking (see preprocess patch above).
+    # Inject ONLY the post-run extracted/ validation before the success return.
+    old_pattern = r'\n([ \t]+)(return f"Model \{model_name\} extracted successfully\.")'
 
     # Check if already patched by looking for our idempotency marker
     if idempotency_marker in content:
@@ -99,23 +94,18 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
         print("[patch_subprocess_validation] extract pattern not found - code may have been modified")
         return content, False
 
-    # Replacement code that checks return code and validates extracted directory
+    # Replacement code that validates extracted directory.
     # Note: The idempotency marker "# Validate extracted files exist" must match the check above
-    replacement = r'''result = subprocess.run(command_1)
-\1if result.returncode != 0:
-\1    return f"Error: Feature extraction failed with code {result.returncode}"
-
+    replacement = r'''
 \1# Validate extracted files exist
 \1extracted_dir = os.path.join(model_path, "extracted")
 \1if not os.path.exists(extracted_dir):
 \1    return f"Error: extracted directory not found at {extracted_dir}. Run preprocessing first to generate audio data for extraction."
-
 \1# Check that extracted directory is not empty
 \1extracted_files = os.listdir(extracted_dir)
 \1if not extracted_files:
 \1    return f"Error: extracted directory is empty at {extracted_dir}. Preprocessing may have failed - try re-running it."
-
-\1return f"Model {model_name} extracted successfully."'''
+\1\2'''
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
