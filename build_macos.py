@@ -84,11 +84,13 @@ import PyInstaller.__main__
 APP_NAME = "Applio"
 BUILD_NUMBER = 5  # Increment for each build
 
-# Read version from assets/config.json (created at runtime by app.py) or, at
-# build time, from assets/config_template.json (config.json is gitignored).
+# Read version from the tracked assets/config_template.json first (the source of
+# truth at build time), falling back to a locally-generated assets/config.json.
+# config.json is gitignored and created at runtime by app.py, so reading it first
+# could embed a stale version from a developer's local file.
 def get_applio_version():
     import json
-    for config_file in ("assets/config.json", "assets/config_template.json"):
+    for config_file in ("assets/config_template.json", "assets/config.json"):
         try:
             with open(config_file, "r") as f:
                 config = json.load(f)

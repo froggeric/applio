@@ -1,4 +1,3 @@
-# _DATASET_PATH_ABSOLUTE_PATCHED = True
 import os
 import shutil
 import sys
