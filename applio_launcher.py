@@ -175,16 +175,46 @@ if len(sys.argv) > 1:
                 except Exception:
                     pass
 
+            # Resolve RELATIVE path args (dataset folder, etc.) against DATA_PATH
+            # then BASE_PATH. The frozen subprocess's CWD is the bundle
+            # (BASE_PATH / sys._MEIPASS), NOT the user's data dir, so relative
+            # paths the UI stores relative to the data dir would otherwise fail
+            # to resolve — e.g. preprocess "The dataset path does not exist".
+            # (Ported from macos_wrapper.py's dispatch; this resolution was lost
+            # when the frozen entry point moved to applio_launcher.py.) Only
+            # resolves args that ARE existing paths, so non-path args like the
+            # sample rate or booleans are left untouched.
+            script_args = list(sys.argv[2:])
+            _data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+            _resolved_args = []
+            for _arg in script_args:
+                if (
+                    isinstance(_arg, str)
+                    and _arg
+                    and not os.path.isabs(_arg)
+                    and not os.path.exists(_arg)
+                ):
+                    _from_data = os.path.normpath(os.path.join(_data_path, _arg))
+                    if os.path.exists(_from_data):
+                        _resolved_args.append(_from_data)
+                        continue
+                    _from_base = os.path.normpath(os.path.join(BASE_PATH, _arg))
+                    if os.path.exists(_from_base):
+                        _resolved_args.append(_from_base)
+                        continue
+                _resolved_args.append(_arg)
+
             # Add script's directory to sys.path so relative imports work
             # This is needed because runpy.run_path doesn't add the script's dir to path
-            script_dir = os.path.dirname(os.path.abspath(script_path))
+            script_path_abs = os.path.abspath(script_path)
+            script_dir = os.path.dirname(script_path_abs)
             if script_dir not in sys.path:
                 sys.path.insert(0, script_dir)
 
             # Delegate to script via runpy
             import runpy
-            sys.argv = [script_path] + sys.argv[2:]
-            runpy.run_path(script_path, run_name="__main__")
+            sys.argv = [script_path_abs] + _resolved_args
+            runpy.run_path(script_path_abs, run_name="__main__")
             sys.exit(0)
 
 # =================================================================
@@ -281,14 +311,20 @@ def release_single_instance_lock():
         except Exception:
             pass
 
-# Logging setup
+# Logging setup — own the root logger explicitly. logging.basicConfig is a NO-OP
+# if the root logger already has handlers (an earlier import adds one in the
+# frozen build), leaving the launcher — and the wrapper output it captures via
+# _read_wrapper_output — silently unlogged (applio_launcher.log stays stale).
 log_dir = os.path.expanduser("~/Library/Logs/Applio")
 os.makedirs(log_dir, exist_ok=True)
-logging.basicConfig(
-    filename=os.path.join(log_dir, "applio_launcher.log"),
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+for _h in list(_root_logger.handlers):
+    _root_logger.removeHandler(_h)
+_log_fh = logging.FileHandler(os.path.join(log_dir, "applio_launcher.log"))
+_log_fh.setLevel(logging.INFO)
+_log_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+_root_logger.addHandler(_log_fh)
 logging.info("[Launcher] Starting Applio Launcher")
 
 # =================================================================

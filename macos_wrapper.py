@@ -1014,18 +1014,23 @@ def setup_logging():
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "applio_wrapper.log")
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, mode='a'),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
+    # Own the root logger explicitly. logging.basicConfig is a NO-OP if the root
+    # logger already has handlers (an AppKit/pyobjc import in the frozen entry
+    # configures it first), which silently leaves the wrapper unlogged and
+    # applio_wrapper.log stale — swallowing every error (incl. Gradio tracebacks).
+    _root = logging.getLogger()
+    _root.setLevel(logging.INFO)
+    for _h in list(_root.handlers):
+        _root.removeHandler(_h)
+    _fh = logging.FileHandler(log_file, mode="a")
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    _root.addHandler(_fh)
+    _root.addHandler(logging.StreamHandler(sys.stdout))
     # Redirect stdout/stderr to log for frozen builds
     if getattr(sys, "frozen", False):
-        sys.stdout = open(log_file, 'a')
-        sys.stderr = open(log_file, 'a')
+        sys.stdout = open(log_file, "a")
+        sys.stderr = open(log_file, "a")
 
     logging.info("--- Applio macOS Native Session Start ---")
     logging.info(f"Version: 1.7.4 (Simplified Local)")

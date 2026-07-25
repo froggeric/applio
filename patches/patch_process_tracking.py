@@ -17,7 +17,7 @@ import shutil
 PROCESS_TRACKER_IMPORT = '''
 # === Process Tracking (injected by patch) ===
 import json
-import datetime
+import datetime as _applio_dt
 import fcntl
 import time as _time_module
 import threading
@@ -98,10 +98,10 @@ def _verify_process_identity(pid, expected_start_time=None):
         proc = psutil.Process(pid)
         if expected_start_time:
             if isinstance(expected_start_time, str):
-                expected = datetime.datetime.fromisoformat(expected_start_time)
+                expected = _applio_dt.datetime.fromisoformat(expected_start_time)
             else:
                 expected = expected_start_time
-            actual = datetime.datetime.fromtimestamp(proc.create_time())
+            actual = _applio_dt.datetime.fromtimestamp(proc.create_time())
             delta = abs((actual - expected).total_seconds())
             if delta > 2.0:
                 return False
@@ -113,7 +113,7 @@ def _track_process(process_type, pid, **metadata):
     state = _read_process_state()
     state["processes"][process_type] = {
         "pid": pid,
-        "started_at": datetime.datetime.now().isoformat(),
+        "started_at": _applio_dt.datetime.now().isoformat(),
         "status": "running",
         **metadata
     }
@@ -181,7 +181,7 @@ def _add_to_history(entry):
     with _history_thread_lock:
         history = _read_process_history()
         # Generate unique process ID
-        process_id = f"{entry.get('type', 'unknown')}-{entry.get('started_at', datetime.datetime.now().isoformat())}"
+        process_id = f"{entry.get('type', 'unknown')}-{entry.get('started_at', _applio_dt.datetime.now().isoformat())}"
         entry["process_id"] = process_id
         # Add to front of list
         history["history"].insert(0, entry)
@@ -223,7 +223,7 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "preprocess.log")
 \1_log_file = open(_log_file_path, "w")
-\1_started_at = datetime.datetime.now().isoformat()
+\1_started_at = _applio_dt.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command, stdout=_log_file, stderr=subprocess.STDOUT)
 \1    _track_process("preprocess", _proc.pid, model_name=model_name, log_file=_log_file_path)
@@ -236,7 +236,7 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \1    "type": "preprocess",
 \1    "model_name": model_name,
 \1    "started_at": _started_at,
-\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "completed_at": _applio_dt.datetime.now().isoformat(),
 \1    "status": "completed" if _proc.returncode == 0 else "failed",
 \1    "log_path": _log_file_path
 \1})
@@ -273,7 +273,7 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "extract.log")
 \1_log_file = open(_log_file_path, "w")
-\1_started_at = datetime.datetime.now().isoformat()
+\1_started_at = _applio_dt.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command_1, stdout=_log_file, stderr=subprocess.STDOUT)
 \1    _track_process("extract", _proc.pid, model_name=model_name, log_file=_log_file_path)
@@ -286,7 +286,7 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 \1    "type": "extract",
 \1    "model_name": model_name,
 \1    "started_at": _started_at,
-\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "completed_at": _applio_dt.datetime.now().isoformat(),
 \1    "status": "completed" if _proc.returncode == 0 else "failed",
 \1    "log_path": _log_file_path
 \1})
@@ -323,7 +323,7 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "training.log")
 \1_log_file = open(_log_file_path, "w")
-\1_started_at = datetime.datetime.now().isoformat()
+\1_started_at = _applio_dt.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command, stdout=_log_file, stderr=subprocess.STDOUT)
 \1    _track_process("training", _proc.pid, model_name=model_name, total_epoch=total_epoch, log_file=_log_file_path)
@@ -336,7 +336,7 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1    "type": "training",
 \1    "model_name": model_name,
 \1    "started_at": _started_at,
-\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "completed_at": _applio_dt.datetime.now().isoformat(),
 \1    "status": "completed" if _proc.returncode == 0 else "failed",
 \1    "log_path": _log_file_path,
 \1    "total_epoch": total_epoch
@@ -405,7 +405,7 @@ def patch_voice_conversion(content: str) -> tuple[str, bool]:
 
     replacement = r'''
 \1# Track TTS process
-\1_started_at = datetime.datetime.now().isoformat()
+\1_started_at = _applio_dt.datetime.now().isoformat()
 \1try:
 \1    _proc = subprocess.Popen(command_tts, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 \1    _track_process("tts", _proc.pid)
@@ -417,7 +417,7 @@ def patch_voice_conversion(content: str) -> tuple[str, bool]:
 \1    "type": "tts",
 \1    "model_name": "TTS",
 \1    "started_at": _started_at,
-\1    "completed_at": datetime.datetime.now().isoformat(),
+\1    "completed_at": _applio_dt.datetime.now().isoformat(),
 \1    "status": "completed" if _proc.returncode == 0 else "failed"
 \1})
 \1if _proc.returncode != 0:
