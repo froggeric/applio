@@ -82,6 +82,50 @@ def patch_train_py(base_path: str) -> bool:
         print(f"[patch_dataset_paths] Fixed save_drop_dataset_audio() to return absolute path")
         patched = True
 
+    # Fix 3: get_pretrained_list() - resolve the custom-pretrained dir ABSOLUTELY.
+    # The relative walk (pretraineds_custom_path_relative) resolved against CWD,
+    # which in the frozen app is the bundle (empty custom/) rather than the data
+    # dir, leaving the dropdown empty even though the .pth files were present.
+    old_pattern3 = r'def get_pretrained_list\(suffix\):\n    return \[\n        os\.path\.join\(dirpath, filename\)\n        for dirpath, _, filenames in os\.walk\(pretraineds_custom_path_relative\)\n        for filename in filenames\n        if filename\.endswith\("\.pth"\) and suffix in filename\n    \]'
+
+    new_code3 = (
+        'def get_pretrained_list(suffix):\n'
+        '    import logging as _logging\n'
+        '    if getattr(sys, "frozen", False):\n'
+        '        _dp = os.environ.get("APPLIO_DATA_PATH")\n'
+        '        if not _dp:\n'
+        '            for _p in (os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"), os.path.expanduser("~/.applio/runtime_paths.json")):\n'
+        '                if os.path.exists(_p):\n'
+        '                    try:\n'
+        '                        import json as _json\n'
+        '                        with open(_p) as _f:\n'
+        '                            _dp = _json.load(_f).get("data_path")\n'
+        '                    except Exception:\n'
+        '                        pass\n'
+        '                    if _dp:\n'
+        '                        break\n'
+        '        if not _dp:\n'
+        '            _dp = os.path.expanduser("~/Applio")\n'
+        '        _scan_dir = os.path.join(_dp, "rvc", "models", "pretraineds", "custom")\n'
+        '    else:\n'
+        '        _scan_dir = pretraineds_custom_path\n'
+        '    _found = [\n'
+        '        os.path.join(dirpath, filename)\n'
+        '        for dirpath, _, filenames in os.walk(_scan_dir)\n'
+        '        for filename in filenames\n'
+        '        if filename.endswith(".pth") and suffix in filename\n'
+        '    ]\n'
+        '    _logging.warning("[custom_pretrained] suffix=%r frozen=%r cwd=%r now_dir=%r scan=%r found=%d", suffix, getattr(sys, "frozen", False), os.getcwd(), now_dir, _scan_dir, len(_found))\n'
+        '    return _found'
+    )
+
+    if re.search(old_pattern3, content):
+        content = re.sub(old_pattern3, new_code3, content)
+        print(f"[patch_dataset_paths] Fixed get_pretrained_list() to scan DATA_PATH-absolute custom dir + diagnostic log")
+        patched = True
+    else:
+        print(f"[patch_dataset_paths] get_pretrained_list pattern not found (already patched?)")
+
     if patched:
         # Add idempotency marker at top of file
         content = "# _DATASET_PATH_ABSOLUTE_PATCHED = True\n" + content
