@@ -26,10 +26,12 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
     if "# Pre-flight: validate dataset path" in content:
         return content, True  # Already patched
 
-    # Pattern to find the end of command list and subprocess.run call
+    # Pattern to find the end of command list and subprocess.run call.
+    # Upstream 3.6.3 assigns the result: `result = subprocess.run(command)`.
+    # The `(?:result = )?` makes the assignment optional for robustness.
     # Matches: ]
-    #         subprocess.run(command)
-    pattern = r'(\s+\]\s*\n)(\s+)(subprocess\.run\(command\))'
+    #         [result = ] subprocess.run(command)
+    pattern = r'(\s+\]\s*\n)(\s+)((?:result = )?subprocess\.run\(command\))'
 
     if not re.search(pattern, content):
         print("[patch_preflight_validation] Pattern not found - code may have been modified")

@@ -1,52 +1,52 @@
 # Core dependencies
-# Using same versions as requirements.txt where applicable, but filtered for macOS relevance
-numpy==1.26.4
-requests>=2.31.0,<2.32.0
-tqdm
-wget
+# Aligned with upstream requirements.txt (3.6.3) where applicable; macOS-only
+# packaging/native-UI packages are appended at the bottom.
+numpy==2.2.6  # latest numpy 2.x for Python 3.10 (2.3+ requires py3.11); pandas 2.x needs numpy 2.x ABI
+requests==2.34.2
+tqdm==4.68.4
+wget==3.2
 PyYAML
 
 # Audio processing
 ffmpeg-python>=0.2.0
-faiss-cpu==1.7.3
+faiss-cpu==1.14.3  # macOS 14+ wheel; needed by upstream KMeans index rewrite
 librosa==0.11.0
-scipy==1.11.1
-soundfile==0.12.1
-noisereduce
-pedalboard
-stftpitchshift
-soxr
+scipy==1.15.3  # latest scipy with a cp310 wheel (1.16+ needs py3.11); has _cythonized_array_utils for torchcrepe
+soundfile==0.14.0
+noisereduce==3.0.3
+pedalboard==0.9.24
+stftpitchshift==2.0
+soxr==1.1.0
 
 # Machine learning
 omegaconf>=2.0.6
-numba==0.61.0
-torch==2.7.1
-torchaudio==2.7.1
-torchvision==0.22.1
-torchcrepe==0.0.23
-torchfcpe
-einops
-transformers==4.44.2
+numba==0.66.0  # supports numpy<2.5 (needed by librosa); bumped with numpy 2.x
+torch==2.11.0
+torchaudio==2.11.0
+torchcrepe==0.0.24
+torchfcpe==0.0.4
+einops==0.8.2
+transformers==5.13.1
 
 # Visualization and UI
-matplotlib==3.7.2
-gradio==6.4.0
+matplotlib==3.10.9  # latest matplotlib for Python 3.10 (3.11+ needs py3.11)
+tensorboard==2.21.0
+gradio==6.20.0
 
 # Miscellaneous utilities
 certifi>=2023.07.22
-antlr4-python3-runtime==4.8
-tensorboard
+antlr4-python3-runtime==4.8  # required by omegaconf
 tensorboardX
-edge-tts==7.2.7
-pypresence
-beautifulsoup4
-sounddevice
-webrtcvad-wheels
+edge-tts==7.2.8
+pypresence==4.6.2
+beautifulsoup4==4.15.0
+sounddevice==0.5.5
+webrtcvad-wheels==2.0.14
+psutil==7.2.2
 
-# Packaging & Native UI
+# Packaging & Native UI (macOS-only, not in upstream)
 pywebview>=5.0
 pyinstaller>=6.3.0
 pyobjc-framework-AVFoundation
 pyobjc-framework-Cocoa
-psutil>=5.9.0
 Pillow>=10.0.0  # Required for icon conversion during build

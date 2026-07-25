@@ -54,18 +54,22 @@ def get_version_from_build_script() -> str:
                 )
 
                 if applio_match and build_match:
-                    # Get APPLIO_VERSION from assets/config.json
-                    config_path = "assets/config.json"
-                    if os.path.exists(config_path):
-                        import json
-                        try:
-                            with open(config_path, "r") as f:
-                                config = json.load(f)
-                                applio_version = config.get("version", "3.6.0")
-                        except:
-                            applio_version = "3.6.0"
-                    else:
-                        applio_version = "3.6.0"
+                    # Get APPLIO_VERSION from assets/config.json (created at runtime
+                    # by app.py) or, at build time, from assets/config_template.json.
+                    applio_version = "3.6.0"
+                    import json
+                    for config_path in (
+                        "assets/config.json",
+                        "assets/config_template.json",
+                    ):
+                        if os.path.exists(config_path):
+                            try:
+                                with open(config_path, "r") as f:
+                                    config = json.load(f)
+                                    applio_version = config.get("version", "3.6.0")
+                                    break
+                            except Exception:
+                                pass
 
                     build_number = build_match.group(1)
                     return f"{applio_version}.{build_number}"

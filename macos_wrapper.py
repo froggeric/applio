@@ -1218,8 +1218,9 @@ def setup_bundled_resources():
 
     # Copy individual files
     files_to_copy = [
-        # Main app config
-        ("assets/config.json", "assets/config.json", "App config"),
+        # Main app config (config.json is gitignored/generated; bundle ships the
+        # template, so copy it out as config.json for the running app)
+        ("assets/config_template.json", "assets/config.json", "App config"),
         # TTS voices list
         ("rvc/lib/tools/tts_voices.json", "rvc/lib/tools/tts_voices.json", "TTS voices list"),
         # Config files for different sample rates

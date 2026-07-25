@@ -97,11 +97,25 @@ This fork maintains minimal delta from upstream - only macOS additions, no core 
 
 **Sync with upstream:**
 ```bash
+git remote add upstream https://github.com/IAHispano/Applio.git   # once
 git fetch upstream
 git merge upstream/main
 ```
 
-No merge conflicts expected since macOS files don't overlap with upstream.
+The fork keeps macOS work in separate files, so the git merge is nearly conflict-free
+(last sync 3.6.2 → 3.6.3 on 2026-07-24: only `.gitignore`, `rvc/train/preprocess/preprocess.py`,
+and `tabs/train/train.py` touched both sides; only `.gitignore` actually conflicted).
+**The real work after a merge is re-pointing build-time patches** (see "Re-pointing patches
+after an upstream sync" below), because upstream rewrites the source our `patches/*.py` anchor on.
+
+**Re-pointing patches after an upstream sync:**
+- Iterate WITHOUT a full build: `build_macos.py` runs the *entire* build at module level
+  (line ~677 `pre_build_patch()` → PyInstaller), so **never `import build_macos`** for testing.
+  Instead run each patcher directly, e.g. `venv_macos/bin/python patches/patch_X.py <arg>`,
+  then `git checkout -- <source>` to restore.
+- Each patcher prints `Pattern not found` / `patch failed` when upstream changed its anchor;
+  re-point the regex/string to the new code, then verify the patched file `py_compile`s and the
+  injected code is correctly placed before committing.
 
 **Safe-to-modify files** (macOS-only, not in upstream):
 - `assets/entitlements.plist`, `scripts/entitlements_dev_id.plist`
@@ -121,6 +135,14 @@ No merge conflicts expected since macOS files don't overlap with upstream.
 | `run-applio.sh` | 3.12 | `.venv` |
 
 **Important:** PyInstaller builds require Python 3.10 (3.12+ has compatibility issues).
+
+**Python 3.10 vs upstream's 3.11+ stack (post-3.6.3 sync):** Upstream now pins packages
+that require Python 3.11+ (numpy 2.4.6, scipy 1.18, matplotlib 3.11, pandas 2.3+). The fork
+stays on 3.10 (PyInstaller), so `requirements_macos.txt` uses the latest py3.10-compatible
+versions instead: **numpy 2.2.6, scipy 1.15.3, numba 0.66.0, matplotlib 3.10.9, pandas 2.2.x+**.
+(pandas 2.3.x imports fine on 3.10 but needs numpy 2.x ABI — the old numpy 1.26 caused
+`pandas._libs.tslibs.vectorized` failures.) If the fork ever moves to Python 3.11, these can
+re-align to upstream's exact pins; that needs `brew install python@3.11` + a fresh `venv_macos`.
 
 **macOS Development:**
 - Use `requirements_macos.txt` (includes pywebview, pyinstaller, pyobjc)
@@ -181,6 +203,13 @@ No merge conflicts expected since macOS files don't overlap with upstream.
 - Signing requires handling broken symlinks (use `path.exists()` before `rglob`)
 - PyInstaller cache corruption: clear `~/Library/Application Support/pyinstaller/`
 - Notarization fails for PyInstaller apps - users run `xattr -cr Applio.app`
+- **Upstream 3.6.3 changed `subprocess.run` calls:** upstream now assigns
+  `result = subprocess.run(...)` and adds `if result.returncode != 0: return ...` after each.
+  Patches that anchored on bare `subprocess.run(command)\n return f"..."` must be re-pointed to
+  the new shape. In the 2026-07-24 sync this broke `patch_process_tracking` (5 sub-fns),
+  `patch_subprocess_validation` (2), and `patch_preflight_validation`; `patch_loading_html` also
+  needed type `"dir"` (not `"file"`) so `patch_all()` resolves the path. `patch_preprocess_warning`
+  was removed as obsolete (upstream now handles empty datasets).
 
 **Pywebview gotchas:**
 - Menu callbacks need lambda wrappers: `MenuAction("About", lambda: show_about_dialog())` not `MenuAction("About", show_about_dialog)`
@@ -237,15 +266,25 @@ No merge conflicts expected since macOS files don't overlap with upstream.
 - **runtime_paths.json keys:** Uses `data_path` for the data directory (not `base_path`)
 
 **Version management:**
-- `macos_wrapper.py` reads VERSION dynamically from `assets/config.json` + BUILD_NUMBER
+- Upstream renamed `assets/config.json` → `assets/config_template.json` (3.6.3) and now
+  **gitignores `config.json`**; `app.py` creates `config.json` at runtime by copying the template.
+- At **build time** only the template exists, so `build_macos.py`, `patches/patch_loading_html.py`,
+  and `macos_wrapper.py` read `config_template.json` (they try `config.json` first, then fall back
+  to the template). Runtime reads of `config.json` elsewhere are fine (app regenerates it).
+- `macos_wrapper.py` copies the bundled template out as `config.json` for the running app.
+- `macos_wrapper.py` reads VERSION dynamically from the config + BUILD_NUMBER
 - `build_macos.py` uses same source - both must stay in sync
-- `patch_loading_html.py` reads from `assets/config.json` for loading screen version
+- `patch_loading_html.py` reads from the config for loading screen version
 
 **Background process tracking:**
 - State file: `~/.applio/active_processes.json` (single source of truth)
 - Process types: training, preprocess, extract, inference, tts
 - POSIX signals: SIGSTOP (pause), SIGCONT (resume), SIGTERM (terminate)
-- Patch order: `patch_process_tracking.py` MUST run before `patch_subprocess_validation.py`
+- Patch order: `patch_process_tracking.py` runs before `patch_subprocess_validation.py`.
+  After the 3.6.3 rework, `subprocess_validation` anchors on the success-`return` line (which
+  survives process_tracking's Popen transformation), so it injects only its post-run output
+  validation (model_info.json / extracted-dir checks) — both patches now coexist on the same
+  functions instead of being mutually exclusive.
 
 **GitHub releases:**
 - Repo name for releases: `froggeric/applio-macOS-native-app`
@@ -255,8 +294,8 @@ No merge conflicts expected since macOS files don't overlap with upstream.
 - Delete release: `gh api repos/{owner}/{repo}/releases/{id} -X DELETE`
 
 **Version management:**
-- Check upstream version: `git show upstream/main:assets/config.json | grep version`
-- `build_macos.py` reads version from `assets/config.json` - keep both in sync
+- Check upstream version: `git show upstream/main:assets/config_template.json | grep version`
+- `build_macos.py` reads version from the config (template at build time) - keep both in sync
 
 ## Data Flow
 
