@@ -116,6 +116,14 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 - Each patcher prints `Pattern not found` / `patch failed` when upstream changed its anchor;
   re-point the regex/string to the new code, then verify the patched file `py_compile`s and the
   injected code is correctly placed before committing.
+- **Patcher indent capture:** in `patch_process_tracking.py` capture the leading indent with
+  `\n+([ \t]+)` (horizontal only), NOT `(\n\s+)`. `patch_preflight_validation` runs first and
+  leaves a blank line before `result = subprocess.run(...)`, so `(\n\s+)` grabs that newline and
+  every injected line gets a spurious blank line. Each replacement reproduces one leading newline
+  (start content on the line after `r'''`).
+- **Tracking patches that switch `subprocess.run`→`Popen`/`communicate()`** (e.g. TTS): wrap in
+  `try/finally` so `_untrack_process()` always runs, and use `stdout=PIPE, stderr=PIPE` +
+  `communicate()` to preserve upstream's `RuntimeError(stderr)` behavior.
 
 **Safe-to-modify files** (macOS-only, not in upstream):
 - `assets/entitlements.plist`, `scripts/entitlements_dev_id.plist`
@@ -192,6 +200,14 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 - All fixes must go through `patches/` - NEVER modify upstream files directly
 - **After patching, verify `git status` shows no upstream files have patch markers.** If present, restore with `git checkout` before committing.
 - When stuck after 3+ fix attempts: STOP and question the architecture (per systematic-debugging skill)
+- **Launch `macos_wrapper.py` from a foreground terminal**, not `nohup ... &` — pywebview's
+  AppKit event loop needs an interactive GUI session and blocks/idles when backgrounded.
+- **`python app.py` smoke-test downloads ~2GB** of pretrained models into gitignored
+  `rvc/models/`; the next `build_macos.py` then bundles them (bloats `dist/Applio.app`
+  ~870M → ~1.6GB). Clean with `rm -rf rvc/models/*`.
+- **Corrupted `venv_macos` package:** if `import torch`/`pandas` fails with a partial-init /
+  circular-import error, the installed wheel is corrupt → fix with
+  `venv_macos/bin/python -m pip install --force-reinstall --no-deps <pkg>`.
 
 **Build process gotchas:**
 - Two entitlements files must stay in sync: `assets/entitlements.plist` (full) and `scripts/entitlements_dev_id.plist` (minimal for Developer ID)
@@ -268,9 +284,10 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 **Version management:**
 - Upstream renamed `assets/config.json` → `assets/config_template.json` (3.6.3) and now
   **gitignores `config.json`**; `app.py` creates `config.json` at runtime by copying the template.
-- At **build time** only the template exists, so `build_macos.py`, `patches/patch_loading_html.py`,
-  and `macos_wrapper.py` read `config_template.json` (they try `config.json` first, then fall back
-  to the template). Runtime reads of `config.json` elsewhere are fine (app regenerates it).
+- At **build time** the template is the source of truth (`config.json` is gitignored + locally
+  regenerated), so `build_macos.py` and `patches/patch_loading_html.py` read `config_template.json`
+  FIRST, then fall back to `config.json` (reading config.json first would embed a stale dev-local
+  version). Runtime reads of `config.json` elsewhere are fine (app regenerates it).
 - `macos_wrapper.py` copies the bundled template out as `config.json` for the running app.
 - `macos_wrapper.py` reads VERSION dynamically from the config + BUILD_NUMBER
 - `build_macos.py` uses same source - both must stay in sync
