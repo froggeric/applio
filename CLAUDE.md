@@ -213,6 +213,21 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 - **Corrupted `venv_macos` package:** if `import torch`/`pandas` fails with a partial-init /
   circular-import error, the installed wheel is corrupt → fix with
   `venv_macos/bin/python -m pip install --force-reinstall --no-deps <pkg>`.
+- **Frozen subprocess CWD is the bundle (`sys._MEIPASS`/Frameworks), not the data dir** —
+  so `os.getcwd()`/`now_dir`-relative paths break. Resolve user/data paths absolutely:
+  `APPLIO_DATA_PATH` env → `runtime_paths.json` `data_path` → `~/Applio`.
+- **`logging.basicConfig` is a no-op once an earlier import configured the root logger** →
+  launcher/wrapper logs silently lost. Own the root logger: clear handlers + add a `FileHandler`
+  explicitly (see `applio_launcher.py` logging setup, `macos_wrapper.py:setup_logging`).
+- **`core.py`'s `from datetime import datetime` rebinds `datetime` to the class**, so injected
+  `datetime.datetime.now()` in patches throws `AttributeError`. In patches use
+  `import datetime as <alias>` + `<alias>.datetime.now()`.
+- **`os._exit(N)` skips stdout flushing** — a preceding diagnostic `print` is lost (e.g.
+  `rvc/train/train.py` sample-rate error). Recover via a line-buffered tee (`open(...,buffering=1)`)
+  or `PYTHONUNBUFFERED=1`.
+- **Reproduce frozen-subprocess behavior without the GUI:** `dist/Applio.app/Contents/MacOS/Applio
+  /tmp/script.py args` — entry `applio_launcher.py` dispatches to the script (CWD=bundle).
+- `ps -E -p <pid>` (macOS) dumps a frozen process's env — check inherited `APPLIO_*`/`PATH`.
 
 **Build process gotchas:**
 - Two entitlements files must stay in sync: `assets/entitlements.plist` (full) and `scripts/entitlements_dev_id.plist` (minimal for Developer ID)
