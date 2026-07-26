@@ -16,7 +16,11 @@ Build mode:
 
 Signing & Notarization:
     --sign:           Sign with Developer ID certificate
-    --notarize:       Notarize with Apple (password retrieved from keychain "applio-notarize")
+    --notarize:       Notarize with Apple via --keychain-profile (App Store Connect API key;
+                      see `xcrun notarytool store-credentials`)
+    --keychain-profile NAME  notarytool keychain profile (default: applio-notarize)
+    --identity ID     codesign identity override (default: Developer ID Application: ...)
+    --team-id ID      team id override
 
 Version format: {APPLIO_VERSION}.{BUILD_NUMBER}
 Example: 3.6.0.1 (Applio 3.6.0, build 1)
@@ -155,10 +159,22 @@ def parse_args():
         help="Build standalone models installer app (bundles all models)"
     )
     parser.add_argument(
-        "--apple-id",
+        "--keychain-profile",
         type=str,
-        default="frederic@guigand.com",
-        help="Apple ID for notarization"
+        default="applio-notarize",
+        help="notarytool keychain profile name (API-key auth; see xcrun notarytool store-credentials)",
+    )
+    parser.add_argument(
+        "--identity",
+        type=str,
+        default=DEVELOPER_IDENTITY,
+        help="codesign identity (default: hardcoded Developer ID)",
+    )
+    parser.add_argument(
+        "--team-id",
+        type=str,
+        default=TEAM_ID,
+        help="team id (default: 46BZ85ALNS)",
     )
     return parser.parse_args()
 
@@ -170,6 +186,23 @@ SIGN_APP = args.sign
 NOTARIZE = args.notarize
 MODELS_INSTALLER = args.models_installer
 VERSION = f"{APPLIO_VERSION}.{args.build_number}"
+
+# Honor --identity / --team-id / --keychain-profile overrides
+DEVELOPER_IDENTITY = args.identity
+TEAM_ID = args.team_id
+KEYCHAIN_PROFILE = args.keychain_profile
+
+# --- Apple-valid plist versions (notarization requires ≤3 numeric segments,
+# no leading zeros — Apple strips them → mismatch). The legacy VERSION
+# "3.6.3.5" has 4 segments and FAILS notarization. Encode version+build as a
+# single monotonic integer (base-100 per segment) so build order is preserved
+# even when patch ≥ 10 (naive APPLIO_VERSION.replace(".","") gives "3635" which
+# is valid but non-monotonic at patch≥10). Segments must stay < 100.
+CFBUNDLE_SHORT_VERSION = APPLIO_VERSION  # "3.6.3" (display version, ≤3 segments)
+_v = (APPLIO_VERSION.split(".") + ["0", "0", "0"])[:3]
+_major, _minor, _patch = (int(x) for x in _v)
+CFBUNDLE_VERSION = str(_major * 1_000_000 + _minor * 10_000 + _patch * 100 + args.build_number)
+# 3.6.3 build 5 → "3060305" | 3.6.4 build 1 → "3060401" | 4.0.0 build 1 → "4000001"
 
 # Validate arguments
 if NOTARIZE and not SIGN_APP:
@@ -265,8 +298,8 @@ def build_models_installer_app():
             with open(info_plist_path, 'rb') as f:
                 plist = plistlib.load(f)
 
-            plist['CFBundleShortVersionString'] = VERSION
-            plist['CFBundleVersion'] = VERSION
+            plist['CFBundleShortVersionString'] = CFBUNDLE_SHORT_VERSION
+            plist['CFBundleVersion'] = CFBUNDLE_VERSION
             plist['CFBundleDisplayName'] = "Applio Models Installer"
             plist['CFBundleName'] = "Applio Models Installer"
             plist['NSHumanReadableCopyright'] = f"Copyright © 2026 IAHispano. All rights reserved."
@@ -803,9 +836,11 @@ if os.path.exists(info_plist_path):
         plist['NSDownloadsFolderUsageDescription'] = "Applio needs downloads access to retrieve models."
         plist['NSAppleEventsUsageDescription'] = "Applio needs apple events access for automation."
 
-        # Branding with version
-        plist['CFBundleShortVersionString'] = VERSION
-        plist['CFBundleVersion'] = VERSION
+        # Branding with version. NOTE: CFBundleVersion / CFBundleShortVersionString
+        # must be Apple-valid (≤3 numeric segments) for notarization — use the
+        # derived constants, NOT the 4-segment display VERSION.
+        plist['CFBundleShortVersionString'] = CFBUNDLE_SHORT_VERSION
+        plist['CFBundleVersion'] = CFBUNDLE_VERSION
         plist['NSHumanReadableCopyright'] = f"Copyright © 2026 IAHispano. All rights reserved. Build {VERSION}"
 
         # High-DPI support
@@ -819,13 +854,9 @@ if os.path.exists(info_plist_path):
         # Prevent multiple app instances (defense in depth for subprocess handling)
         plist['LSMultipleInstancesProhibited'] = True
 
-        # Team ID for notarization
-        if SIGN_APP:
-            plist['com.apple.developer.team-identifier'] = TEAM_ID
-
         with open(info_plist_path, 'wb') as f:
             plistlib.dump(plist, f)
-        print(f"Info.plist patched successfully (version: {VERSION}).")
+        print(f"Info.plist patched successfully (version: {VERSION}, build: {CFBUNDLE_VERSION}).")
 
     except Exception as e:
         print(f"Failed to patch Info.plist: {e}")
@@ -836,8 +867,80 @@ else:
 # =================================================================
 # Code Signing
 # =================================================================
+# Extensions that are never Mach-O — skip the `file` call entirely (speeds up
+# discovery of the ~thousands of files in a 1.6GB PyInstaller bundle).
+_MACHO_DATA_EXTS = {
+    ".py", ".pyc", ".pyo", ".pyd", ".json", ".txt", ".plist", ".html", ".htm",
+    ".css", ".js", ".map", ".png", ".jpg", ".jpeg", ".ico", ".gif", ".svg",
+    ".ttf", ".otf", ".woff", ".woff2", ".md", ".toml", ".cfg", ".ini",
+    ".yaml", ".yml", ".csv", ".npy", ".npz", ".pt", ".pth", ".ckpt", ".bin",
+    ".onnx", ".zip", ".a", ".la",
+}
+
+
+def _is_macho_file(path):
+    """True if `path` is a Mach-O binary (via `file -b`). Prefilters by size/extension."""
+    try:
+        if not os.path.isfile(path):
+            return False
+        if os.path.islink(path) and not os.path.exists(path):
+            return False  # broken symlink — codesign refuses these
+        if os.path.getsize(path) < 4096:
+            return False  # too small to be a Mach-O
+        if os.path.splitext(path)[1].lower() in _MACHO_DATA_EXTS:
+            return False
+    except OSError:
+        return False
+    # Use bytes (not text=True): `file -b` can emit non-UTF-8 bytes for some
+    # binaries, which would raise UnicodeDecodeError under text mode.
+    r = subprocess.run(["file", "-b", path], capture_output=True)
+    return b"Mach-O" in (r.stdout or b"")
+
+
+def _discover_macho(app_path):
+    """All Mach-O binaries under Contents/{Frameworks,Resources,MacOS}, deepest-first.
+
+    Covers bare executables PyInstaller scatters in Contents/Resources that the
+    old *.so/*.dylib glob missed (those go unsigned → notarization fails). The
+    outer .app bundle is excluded (sealed separately as the last step).
+    """
+    found = []
+    app = Path(app_path)
+    for sub in ("Contents/Frameworks", "Contents/Resources", "Contents/MacOS"):
+        base = app / sub
+        if not base.exists():
+            continue
+        for p in base.rglob("*"):
+            if p.is_dir() or not p.exists():
+                continue
+            if _is_macho_file(str(p)):
+                found.append(str(p))
+    found.sort(key=lambda p: p.count(os.sep), reverse=True)  # deepest-first
+    return found
+
+
+def _repair_python_framework_symlinks(app_path):
+    """Recreate Python.framework/Versions/Current if broken (codesign rejects
+    bundles with broken symlinks; PyInstaller cache can leave a stale one)."""
+    for base in ("Contents/Frameworks", "Contents/Resources"):
+        versions_dir = Path(app_path) / base / "Python.framework" / "Versions"
+        if not versions_dir.exists():
+            continue
+        reals = [v.name for v in versions_dir.iterdir()
+                 if v.is_dir() and v.name.replace(".", "").isdigit()]
+        if not reals:
+            continue
+        current = versions_dir / "Current"
+        try:
+            if not current.exists():
+                current.symlink_to(reals[0])
+        except OSError:
+            pass
+
+
 def sign_app():
-    """Sign the application with Developer ID certificate."""
+    """Sign the application with Developer ID certificate (inside-out, hardened
+    runtime). Returns True on success, False on any failure (hard-fail)."""
     if not SIGN_APP:
         # Ad-hoc signing for local use
         print("\nSigning application (ad-hoc for local use)...")
@@ -858,7 +961,7 @@ def sign_app():
             print(f"WARNING: Ad-hoc signing failed: {result.stderr}")
         return result.returncode == 0
 
-    # Developer ID signing for distribution
+    # ---- Developer ID signing for distribution ----
     print("\nSigning application with Developer ID certificate...")
 
     # Check if certificate is available
@@ -866,7 +969,6 @@ def sign_app():
         ["security", "find-identity", "-v", "-p", "codesigning"],
         capture_output=True, text=True
     )
-
     if TEAM_ID not in result.stdout:
         print(f"ERROR: Developer ID certificate not found for team {TEAM_ID}")
         print("Available signing identities:")
@@ -874,126 +976,75 @@ def sign_app():
         print("\nPlease install your Developer ID certificate and try again.")
         return False
 
-    # Sign the app
     print(f"  Identity: {DEVELOPER_IDENTITY}")
+    _repair_python_framework_symlinks(app_path)
 
-    # Step 1: Remove existing signatures from all binaries
-    # PyInstaller binaries have ad-hoc signatures that conflict with hardened runtime
+    # Discover all Mach-O binaries (incl. bare executables in Contents/Resources).
+    print("  Discovering Mach-O binaries...")
+    binaries = _discover_macho(app_path)
+    print(f"  Found {len(binaries)} Mach-O binaries")
+
+    # Step 1: strip existing (PyInstaller ad-hoc) signatures — idempotent re-runs.
     print("  Removing existing signatures...")
-    frameworks_path = Path(app_path) / "Contents" / "Frameworks"
-    resources_path = Path(app_path) / "Contents" / "Resources"
+    for b in binaries:
+        subprocess.run(["codesign", "--remove-signature", b],
+                       capture_output=True, text=True)
+    subprocess.run(["codesign", "--remove-signature", app_path],
+                   capture_output=True, text=True)
 
-    for base_path in [frameworks_path, resources_path]:
-        if base_path.exists():
-            for ext in ["*.so", "*.dylib"]:
-                for binary in base_path.rglob(ext):
-                    subprocess.run(
-                        ["codesign", "--remove-signature", str(binary)],
-                        capture_output=True, text=True
-                    )
-
-    # Remove signature from Python framework binaries
-    for base in ["Contents/Frameworks", "Contents/Resources"]:
-        framework_path = Path(app_path) / base / "Python.framework"
-        if framework_path.exists():
-            versions_path = framework_path / "Versions"
-            if versions_path.exists():
-                for version in versions_path.iterdir():
-                    if version.is_dir():
-                        python_bin = version / "Python"
-                        if python_bin.exists():
-                            subprocess.run(
-                                ["codesign", "--remove-signature", str(python_bin)],
-                                capture_output=True, text=True
-                            )
-
-    # Remove signature from main executable
-    main_exe = Path(app_path) / "Contents" / "MacOS" / APP_NAME
-    if main_exe.exists():
-        subprocess.run(
-            ["codesign", "--remove-signature", str(main_exe)],
-            capture_output=True, text=True
-        )
-
-    # Step 2: Sign all binaries with hardened runtime
-    print("  Signing binaries with hardened runtime...")
-    signed_count = 0
-
-    # Sign .so and .dylib files
-    for base_path in [frameworks_path, resources_path]:
-        if base_path.exists():
-            for ext in ["*.so", "*.dylib"]:
-                try:
-                    for binary in base_path.rglob(ext):
-                        if binary.exists():  # Skip broken symlinks
-                            result = subprocess.run(
-                                ["codesign", "--force", "--sign", DEVELOPER_IDENTITY,
-                                 "--options", "runtime", "--timestamp", str(binary)],
-                                capture_output=True, text=True
-                            )
-                            if result.returncode == 0:
-                                signed_count += 1
-                except (FileNotFoundError, OSError):
-                    pass  # Skip directories with broken symlinks
-
-    # Sign Python frameworks
-    for base in ["Contents/Frameworks", "Contents/Resources"]:
-        framework_path = Path(app_path) / base / "Python.framework"
-        if framework_path.exists():
-            versions_path = framework_path / "Versions"
-            if versions_path.exists():
-                for version in versions_path.iterdir():
-                    if version.is_dir():
-                        python_bin = version / "Python"
-                        if python_bin.exists():
-                            result = subprocess.run(
-                                ["codesign", "--force", "--sign", DEVELOPER_IDENTITY,
-                                 "--options", "runtime", "--timestamp", str(python_bin)],
-                                capture_output=True, text=True
-                            )
-                            if result.returncode == 0:
-                                signed_count += 1
-
-    # Sign main executable
-    if main_exe.exists():
-        result = subprocess.run(
+    # Step 2: sign every leaf Mach-O inside-out (deepest-first) with hardened
+    # runtime + timestamp. NO entitlements on leaf binaries — entitlements apply
+    # only to the outer bundle/main executable (applying them to every .so/.dylib
+    # is unnecessary and can cause codesign warnings).
+    print("  Signing binaries (hardened runtime)...")
+    signed = 0
+    for b in binaries:
+        r = subprocess.run(
             ["codesign", "--force", "--sign", DEVELOPER_IDENTITY,
-             "--options", "runtime", "--timestamp", str(main_exe)],
-            capture_output=True, text=True
+             "--options", "runtime", "--timestamp", b],
+            capture_output=True, text=True,
         )
-        if result.returncode == 0:
-            signed_count += 1
+        if r.returncode == 0:
+            signed += 1
+        else:
+            print(f"  WARNING: failed to sign {b}: {(r.stderr or '').strip()}")
+    print(f"  Signed {signed}/{len(binaries)} binaries")
 
-    print(f"  Signed {signed_count} binaries")
-
-    # Step 3: Sign the app bundle with --deep
+    # Step 3: seal the outer .app bundle LAST, WITH entitlements, WITHOUT --deep.
+    # --deep is deprecated for signing; all nested code is already sealed above.
     print("  Signing app bundle...")
     result = subprocess.run(
-        ["codesign", "--force", "--deep", "--sign", DEVELOPER_IDENTITY,
+        ["codesign", "--force", "--sign", DEVELOPER_IDENTITY,
          "--entitlements", ENTITLEMENTS_PATH,
-         "--options", "runtime",
-         "--timestamp",
-         app_path],
-        capture_output=True, text=True
+         "--options", "runtime", "--timestamp", app_path],
+        capture_output=True, text=True,
     )
-
-    if result.returncode == 0:
-        print("Application signed successfully.")
-
-        # Verify signature
-        print("  Verifying signature...")
-        verify_result = subprocess.run(
-            ["codesign", "--verify", "--deep", "--strict", "--verbose=2", app_path],
-            capture_output=True, text=True
-        )
-        if verify_result.returncode == 0:
-            print("  Signature verified.")
-        else:
-            print(f"  WARNING: Signature verification failed: {verify_result.stderr}")
-        return True
-    else:
-        print(f"ERROR: Signing failed: {result.stderr}")
+    if result.returncode != 0:
+        print(f"ERROR: Bundle signing failed: {result.stderr}")
         return False
+    print("Application signed successfully.")
+
+    # Step 4: HARD-FAIL verify gate (cheap — catches a bad bundle before the slow
+    # notarize step). --deep IS valid for verification (only signing deprecated it).
+    print("  Verifying signature (strict)...")
+    verify = subprocess.run(
+        ["codesign", "--verify", "--all-architectures", "--deep", "--strict",
+         "--verbose=2", app_path],
+        capture_output=True, text=True,
+    )
+    if verify.returncode != 0:
+        print(f"ERROR: codesign verification failed:\n{verify.stderr}")
+        return False
+    print("  Signature verified.")
+
+    # Informational Gatekeeper assessment (pre-notarize: source=Developer ID;
+    # becomes "Notarized Developer ID" only after stapling).
+    spctl = subprocess.run(
+        ["spctl", "-vvv", "--assess", "--type", "execute", app_path],
+        capture_output=True, text=True,
+    )
+    print(f"  spctl: {((spctl.stdout or '') + ' ' + (spctl.stderr or '')).strip()}")
+    return True
 
 
 sign_success = sign_app()
@@ -1025,9 +1076,13 @@ def create_dmg():
         shutil.rmtree(dmg_folder)
     os.makedirs(dmg_folder)
 
-    # Copy app to DMG folder
+    # Copy app to DMG folder. symlinks=True is REQUIRED: Python.framework uses
+    # symlinks (Python -> Versions/Current/Python, Resources -> Versions/Current/Resources,
+    # Current -> Versions/3.x). The default symlinks=False flattens them into real files,
+    # breaking the framework's signature seal → notarization rejects the DMG with
+    # "The signature of the binary is invalid" on the Python framework paths.
     print("  Preparing DMG contents...")
-    shutil.copytree(app_path, os.path.join(dmg_folder, f"{APP_NAME}.app"))
+    shutil.copytree(app_path, os.path.join(dmg_folder, f"{APP_NAME}.app"), symlinks=True)
 
     # Create symbolic link to Applications folder
     applications_link = os.path.join(dmg_folder, "Applications")
@@ -1048,15 +1103,8 @@ def create_dmg():
         print(f"ERROR: DMG creation failed: {result.stderr}")
         return None
 
-    # Sign DMG if signing is enabled
-    if SIGN_APP and sign_success:
-        print("  Signing DMG...")
-        sign_result = subprocess.run(
-            ["codesign", "--sign", DEVELOPER_IDENTITY, temp_dmg],
-            capture_output=True, text=True
-        )
-        if sign_result.returncode != 0:
-            print(f"  WARNING: DMG signing failed: {sign_result.stderr}")
+    # NOTE: the DMG is assembled UNSIGNED here. It is signed (with --timestamp)
+    # and notarized+stapled by the release flow below (create_dmg just builds it).
 
     # Rename to final name
     os.rename(temp_dmg, dmg_path)
@@ -1069,84 +1117,143 @@ def create_dmg():
     return dmg_path
 
 
-dmg_path = create_dmg()
-
-
 # =================================================================
 # Notarization
 # =================================================================
-def get_notarization_password():
-    """Retrieve notarization password from keychain."""
-    result = subprocess.run(
-        ["security", "find-generic-password", "-a", args.apple_id, "-s", "applio-notarize", "-w"],
-        capture_output=True, text=True
+def _notarytool_submit(artifact, profile, timeout=7200):
+    """Submit `artifact` to Apple's notary service with `--keychain-profile`, wait
+    for a terminal state, and on failure pull the JSON log (which names the exact
+    offending binary/key). Returns True only on `status: Accepted`."""
+    import re
+    print(f"  notarytool submit {artifact} (profile: {profile}) ...")
+    r = subprocess.run(
+        ["xcrun", "notarytool", "submit", artifact,
+         "--keychain-profile", profile, "--wait"],
+        capture_output=True, text=True, timeout=timeout,
     )
-    if result.returncode == 0:
-        return result.stdout.strip()
-    return None
-
-
-def notarize_app():
-    """Notarize the app or DMG with Apple."""
-    if not NOTARIZE:
+    out = (r.stdout or "") + (r.stderr or "")
+    print(out)
+    if "status: Accepted" in out:
         return True
+    # Invalid / rejected / service error — capture the submission id and fetch the
+    # JSON log so the offending binary/key is visible (stderr alone is unhelpful).
+    m = re.search(r"id:\s*([0-9a-fA-F-]{36})", out)
+    if m:
+        sub_id = m.group(1)
+        log_path = f"/tmp/notary-{os.path.basename(artifact)}-{sub_id}.json"
+        subprocess.run(["xcrun", "notarytool", "log", sub_id,
+                        "--keychain-profile", profile, log_path],
+                       capture_output=True, text=True)
+        try:
+            with open(log_path) as f:
+                print("=== NOTARIZATION LOG ===\n" + f.read())
+        except OSError:
+            print(f"  (log written to {log_path})")
+    return False
 
-    if not SIGN_APP or not sign_success:
-        print("ERROR: Cannot notarize - app must be signed first")
+
+def _staple(artifact):
+    """Staple the notarization ticket and validate it. Returns False on failure."""
+    sr = subprocess.run(["xcrun", "stapler", "staple", artifact],
+                        capture_output=True, text=True)
+    if sr.returncode != 0:
+        print(f"ERROR: staple failed for {artifact}: {sr.stderr}")
         return False
-
-    print("\nNotarizing with Apple...")
-
-    # Get app-specific password from keychain
-    app_password = get_notarization_password()
-    if not app_password:
-        print("ERROR: Could not retrieve notarization password from keychain")
-        print("Please store it with:")
-        print('  security add-generic-password -a "frederic@guigand.com" -s "applio-notarize" -w "your-password"')
+    vr = subprocess.run(["xcrun", "stapler", "validate", artifact],
+                        capture_output=True, text=True)
+    if vr.returncode != 0:
+        print(f"ERROR: stapler validate failed for {artifact}: {vr.stderr}")
         return False
+    print(f"  stapled + validated: {artifact}")
+    return True
 
-    print("  Retrieved password from keychain")
 
-    # Submit for notarization
-    submit_path = dmg_path if dmg_path else app_path
-    print(f"  Submitting: {submit_path}")
-
-    result = subprocess.run(
-        ["xcrun", "notarytool", "submit", submit_path,
-         "--apple-id", args.apple_id,
-         "--team-id", TEAM_ID,
-         "--password", app_password,
-         "--wait"],
+def _sign_dmg(path):
+    """Sign a DMG with Developer ID + secure timestamp. A DMG is not code, so no
+    hardened runtime / entitlements — just --sign --timestamp."""
+    r = subprocess.run(
+        ["codesign", "--force", "--sign", DEVELOPER_IDENTITY, "--timestamp", path],
         capture_output=True, text=True,
-        timeout=1800  # 30 minute timeout
     )
-
-    if result.returncode == 0:
-        print("  Notarization successful!")
-
-        # Staple the ticket
-        print("  Stapling notarization ticket...")
-        staple_result = subprocess.run(
-            ["xcrun", "stapler", "staple", app_path],
-            capture_output=True, text=True
-        )
-
-        if staple_result.returncode == 0:
-            print("  Ticket stapled successfully.")
-        else:
-            print(f"  WARNING: Stapling failed: {staple_result.stderr}")
-
-        return True
-    else:
-        print(f"ERROR: Notarization failed: {result.stderr}")
-        print(result.stdout)
-        return False
+    if r.returncode != 0:
+        print(f"ERROR: DMG signing failed: {r.stderr}")
+    return r.returncode == 0
 
 
-if NOTARIZE:
-    notarize_success = notarize_app()
-else:
-    notarize_success = None
+def _final_verify(app, dmg):
+    """HARD-FAIL final Gatekeeper check on the notarized+stapled artifacts."""
+    print("\nFinal verification (Gatekeeper)...")
+    ok = True
+    for artifact in [app] + ([dmg] if dmg else []):
+        if not artifact or not os.path.exists(artifact):
+            continue
+        sp = subprocess.run(["spctl", "-vvv", "--assess", artifact],
+                            capture_output=True, text=True)
+        out = ((sp.stdout or "") + " " + (sp.stderr or "")).strip()
+        print(f"  spctl {os.path.basename(artifact)}: {out}")
+        if sp.returncode != 0 or "Notarized Developer ID" not in out:
+            print(f"ERROR: {artifact} is not Notarized Developer ID.")
+            ok = False
+        st = subprocess.run(["xcrun", "stapler", "validate", artifact],
+                            capture_output=True, text=True)
+        print(f"  stapler validate {os.path.basename(artifact)}: "
+              f"{(st.stdout or st.stderr or '').strip()}")
+        if st.returncode != 0:
+            ok = False
+        if artifact == app:  # DMG isn't a code bundle — skip codesign deep verify
+            cs = subprocess.run(["codesign", "-vvv", "--deep", "--strict", artifact],
+                                capture_output=True, text=True)
+            print(f"  codesign {os.path.basename(artifact)}: "
+                  f"{(cs.stderr or cs.stdout or '').strip()}")
+            if cs.returncode != 0:
+                ok = False
+    if not ok:
+        print("ERROR: final verification failed.")
+        sys.exit(1)
+    print("  All artifacts verified (Notarized Developer ID).")
+
+
+# ---- Release pipeline --------------------------------------------------------
+# Order per Apple "Customizing the notarization workflow": notarize .app → staple
+# .app → build .dmg FROM THE STAPLED APP → notarize .dmg → staple .dmg. Stapling
+# the .app before building the DMG is required (the DMG must contain the stapled
+# app). The .app is ditto-zipped for submission (notarytool rejects a raw .app
+# directory); the .dmg is submitted directly.
+dmg_path = None
+notarize_success = None
+
+if NOTARIZE and sign_success:
+    # --- .app ---
+    app_zip = os.path.join("dist", f"{APP_NAME}.zip")
+    print("\nNotarizing the .app with Apple...")
+    subprocess.run(["ditto", "-c", "-k", "--keepParent", app_path, app_zip], check=True)
+    ok = _notarytool_submit(app_zip, KEYCHAIN_PROFILE)
+    try:
+        os.remove(app_zip)
+    except OSError:
+        pass
+    if not ok or not _staple(app_path):
+        sys.exit(1)
+
+    # --- .dmg (built from the now-stapled app) ---
+    if CREATE_DMG:
+        dmg_path = create_dmg()
+        if not dmg_path or not _sign_dmg(dmg_path):
+            sys.exit(1)
+        if not _notarytool_submit(dmg_path, KEYCHAIN_PROFILE) or not _staple(dmg_path):
+            sys.exit(1)
+
+    notarize_success = True
+    _final_verify(app_path, dmg_path)  # hard-fail: source=Notarized Developer ID
+
+elif CREATE_DMG and sign_success:
+    # Signed DMG, no notarization
+    dmg_path = create_dmg()
+    if dmg_path:
+        _sign_dmg(dmg_path)
+
+elif CREATE_DMG:
+    dmg_path = create_dmg()
 
 
 # =================================================================

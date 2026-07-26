@@ -43,7 +43,7 @@ python macos_wrapper.py
 
 ## Build Mode
 
-The build creates a lightweight app (~850MB) with all user data stored externally. Models download automatically on first launch from HuggingFace:
+The build creates a lightweight app (~1.6GB) with all user data stored externally. Models download automatically on first launch from HuggingFace:
 
 - HiFi-GAN pretraineds: ~800MB
 - RefineGAN pretraineds: ~600MB
@@ -338,42 +338,36 @@ All dependencies are included in the Applio virtual environment. For full techni
 
 ### Prerequisites
 
-1. Apple Developer account
-2. Developer ID Application certificate installed in Keychain
-3. App-specific password stored in Keychain
+1. Apple Developer account (paid)
+2. **Developer ID Application** certificate installed in Keychain
+3. An **App Store Connect API key** stored as a notarytool keychain profile (`applio-notarize`)
 
 ### Setting Up Signing
 
-1. **Request Certificate** (if not already done):
-   ```bash
-   # Create CSR
-   mkdir -p ~/Desktop/Applio_Certs
-   cd ~/Desktop/Applio_Certs
-   openssl req -new -newkey rsa:2048 -nodes \
-     -keyout applio_dev_private.key \
-     -out applio_dev.csr \
-     -subj "/emailAddress=your@email.com/C=FR/ST=State/L=City/O=YourName/CN=your@email.com"
-   ```
+1. **Install the Developer ID Application certificate** (Xcode is fastest):
+   - Xcode → Settings → Accounts → your Apple ID → **Manage Certificates…** → **+ → Developer ID Application**.
+   - (Manual: Keychain Access → Certificate Assistant → Request a Certificate from a Certificate
+     Authority → upload the CSR at
+     [developer.apple.com](https://developer.apple.com/account/resources/certificates/list) →
+     "Developer ID Application" → download + double-click.)
+   - Verify: `security find-identity -v -p codesigning` → shows
+     `Developer ID Application: Your Name (TEAMID)`.
 
-2. **Get Certificate from Apple**:
-   - Go to [Apple Developer Certificates](https://developer.apple.com/account/resources/certificates/list)
-   - Create new certificate → "Developer ID Application"
-   - Upload the CSR file
-   - Download and double-click to install
+2. **Create an App Store Connect API key** (authenticates notarytool — use this, **not** an
+   app-specific password):
+   - [App Store Connect](https://appstoreconnect.apple.com) → Users and Access → Integrations →
+     **App Store Connect API** → **Team Keys** → **+**. Access: **App Manager** (the minimum role
+     that can submit for notarization). Download the `.p8` (one-time); note the **Key ID** and
+     **Issuer ID**.
 
-3. **Store Notarization Password**:
+3. **Store the notarytool credentials** (one-time):
    ```bash
-   # Create app-specific password at appleid.apple.com first
-   security add-generic-password \
-     -a "your@email.com" \
-     -s "applio-notarize" \
-     -w "xxxx-xxxx-xxxx-xxxx"
-   ```
-
-4. **Verify Setup**:
-   ```bash
-   security find-identity -v -p codesigning
-   # Should show: "Developer ID Application: Your Name (TEAMID)"
+   xcrun notarytool store-credentials "applio-notarize" \
+     --key ~/.private_keys/AuthKey_XXXXXXXXXX.p8 \
+     --key-id XXXXXXXXXX \
+     --issuer 11111111-2222-3333-4444-555555555555
+   # Verify (lists history, submits nothing):
+   xcrun notarytool history --keychain-profile "applio-notarize"
    ```
 
 ### Build Commands
@@ -393,7 +387,7 @@ All dependencies are included in the Applio virtual environment. For full techni
 # Recommended command for distribution
 python build_macos.py --sign --dmg --notarize
 
-# Output: dist/Applio-3.6.2.1.dmg (notarized, ~850MB)
+# Output: dist/Applio-<VERSION>.dmg + dist/Applio.app (notarized + stapled, ~1.6GB)
 ```
 
 ## Build Output
@@ -545,19 +539,64 @@ The macOS build patches the training UI at build time to support additional samp
 
 ## Architecture
 
+### Bundle layout
 ```
 Applio.app/
 ├── Contents/
-│   ├── MacOS/Applio          # Main executable (PyInstaller bootloader)
-│   ├── Frameworks/           # Python runtime and packages
-│   │   ├── tabs/             # UI tabs (patched at build time)
-│   │   └── ...               # Other Python packages
-│   ├── Resources/            # App assets
-│   ├── Info.plist           # App metadata, permissions, version
-│   └── _CodeSignature/      # Signature (ad-hoc or Developer ID)
+│   ├── MacOS/Applio          # PyInstaller bootloader → applio_launcher.py (entry)
+│   ├── Frameworks/           # Python.framework + all bundled packages (.so/.dylib)
+│   ├── Resources/            # tabs/, assets/, rvc/, core.py, app.py, macos_wrapper.py + build_info.json
+│   ├── Info.plist            # metadata, usage descriptions, version, LSMinimumSystemVersion
+│   └── _CodeSignature/       # Developer ID signature + notarization staple
 ```
+User data (models, datasets, training output) lives in the user-selected external location, **not** the bundle.
 
-**Note:** User data (models, datasets, training outputs) is stored in the user-selected external location, not in the app bundle.
+### Runtime: two cooperating processes
+The native app runs as **two processes**, because macOS app contracts (dock icon, menu bar, reopen,
+quit cascade) are per-process:
+- **`applio_launcher.py`** — the `.app` EXE (**Regular** activation policy): owns the dock icon +
+  menu bar + `NSApplicationDelegate`. It re-execs as training/preprocess/extract **subprocesses**
+  (the entry detects `argv[1].endswith('.py')` and `runpy.run_path`s the script, so upstream's
+  `Popen([sys.executable, script])` works against the frozen binary). It `subprocess.Popen`s the wrapper.
+- **`macos_wrapper.py`** — an **Accessory** (dock-hidden) child: owns the only window, runs
+  **Gradio in-process** (daemon thread, port 6969; loading screen on 5678) inside a **pywebview**
+  `WKWebView`, with its own native menu. Reachable from the launcher via a 2 s-polled
+  `runtime_paths.json` flag + `NSDistributedNotificationCenter`.
+
+### Frozen-CWD invariant
+In the frozen app the working directory is the bundle, not the data dir — so upstream's CWD-relative
+paths (`logs/`, `assets/config.json`, dataset folders) break. The wrapper does `os.chdir(DATA_PATH)`
+before importing Gradio, and build-time patches (`patches/patch_*.py`) resolve paths absolutely via
+`APPLIO_DATA_PATH` → `runtime_paths.json` → `~/Applio`. This is the root cause behind most
+"works in dev, fails frozen" bugs.
+
+### Build-time patches (minimal upstream delta)
+Upstream files are **never** edited in the repo. `build_macos.py:pre_build_patch()` applies
+`patches/*.py` to the source just before PyInstaller, then `post_build_restore()` reverts them — so
+`git status` stays clean. See "Fork Modifications" below.
+
+### Lite build
+The default build is **lite**: `clean_bundled_models()` strips model weights from the bundle
+(~1.6 GB without models); ~2 GB of models download on first launch. Local `rvc/models/` is never
+touched. (A model-bundled build is the separate `--models-installer` app.)
+
+### Signing & notarization pipeline (technical)
+`build_macos.py --sign --notarize --dmg` runs, in order, each step gating the next:
+1. **Inside-out sign** — discover every Mach-O under `Contents/{Frameworks,Resources,MacOS}`
+   (including bare executables the old `*.so`/`*.dylib` glob missed), sign each leaf with
+   `--options runtime --timestamp` (**no** entitlements on leaves), then seal the outer bundle with
+   `assets/entitlements.plist` (**no** `--deep`). Hard-fail `codesign --verify`.
+2. **Notarize `.app`** — `ditto`-zip → `xcrun notarytool submit --keychain-profile applio-notarize
+   --wait` → parse `status: Accepted` (auto-pull the JSON log on failure, which names the offending binary).
+3. **Staple `.app`** — `xcrun stapler staple` + `validate`.
+4. **Build + sign `.dmg`** from the **stapled** app — `shutil.copytree(symlinks=True)` preserves the
+   `Python.framework` symlinks; sign the DMG with `codesign --timestamp` (no runtime/entitlements).
+5. **Notarize `.dmg`** → **staple `.dmg`**.
+6. **Final Gatekeeper gate** — `spctl` + `stapler validate` must report `source=Notarized Developer ID`.
+
+Authentication is an App Store Connect **Team Key** (role **App Manager**) stored via
+`xcrun notarytool store-credentials` — **no secrets live in the repo** (the `.p8` stays outside it,
+and `.gitignore` excludes `*.p8`/`*.p12`/`*.key`).
 
 ## Fork Modifications (Build-Time Patches)
 
@@ -618,11 +657,20 @@ The app is signed with entitlements from `assets/entitlements.plist`:
 
 | Entitlement | Value | Purpose |
 |-------------|-------|---------|
-| `app-sandbox` | false | Full filesystem access for models |
-| `device.audio-input` | true | Microphone access |
-| `cs.allow-jit` | true | PyTorch JIT compilation |
-| `network.client` | true | Download models |
-| `network.server` | true | Gradio local server |
+| `app-sandbox` | false | Not sandboxed (Developer ID distribution; needs free filesystem access) |
+| `device.camera` | true | Camera (declared) |
+| `files.user-selected.read-write` | true | User-chosen data/model folders |
+| `files.downloads.read-write` | true | Downloads folder |
+| `network.client` | true | Outbound HTTPS (model downloads) |
+| `network.server` | true | Gradio local server (6969/5678) |
+| `automation.apple-events` | true | Automation (declared) |
+| `cs.allow-jit` | true | Python/PyTorch under hardened runtime |
+| `cs.allow-unsigned-executable-memory` | true | ctypes/libffi (required for PyInstaller+Python) |
+| `cs.disable-library-validation` | true | Load bundled third-party .dylib/.so (PyInstaller) |
+
+No `device.audio-input` — audio is captured by the browser in the Gradio UI, not the app process.
+These entitlements are applied only to the outer `.app` bundle/main executable; leaf `.so`/`.dylib`
+binaries are signed with hardened runtime + timestamp only.
 
 ## Troubleshooting
 
@@ -700,14 +748,16 @@ Should show your "Developer ID Application" certificate.
 
 ### Notarization fails
 
-1. Verify app-specific password in keychain:
+The build auto-pulls and prints the JSON log on failure (it names the offending binary). To debug:
+
+1. Verify the keychain profile works:
    ```bash
-   security find-generic-password -a "your@email.com" -s "applio-notarize" -w
+   xcrun notarytool history --keychain-profile "applio-notarize"
    ```
-2. Check Apple System Status for outages
-3. Review notarization logs:
+2. Check [Apple System Status](https://developer.apple.com/system-status/) for outages.
+3. Review the notarization log for a given submission:
    ```bash
-   xcrun notarytool log <submission-id> --apple-id your@email.com --team-id TEAMID --password "xxxx"
+   xcrun notarytool log <submission-id> --keychain-profile "applio-notarize"
    ```
 
 ## Build Requirements
@@ -725,10 +775,18 @@ All included in `requirements_macos.txt`.
 
 ## Release Checklist
 
-1. Update `BUILD_NUMBER` in `build_macos.py`
-2. Build and notarize:
+1. Update `BUILD_NUMBER` in `build_macos.py` (bumps `VERSION` and the derived `CFBundleVersion`).
+2. Ensure prerequisites: **Developer ID Application** cert in Keychain + `applio-notarize` notarytool profile.
+3. Build, sign, notarize, staple (both `.app` and `.dmg`):
    ```bash
-   python build_macos.py --sign --dmg --notarize
+   venv_macos/bin/python build_macos.py --sign --notarize --dmg
    ```
-3. Verify DMG installs correctly on clean Mac
-4. Upload `dist/Applio-{version}.dmg` to GitHub Releases
+4. Verify Gatekeeper (must show `source=Notarized Developer ID`):
+   ```bash
+   spctl -vvv --assess --type execute dist/Applio.app
+   xcrun stapler validate dist/Applio.app
+   xcrun stapler validate "dist/Applio-<VERSION>.dmg"
+   ```
+5. Confirm `git status` is clean (the build restores upstream files; `git checkout -- <file>` any dirty upstream file).
+6. Smoke-test the DMG on a clean Mac (drag to /Applications, launch — should open **without** `xattr -cr`).
+7. Commit, push, then create a GitHub Release tagged `v<VERSION>` with `dist/Applio-<VERSION>.dmg` as the asset.

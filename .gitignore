@@ -34,6 +34,13 @@ dist/
 Applio.spec
 .DS_Store
 
+# Apple signing/notarization secrets — never commit (these live outside the
+# repo, at ~/.private_keys/). Defense-in-depth in case one is ever copied in.
+*.p8
+AuthKey_*.p8
+*.p12
+*.key
+
 # Local archives (downloaded models, etc.)
 .archive/
 

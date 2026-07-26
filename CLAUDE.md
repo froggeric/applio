@@ -71,7 +71,7 @@ assets/
 |---------|------|
 | macOS installer | `install_applio_mac.sh` |
 | 44.1kHz patch | `patches/patch_train_44100.py` |
-| Code signing config | `assets/entitlements.plist`, `scripts/entitlements_dev_id.plist` |
+| Code signing config | `assets/entitlements.plist` |
 | Fork differences | `FORK_DIFFERENCES.md` |
 | Main entry point | `app.py` |
 | Core function exports | `core.py` |
@@ -126,7 +126,7 @@ after an upstream sync" below), because upstream rewrites the source our `patche
   `communicate()` to preserve upstream's `RuntimeError(stderr)` behavior.
 
 **Safe-to-modify files** (macOS-only, not in upstream):
-- `assets/entitlements.plist`, `scripts/entitlements_dev_id.plist`
+- `assets/entitlements.plist`
 - `patches/`, `macos_wrapper.py`, `build_macos.py`, `Applio.spec`
 - `install_applio_mac.sh`, `requirements_macos.txt`, `CLAUDE.md`
 
@@ -204,7 +204,7 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
   AppKit event loop needs an interactive GUI session and blocks/idles when backgrounded.
 - **Local `rvc/models` must NOT be deleted.** The default `build_macos.py` is a *lite*
   build: `clean_bundled_models()` strips model weights from `dist/Applio.app` (the bundle
-  only — shipped app stays ~870M) and never touches the local filesystem. So keeping the
+  only — shipped app stays ~1.6GB) and never touches the local filesystem. So keeping the
   ~1.8G of models in gitignored `rvc/models/` does NOT bloat the shipped app, and `rm -rf
   rvc/models/*` only forces a costly ~2G re-download. Leave local models in place; the
   bundle is re-stripped on every build. (A model-bundled build is `--models-installer`, a
@@ -230,15 +230,33 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 - `ps -E -p <pid>` (macOS) dumps a frozen process's env — check inherited `APPLIO_*`/`PATH`.
 
 **Build process gotchas:**
-- Two entitlements files must stay in sync: `assets/entitlements.plist` (full) and `scripts/entitlements_dev_id.plist` (minimal for Developer ID)
+- Single entitlements file: `assets/entitlements.plist` (the old `scripts/entitlements_dev_id.plist` was deleted — it had drifted). Signing/notarization is built into `build_macos.py --sign --notarize --dmg` (the standalone `scripts/*.sh` were removed).
 - No microphone entitlement needed - pywebview wrapper doesn't capture audio; Gradio handles it via browser
 - **Patcher escape sequences:** In triple-quoted strings, `\\n` produces literal newline. Use `chr(10)` for newlines in patched code.
 - Patches in `patches/` are applied to source files before PyInstaller, then source files are restored to pristine state
 - PyInstaller cleans `dist/` at start - never delete while builds running
-- Build size: ~850MB (~2GB downloads on first launch)
+- Build size: ~1.6GB lite (post-3.6.3 dependency stack; ~2GB models download on first launch)
 - Signing requires handling broken symlinks (use `path.exists()` before `rglob`)
 - PyInstaller cache corruption: clear `~/Library/Application Support/pyinstaller/`
-- Notarization fails for PyInstaller apps - users run `xattr -cr Applio.app`
+- **Signing & notarization (working):** `venv_macos/bin/python build_macos.py --sign --notarize --dmg`
+  produces a notarized+stapled `.app` and `.dmg`. Auth = `--keychain-profile applio-notarize`
+  (App Store Connect **Team Key**, **App Manager** role — stored via
+  `xcrun notarytool store-credentials`). Pipeline: inside-out Mach-O sign (leaf binaries get
+  `--options runtime --timestamp` only; entitlements only on the outer bundle) → notarize `.app`
+  (ditto zip) → staple `.app` → build+sign `.dmg` (`--timestamp`) → notarize `.dmg` → staple `.dmg`.
+  `CFBundleVersion` must be ≤3 numeric segments (derived `3060305`-style integer, NOT the 4-segment
+  display VERSION). A stapled artifact should not need `xattr -cr` from end users. **Validated
+  end-to-end 2026-07-26** — `v3.6.3.5` is the first notarized release (both `.app` + `.dmg` pass
+  `spctl`/`stapler validate` as `Notarized Developer ID`). Cut a release: `build_macos.py --sign
+  --notarize --dmg` → commit/push → `git tag v<VERSION>` → `gh release create v<VERSION>
+  dist/Applio-<VERSION>.dmg` (if `gh release` 403s on scope, use `gh api` to create + `curl` to upload
+  the asset — see "GitHub releases" below).
+- **DMG symlink trap:** `create_dmg` MUST use `shutil.copytree(..., symlinks=True)`. Python.framework
+  uses symlinks (`Python -> Versions/Current/Python`, `Resources -> Versions/Current/Resources`,
+  `Current -> Versions/3.x`); the default `symlinks=False` flattens them into real files, breaking
+  the framework's signature seal → the DMG notarization is rejected with "The signature of the binary
+  is invalid" on the Python framework paths (the `.app` zip notarization still passes — only the DMG
+  copy breaks). Staple the `.app` before building the DMG.
 - **Upstream 3.6.3 changed `subprocess.run` calls:** upstream now assigns
   `result = subprocess.run(...)` and adds `if result.returncode != 0: return ...` after each.
   Patches that anchored on bare `subprocess.run(command)\n return f"..."` must be re-pointed to

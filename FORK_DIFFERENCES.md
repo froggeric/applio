@@ -68,7 +68,7 @@ This fork maintains a **minimal delta** from upstream - only macOS native app ad
 
 | File | Purpose |
 |------|---------|
-| `assets/entitlements.plist` | macOS code signing entitlements (microphone, JIT, network access) |
+| `assets/entitlements.plist` | macOS code signing entitlements (hardened-runtime: JIT, unsigned-executable-memory, disable-library-validation; + network/camera — no microphone; see README_MACOS.md) |
 | `assets/loading.html` | HTML/CSS loading screen shown during backend startup |
 | `assets/pretrains_macos_additions.json` | Additional pretrained model definitions for Download tab |
 
@@ -158,12 +158,25 @@ On first launch, users select where to store all Applio data (models, datasets, 
 ### `build_macos.py` - Build Options
 
 ```bash
-python build_macos.py                    # Basic build (LITE, ad-hoc signed)
-python build_macos.py --sign             # Sign with Developer ID
-python build_macos.py --dmg              # Create DMG installer
-python build_macos.py --notarize         # Notarize with Apple
-python build_macos.py --models-pkg       # Build models-only PKG installer
+venv_macos/bin/python build_macos.py                           # Basic build (LITE, ad-hoc signed)
+venv_macos/bin/python build_macos.py --sign --notarize --dmg   # Release: sign + notarize + staple (.app AND .dmg)
+venv_macos/bin/python build_macos.py --models-installer        # Standalone models-installer app
+# Optional overrides:
+#   --keychain-profile NAME   notarytool profile (default: applio-notarize)
+#   --identity "Developer ID Application: ..."   codesign identity
+#   --team-id XXXXXXXXXX      Apple team id
+#   --build-number N          bump the build (drives VERSION + CFBundleVersion)
 ```
+
+### Code Signing & Notarization (new in 3.6.3.5)
+
+The fork ships a working **Developer ID sign + Apple notarize + staple** pipeline (the first
+notarized release). `--sign --notarize --dmg` produces a Gatekeeper-clean `.app` and `.dmg`:
+inside-out Mach-O signing (hardened runtime; entitlements only on the outer bundle) → ditto-zip +
+`notarytool submit --keychain-profile applio-notarize` → staple `.app` → build + sign `.dmg`
+(preserving the `Python.framework` symlinks) → notarize + staple `.dmg` → final
+`spctl`/`stapler validate`. Auth is an App Store Connect **Team Key** (role **App Manager**); **no
+secrets live in the repo**. See `README_MACOS.md` → "Code Signing & Notarization" for full setup.
 
 ### Build-Time Patchers
 
@@ -223,17 +236,19 @@ Since this fork only adds files that don't exist in upstream, there should be no
 ## Building the macOS App
 
 ```bash
-# Development (requires venv with dependencies)
+# Development (requires venv_macos with dependencies)
 source venv_macos/bin/activate
-python macos_wrapper.py
+python applio_launcher.py          # foreground terminal (pywebview idles when backgrounded)
 
 # Build app bundle (LITE mode)
-python build_macos.py
-# Output: dist/Applio.app (~820MB, models download on first launch)
+venv_macos/bin/python build_macos.py
+# Output: dist/Applio.app (~1.6GB, models download on first launch)
 
-# Build models installer (optional)
-python build_macos.py --models-pkg
-# Output: dist/ApplioModels-{version}.pkg (~5.3GB, all models bundled)
+# Build models installer (optional, separate artifact)
+venv_macos/bin/python build_macos.py --models-installer
+
+# Release build (signed + notarized + stapled .app and .dmg)
+venv_macos/bin/python build_macos.py --sign --notarize --dmg
 ```
 
 See `README_MACOS.md` for detailed instructions.
