@@ -257,6 +257,17 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
   the framework's signature seal → the DMG notarization is rejected with "The signature of the binary
   is invalid" on the Python framework paths (the `.app` zip notarization still passes — only the DMG
   copy breaks). Staple the `.app` before building the DMG.
+- **Mach-O detection must use bytes mode:** `file -b <path>` can emit non-UTF-8 bytes → `subprocess.run(text=True)`
+  raises UnicodeDecodeError mid-sign. Use `capture_output=True` (no `text=True`) and test `b"Mach-O" in r.stdout`.
+- **Verifying a notarized DMG:** `spctl --assess --type execute <dmg>` reports "rejected (…does not seem to be an
+  app)" / "Insufficient Context" — expected for a disk image. The authoritative DMG check is
+  `xcrun stapler validate <dmg>` → "The validate action worked!". (`.app` uses spctl; `.dmg` uses stapler.)
+- **Background build exit codes:** don't end a backgrounded build with `; echo "exit=$?"` — the task reports the
+  LAST command's exit (the echo = 0), masking a failed build. Make the build the final command and read its real
+  exit/output (`tail` the output file, check for `BUILD COMPLETE` / hard-fail markers).
+- **Cert-free gates for signing changes:** a plain `build_macos.py` run (no `--sign`) is safe (`--help`/`py_compile`
+  exit before the module-level build) and verifies `CFBundleVersion` in the built Info.plist + git-cleanliness
+  without the cert; unit-test Mach-O detection by copying the fn to a temp script (`import build_macos` runs the build).
 - **Upstream 3.6.3 changed `subprocess.run` calls:** upstream now assigns
   `result = subprocess.run(...)` and adds `if result.returncode != 0: return ...` after each.
   Patches that anchored on bare `subprocess.run(command)\n return f"..."` must be re-pointed to
