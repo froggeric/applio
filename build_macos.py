@@ -570,6 +570,7 @@ def pre_build_patch():
         ("patches/patch_data_paths.py", "core.py", "core.py - file-based path resolution", "dir"),
         ("patches/patch_preflight_validation.py", "core.py", "core.py - pre-flight dataset validation", "dir"),
         ("patches/patch_dataset_paths.py", "core.py", "core.py + tabs/train/train.py - dataset path absolute resolution", "dir"),
+        ("patches/patch_download_paths.py", "tabs/download/download.py", "tabs/download/download.py - custom-pretrained download data-path resolution", "dir"),
         ("patches/patch_process_tracking.py", "core.py", "core.py - process tracking for subprocesses", "dir"),  # MUST be before subprocess_validation
         ("patches/patch_subprocess_validation.py", "core.py", "core.py - subprocess validation", "dir"),
         ("patches/patch_custom_pretrained_paths.py", "core.py", "core.py - custom pretrained path resolution", "dir"),
