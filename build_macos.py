@@ -580,6 +580,7 @@ def pre_build_patch():
         ("patches/patch_f0_model_paths.py", "rvc/lib/predictors/f0.py", "f0.py - absolute model paths for frozen app", "dir"),
         # File-based patchers (pass full file path)
         ("patches/patch_loading_html.py", "assets/loading.html", "assets/loading.html - dynamic version in footer", "dir"),  # "dir" so patcher gets "assets" dir (patch_all expects dir/root, not the file path)
+        ("patches/patch_version_checker.py", "assets/version_checker.py", "assets/version_checker.py - read current version from bundle, not stale data-dir config", "dir"),
         ("patches/patch_train_44100.py", "tabs/train/train.py", "tabs/train/train.py - 44100 Hz support", "file"),
         ("patches/patch_multiprocessing.py", "rvc/train/extract/extract.py", "extract.py - multiprocessing safety", "file"),
         ("patches/patch_extract_error_logging.py", "rvc/train/extract/extract.py", "extract.py - file-based error logging", "dir"),
