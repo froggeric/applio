@@ -3685,15 +3685,27 @@ class ApplioLauncher:
 
         from AppKit import NSAlert, NSAlertStyleInformational
 
-        # Load version from config
+        # Load the full build version (e.g. "3.6.3.5") from the same source as
+        # Info.plist and the loading screen (Contents/Resources/build_info.json),
+        # so the About dialog never diverges from the app's bundle version.
         version = "Unknown"
         try:
             import json
-            config_path = os.path.join(BASE_PATH, "assets", "config.json")
-            if os.path.exists(config_path):
-                with open(config_path, "r") as f:
-                    config = json.load(f)
-                    version = config.get("version", "Unknown")
+            for _rel in ("build_info.json", os.path.join("assets", "build_info.json")):
+                _bi = os.path.join(BASE_PATH, _rel)
+                if os.path.exists(_bi):
+                    with open(_bi, "r") as f:
+                        _info = json.load(f)
+                        version = _info.get("full_version") or _info.get(
+                            "version", version
+                        )
+                    if version != "Unknown":
+                        break
+            if version == "Unknown":
+                _cfg = os.path.join(BASE_PATH, "assets", "config.json")
+                if os.path.exists(_cfg):
+                    with open(_cfg, "r") as f:
+                        version = json.load(f).get("version", "Unknown")
         except Exception:
             pass
 

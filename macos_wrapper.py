@@ -195,15 +195,33 @@ else:
 # This ensures version consistency without manual synchronization.
 
 def _get_version_info():
-    """Read version from build_info.json (written by build_macos.py at build time)."""
+    """Read the full build version from build_info.json (written by build_macos.py).
+
+    build_macos.py writes build_info.json to Contents/Resources/build_info.json,
+    which in the frozen app is BASE_PATH/build_info.json (BASE_PATH == sys._MEIPASS).
+    Earlier code looked only under BASE_PATH/assets/ (where the file never landed),
+    so it silently fell back to a stale literal. Prefer 'full_version'
+    (e.g. '3.6.3.5'); fall back to 'version', then the upstream config version.
+    """
     import json
-    build_info_path = os.path.join(BASE_PATH, "assets", "build_info.json")
-    try:
-        with open(build_info_path, "r", encoding="utf-8") as f:
-            info = json.load(f)
-            return info.get("version", "3.6.2.0")
-    except Exception:
-        return "3.6.2.0"
+    for _rel in ("build_info.json", os.path.join("assets", "build_info.json")):
+        _candidate = os.path.join(BASE_PATH, _rel)
+        try:
+            with open(_candidate, "r", encoding="utf-8") as f:
+                _info = json.load(f)
+                _full = _info.get("full_version") or _info.get("version")
+                if _full:
+                    return _full
+        except Exception:
+            continue
+    # Last resort: upstream version from config (no build number).
+    for _cfg in ("assets/config.json", "assets/config_template.json"):
+        try:
+            with open(os.path.join(BASE_PATH, _cfg), "r", encoding="utf-8") as f:
+                return json.load(f).get("version", "3.6.3")
+        except Exception:
+            continue
+    return "3.6.3"
 
 VERSION = _get_version_info()
 GITHUB_REPO = "froggeric/applio-macOS-native-app"
@@ -1033,7 +1051,7 @@ def setup_logging():
         sys.stderr = open(log_file, "a")
 
     logging.info("--- Applio macOS Native Session Start ---")
-    logging.info(f"Version: 1.7.4 (Simplified Local)")
+    logging.info(f"Version: {VERSION}")
     logging.info(f"CWD: {os.getcwd()}")
     logging.info(f"Base Path: {BASE_PATH}")
     logging.info(f"sys.frozen: {getattr(sys, 'frozen', False)}")
