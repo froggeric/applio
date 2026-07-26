@@ -810,6 +810,11 @@ if os.path.exists(info_plist_path):
         # High-DPI support
         plist['NSHighResolutionCapable'] = True
 
+        # Minimum macOS version (arm64 build; PyTorch MPS + the frameworks we
+        # bundle require at least Monterey). Lets Gatekeeper refuse a launch on
+        # an unsupported OS with a clear message instead of a cryptic crash.
+        plist['LSMinimumSystemVersion'] = "12.0.0"
+
         # Prevent multiple app instances (defense in depth for subprocess handling)
         plist['LSMultipleInstancesProhibited'] = True
 
