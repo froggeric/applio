@@ -495,7 +495,19 @@ def verify_process_identity(pid, expected_start_time=None):
                 expected = expected_start_time
 
             # Allow 2 second tolerance for timing differences
-            actual = datetime.datetime.fromtimestamp(proc.create_time())
+            try:
+                actual = datetime.datetime.fromtimestamp(proc.create_time())
+            except psutil.AccessDenied:
+                # Process exists but its start time is unreadable. A *dead* pid raises
+                # NoSuchProcess, not AccessDenied — so reaching here means it is ALIVE.
+                # For quit-safety we treat an unverifiable-live process as our own
+                # rather than risk skipping a "training in progress" warning.
+                logging.info(
+                    f"[Launcher] PID {pid} alive but start time unreadable "
+                    f"(AccessDenied); assuming active"
+                )
+                return True
+
             delta = abs((actual - expected).total_seconds())
 
             if delta > 2.0:
@@ -504,8 +516,16 @@ def verify_process_identity(pid, expected_start_time=None):
 
         return True
 
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except psutil.NoSuchProcess:
         return False
+    except psutil.AccessDenied:
+        # Process exists but is inaccessible (rare for same-user processes). Dead pids
+        # raise NoSuchProcess above; AccessDenied implies the process is ALIVE, so be
+        # conservative and treat it as our own active process.
+        logging.info(
+            f"[Launcher] PID {pid} exists but inaccessible (AccessDenied); assuming active"
+        )
+        return True
 
 
 def validate_process_state(state):
