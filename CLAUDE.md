@@ -251,6 +251,14 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
   --notarize --dmg` → commit/push → `git tag v<VERSION>` → `gh release create v<VERSION>
   dist/Applio-<VERSION>.dmg` (if `gh release` 403s on scope, use `gh api` to create + `curl` to upload
   the asset — see "GitHub releases" below).
+- **CI signing:** `.github/workflows/release-macos.yml` (tag `v*` → build+sign+notarize+staple, attaches
+  the DMG to the release) and `ci-macos.yml` (build-only, path-filtered, no cert). The release job runs
+  in a protected `signing` **environment** and uses inline API-key auth (`build_macos.py --api-key …
+  --api-key-id … --api-issuer …` — no keychain on the runner; the `--keychain-profile` path is for
+  local). Secrets in the `signing` env: `MACOS_CERTIFICATE` (base64 .p12), `MACOS_CERTIFICATE_PWD`,
+  `APP_STORE_CONNECT_KEY` (base64 .p8), `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER`. These
+  are GitHub-side settings — a human must create the env + secrets; can't be done from code. macOS
+  runners bill at ~10× and are metered even on public repos, hence the path-filtering + tag-only triggers.
 - **DMG symlink trap:** `create_dmg` MUST use `shutil.copytree(..., symlinks=True)`. Python.framework
   uses symlinks (`Python -> Versions/Current/Python`, `Resources -> Versions/Current/Resources`,
   `Current -> Versions/3.x`); the default `symlinks=False` flattens them into real files, breaking

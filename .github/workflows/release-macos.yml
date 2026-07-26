@@ -1,0 +1,104 @@
+name: Release (macOS — sign + notarize)
+
+# Builds, signs (Developer ID Application), notarizes, and staples the macOS .app
+# and .dmg, then attaches the DMG to the GitHub release for the pushed tag.
+#
+# One-time setup — repo Settings → Environments → create environment "signing",
+# then add these secrets TO THAT ENVIRONMENT (not repo-level) + add Required
+# Reviewers so the certificate can't be exfiltrated via a PR:
+#   MACOS_CERTIFICATE          base64 of the Developer ID Application .p12
+#                              (export from Keychain Access, then `base64 -i file.p12`)
+#   MACOS_CERTIFICATE_PWD      the .p12 export password
+#   APP_STORE_CONNECT_KEY      base64 of the App Store Connect API key (AuthKey_*.p8)
+#                              — Team Key, role App Manager (notarytool access)
+#   APP_STORE_CONNECT_KEY_ID   the 10-char Key ID
+#   APP_STORE_CONNECT_ISSUER   the Issuer ID (UUID)
+#
+# Cut a release: bump BUILD_NUMBER (and version if needed), commit, then
+# `git tag vX.Y.Z && git push --tags` (or run via "Run workflow"). The DMG lands
+# on the release for that tag.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to attach the build to (must already exist)'
+        required: false
+
+permissions:
+  contents: write   # attach the DMG to the release
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-14
+    environment: signing
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache venv_macos
+        uses: actions/cache@v4
+        with:
+          path: venv_macos
+          key: venvmacos-${{ runner.os }}-py310-${{ hashFiles('requirements_macos.txt') }}
+          restore-keys: venvmacos-${{ runner.os }}-py310-
+
+      - name: Create venv + install dependencies
+        run: |
+          if [ ! -x venv_macos/bin/python ]; then
+            python3.10 -m venv venv_macos
+          fi
+          venv_macos/bin/pip install --upgrade pip wheel
+          venv_macos/bin/pip install -r requirements_macos.txt
+
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+
+      - name: Build, sign, notarize, staple (.app + .dmg)
+        env:
+          ASC_KEY_B64: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER }}
+          P8_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: |
+          # Decode the API key without relying on BSD/GNU base64 CLI differences.
+          python3 -c "import base64,os; open(os.environ['P8_PATH'],'wb').write(base64.b64decode(os.environ['ASC_KEY_B64']))"
+          venv_macos/bin/python build_macos.py --sign --notarize --dmg \
+            --api-key "$P8_PATH" \
+            --api-key-id "$ASC_KEY_ID" \
+            --api-issuer "$ASC_ISSUER"
+
+      - name: Verify Gatekeeper
+        run: |
+          echo "spctl (.app):"; spctl -vvv --assess --type execute dist/Applio.app
+          echo "stapler (.app):"; xcrun stapler validate dist/Applio.app
+          echo "stapler (.dmg):"; xcrun stapler validate dist/Applio-*.dmg
+
+      - name: Attach DMG to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Applio-*.dmg
+          generate_release_notes: true
+
+      - name: Upload notarization logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notary-logs
+          path: /tmp/notary-*.json
+          if-no-files-found: ignore
+          retention-days: 14

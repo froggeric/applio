@@ -176,6 +176,19 @@ def parse_args():
         default=TEAM_ID,
         help="team id (default: 46BZ85ALNS)",
     )
+    parser.add_argument(
+        "--api-key", type=str, default=None,
+        help="path to App Store Connect API key (.p8) for notarytool (inline auth; CI-friendly). "
+             "If set, used instead of --keychain-profile.",
+    )
+    parser.add_argument(
+        "--api-key-id", type=str, default=None,
+        help="App Store Connect API Key ID (required with --api-key)",
+    )
+    parser.add_argument(
+        "--api-issuer", type=str, default=None,
+        help="App Store Connect Issuer ID (required with --api-key)",
+    )
     return parser.parse_args()
 
 
@@ -191,6 +204,17 @@ VERSION = f"{APPLIO_VERSION}.{args.build_number}"
 DEVELOPER_IDENTITY = args.identity
 TEAM_ID = args.team_id
 KEYCHAIN_PROFILE = args.keychain_profile
+
+# Notarytool auth: inline App Store Connect API key (CI, no keychain needed) if
+# provided, else the keychain profile (local interactive). Selected once, used by
+# _notarytool_submit.
+if args.api_key:
+    if not (args.api_key_id and args.api_issuer):
+        print("ERROR: --api-key requires --api-key-id and --api-issuer")
+        sys.exit(1)
+    _NOTARY_AUTH = ["--key", args.api_key, "--key-id", args.api_key_id, "--issuer", args.api_issuer]
+else:
+    _NOTARY_AUTH = ["--keychain-profile", KEYCHAIN_PROFILE]
 
 # --- Apple-valid plist versions (notarization requires ≤3 numeric segments,
 # no leading zeros — Apple strips them → mismatch). The legacy VERSION
@@ -1120,15 +1144,15 @@ def create_dmg():
 # =================================================================
 # Notarization
 # =================================================================
-def _notarytool_submit(artifact, profile, timeout=7200):
-    """Submit `artifact` to Apple's notary service with `--keychain-profile`, wait
-    for a terminal state, and on failure pull the JSON log (which names the exact
-    offending binary/key). Returns True only on `status: Accepted`."""
+def _notarytool_submit(artifact, timeout=7200):
+    """Submit `artifact` to Apple's notary service, wait for a terminal state, and
+    on failure pull the JSON log (which names the exact offending binary/key).
+    Returns True only on `status: Accepted`. Auth comes from the module-level
+    `_NOTARY_AUTH` (inline API key for CI, or keychain profile for local)."""
     import re
-    print(f"  notarytool submit {artifact} (profile: {profile}) ...")
+    print(f"  notarytool submit {artifact} ...")
     r = subprocess.run(
-        ["xcrun", "notarytool", "submit", artifact,
-         "--keychain-profile", profile, "--wait"],
+        ["xcrun", "notarytool", "submit", artifact] + _NOTARY_AUTH + ["--wait"],
         capture_output=True, text=True, timeout=timeout,
     )
     out = (r.stdout or "") + (r.stderr or "")
@@ -1141,8 +1165,7 @@ def _notarytool_submit(artifact, profile, timeout=7200):
     if m:
         sub_id = m.group(1)
         log_path = f"/tmp/notary-{os.path.basename(artifact)}-{sub_id}.json"
-        subprocess.run(["xcrun", "notarytool", "log", sub_id,
-                        "--keychain-profile", profile, log_path],
+        subprocess.run(["xcrun", "notarytool", "log", sub_id] + _NOTARY_AUTH + [log_path],
                        capture_output=True, text=True)
         try:
             with open(log_path) as f:
@@ -1227,7 +1250,7 @@ if NOTARIZE and sign_success:
     app_zip = os.path.join("dist", f"{APP_NAME}.zip")
     print("\nNotarizing the .app with Apple...")
     subprocess.run(["ditto", "-c", "-k", "--keepParent", app_path, app_zip], check=True)
-    ok = _notarytool_submit(app_zip, KEYCHAIN_PROFILE)
+    ok = _notarytool_submit(app_zip)
     try:
         os.remove(app_zip)
     except OSError:
@@ -1240,7 +1263,7 @@ if NOTARIZE and sign_success:
         dmg_path = create_dmg()
         if not dmg_path or not _sign_dmg(dmg_path):
             sys.exit(1)
-        if not _notarytool_submit(dmg_path, KEYCHAIN_PROFILE) or not _staple(dmg_path):
+        if not _notarytool_submit(dmg_path) or not _staple(dmg_path):
             sys.exit(1)
 
     notarize_success = True

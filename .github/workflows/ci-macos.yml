@@ -1,0 +1,88 @@
+name: CI (macOS build)
+
+# Cheap build-only smoke test (no cert, no notarization) that catches build
+# regressions on build-relevant changes. Path-filtered so doc-only commits don't
+# burn macOS minutes. Ad-hoc signed (local-use quality) — NOT distributable.
+# For signed/notarized releases, see release-macos.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build_macos.py'
+      - 'Applio.spec'
+      - 'applio_launcher.py'
+      - 'macos_wrapper.py'
+      - 'requirements_macos.txt'
+      - 'assets/entitlements.plist'
+      - 'patches/**'
+      - 'core.py'
+      - 'app.py'
+      - 'tabs/**'
+      - 'rvc/**'
+      - '.github/workflows/ci-macos.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'build_macos.py'
+      - 'Applio.spec'
+      - 'applio_launcher.py'
+      - 'macos_wrapper.py'
+      - 'requirements_macos.txt'
+      - 'assets/entitlements.plist'
+      - 'patches/**'
+      - 'core.py'
+      - 'app.py'
+      - 'tabs/**'
+      - 'rvc/**'
+      - '.github/workflows/ci-macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache venv_macos
+        uses: actions/cache@v4
+        with:
+          path: venv_macos
+          key: venvmacos-${{ runner.os }}-py310-${{ hashFiles('requirements_macos.txt') }}
+          restore-keys: venvmacos-${{ runner.os }}-py310-
+
+      - name: Create venv + install dependencies
+        run: |
+          if [ ! -x venv_macos/bin/python ]; then
+            python3.10 -m venv venv_macos
+          fi
+          venv_macos/bin/pip install --upgrade pip wheel
+          venv_macos/bin/pip install -r requirements_macos.txt
+
+      - name: Build (ad-hoc, no signing)
+        run: venv_macos/bin/python build_macos.py
+
+      - name: Assert Apple-valid bundle version
+        run: |
+          set -e
+          CFV=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" dist/Applio.app/Contents/Info.plist)
+          CFSLV=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" dist/Applio.app/Contents/Info.plist)
+          echo "CFBundleVersion=$CFV  CFBundleShortVersionString=$CFSLV"
+          # CFBundleVersion must be 1-3 numeric segments (notarization requires it).
+          echo "$CFV" | rg -q '^[0-9]+(\.[0-9]+){0,2}$' || { echo "ERROR: CFBundleVersion not Apple-valid: $CFV"; exit 1; }
+
+      - name: Verify ad-hoc signature
+        run: codesign --verify --all-architectures --deep --strict --verbose=2 dist/Applio.app

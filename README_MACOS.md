@@ -390,6 +390,36 @@ python build_macos.py --sign --dmg --notarize
 # Output: dist/Applio-<VERSION>.dmg + dist/Applio.app (notarized + stapled, ~1.6GB)
 ```
 
+### CI: signed + notarized releases via GitHub Actions
+
+Two fork-added workflows live in `.github/workflows/`:
+
+- **`ci-macos.yml`** — a build-only smoke test (ad-hoc, **no cert**). Path-filtered to run only on
+  build-relevant changes to `main` / PRs; catches build regressions cheaply. No secrets required.
+- **`release-macos.yml`** — on a pushed `v*` tag (or "Run workflow"): builds, signs, notarizes,
+  staples, and attaches `Applio-<VERSION>.dmg` to the release. Auth uses the App Store Connect API
+  key inline (`build_macos.py --api-key …`), so it needs no keychain on the runner.
+
+**One-time setup** (repo Settings → Environments → **create environment `signing`**, then add these
+secrets **to that environment** + add **Required Reviewers** so the cert can't be exfiltrated):
+
+| Secret | Value |
+|--------|-------|
+| `MACOS_CERTIFICATE` | `base64` of the Developer ID Application `.p12` — export the cert+key from Keychain Access with a password, then `base64 -i your.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE_PWD` | that `.p12`'s export password |
+| `APP_STORE_CONNECT_KEY` | `base64` of the App Store Connect API key (`AuthKey_*.p8`) — `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
+| `APP_STORE_CONNECT_KEY_ID` | the 10-char Key ID |
+| `APP_STORE_CONNECT_ISSUER` | the Issuer ID (UUID) |
+
+**Cut a release:** bump `BUILD_NUMBER` (+ version if needed), commit to `main`, then
+`git tag vX.Y.Z && git push --tags`. The workflow builds the notarized DMG and attaches it to the
+release for that tag. (The upstream `release.yml` may also fire on a `config_template.json` version
+bump and generate notes — `release-macos.yml` only attaches the DMG, so they coexist.)
+
+> **Cost note:** macOS runners bill at ~10× Linux minutes and are metered even on public repos.
+> The release build is ~40–60 min; the build-only CI ~20 min. That's why `ci-macos.yml` is
+> path-filtered and `release-macos.yml` runs only on tags.
+
 ## Build Output
 
 | Output | Size | Notes |
