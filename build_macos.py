@@ -1204,36 +1204,46 @@ def _sign_dmg(path):
 
 
 def _final_verify(app, dmg):
-    """HARD-FAIL final Gatekeeper check on the notarized+stapled artifacts."""
+    """HARD-FAIL final Gatekeeper check on the notarized+stapled artifacts.
+
+    `spctl --assess` on a DMG reports "rejected (…does not seem to be an app)" — that's
+    expected for a disk image, NOT a failure. So the .app is gated on spctl/codesign/
+    stapler, but the .dmg is gated ONLY on `xcrun stapler validate`."""
     print("\nFinal verification (Gatekeeper)...")
     ok = True
-    for artifact in [app] + ([dmg] if dmg else []):
-        if not artifact or not os.path.exists(artifact):
-            continue
-        sp = subprocess.run(["spctl", "-vvv", "--assess", artifact],
+
+    # --- .app: spctl (Notarized Developer ID) + codesign deep + stapler validate ---
+    sp = subprocess.run(["spctl", "-vvv", "--assess", "--type", "execute", app],
+                        capture_output=True, text=True)
+    out = ((sp.stdout or "") + " " + (sp.stderr or "")).strip()
+    print(f"  spctl {os.path.basename(app)}: {out}")
+    if sp.returncode != 0 or "Notarized Developer ID" not in out:
+        print(f"ERROR: {app} is not Notarized Developer ID.")
+        ok = False
+    cs = subprocess.run(["codesign", "-vvv", "--deep", "--strict", app],
+                        capture_output=True, text=True)
+    print(f"  codesign {os.path.basename(app)}: {(cs.stderr or cs.stdout or '').strip()}")
+    if cs.returncode != 0:
+        ok = False
+    st = subprocess.run(["xcrun", "stapler", "validate", app],
+                        capture_output=True, text=True)
+    print(f"  stapler validate {os.path.basename(app)}: {(st.stdout or st.stderr or '').strip()}")
+    if st.returncode != 0:
+        ok = False
+
+    # --- .dmg: stapler validate ONLY (spctl on a disk image is not meaningful) ---
+    if dmg and os.path.exists(dmg):
+        sd = subprocess.run(["xcrun", "stapler", "validate", dmg],
                             capture_output=True, text=True)
-        out = ((sp.stdout or "") + " " + (sp.stderr or "")).strip()
-        print(f"  spctl {os.path.basename(artifact)}: {out}")
-        if sp.returncode != 0 or "Notarized Developer ID" not in out:
-            print(f"ERROR: {artifact} is not Notarized Developer ID.")
+        print(f"  stapler validate {os.path.basename(dmg)}: {(sd.stdout or sd.stderr or '').strip()}")
+        if sd.returncode != 0:
+            print(f"ERROR: {dmg} stapler validate failed.")
             ok = False
-        st = subprocess.run(["xcrun", "stapler", "validate", artifact],
-                            capture_output=True, text=True)
-        print(f"  stapler validate {os.path.basename(artifact)}: "
-              f"{(st.stdout or st.stderr or '').strip()}")
-        if st.returncode != 0:
-            ok = False
-        if artifact == app:  # DMG isn't a code bundle — skip codesign deep verify
-            cs = subprocess.run(["codesign", "-vvv", "--deep", "--strict", artifact],
-                                capture_output=True, text=True)
-            print(f"  codesign {os.path.basename(artifact)}: "
-                  f"{(cs.stderr or cs.stdout or '').strip()}")
-            if cs.returncode != 0:
-                ok = False
+
     if not ok:
         print("ERROR: final verification failed.")
         sys.exit(1)
-    print("  All artifacts verified (Notarized Developer ID).")
+    print("  All artifacts verified (.app: Notarized Developer ID; .dmg: staple validated).")
 
 
 # ---- Release pipeline --------------------------------------------------------
