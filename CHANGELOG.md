@@ -3,6 +3,25 @@
 All notable changes to this macOS-native fork of Applio. Versions follow
 `{Applio release}.{build}` (e.g. `3.6.3.5` = Applio 3.6.3, fork build 5).
 
+## [Unreleased]
+
+### Added
+- **CI: macOS build + signed/notarized releases via GitHub Actions.**
+  - `.github/workflows/ci-macos.yml` — path-filtered, build-only smoke test (ad-hoc, no cert) with
+    `CFBundleVersion` + `codesign` assertions.
+  - `.github/workflows/release-macos.yml` — on a `v*` tag, builds + signs + notarizes + staples the
+    `.app`/`.dmg` on a `macos-14` runner and attaches the DMG to the release. Runs in a protected
+    `signing` environment; inline App Store Connect API-key auth (no keychain on the runner). Validated
+    end-to-end.
+- `build_macos.py --api-key/--api-key-id/--api-issuer` — inline notarytool auth (CI/headless);
+  `--keychain-profile` remains the default for local runs.
+
+### Fixed
+- `_final_verify` now gates the `.dmg` only on `xcrun stapler validate` (it was hard-failing on
+  `spctl`, which reports "does not seem to be an app" for a disk image). Caught by the CI release test.
+
+---
+
 ## [3.6.3.5] — 2026-07-26
 
 ### Added

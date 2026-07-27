@@ -162,7 +162,8 @@ venv_macos/bin/python build_macos.py                           # Basic build (LI
 venv_macos/bin/python build_macos.py --sign --notarize --dmg   # Release: sign + notarize + staple (.app AND .dmg)
 venv_macos/bin/python build_macos.py --models-installer        # Standalone models-installer app
 # Optional overrides:
-#   --keychain-profile NAME   notarytool profile (default: applio-notarize)
+#   --keychain-profile NAME   notarytool profile (default: applio-notarize; local interactive)
+#   --api-key FILE --api-key-id ID --api-issuer UUID   inline App Store Connect API key (CI/headless; no keychain)
 #   --identity "Developer ID Application: ..."   codesign identity
 #   --team-id XXXXXXXXXX      Apple team id
 #   --build-number N          bump the build (drives VERSION + CFBundleVersion)

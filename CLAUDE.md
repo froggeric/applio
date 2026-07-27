@@ -259,6 +259,9 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
   `APP_STORE_CONNECT_KEY` (base64 .p8), `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER`. These
   are GitHub-side settings — a human must create the env + secrets; can't be done from code. macOS
   runners bill at ~10× and are metered even on public repos, hence the path-filtering + tag-only triggers.
+  **Validated end-to-end 2026-07-27** (test tag → green run → notarized DMG auto-attached to the release;
+  ~15 min). Each release run PAUSES for manual approval (required reviewers on the `signing` env) —
+  approve via Actions UI → *Review deployments* → `signing` → *Approve and deploy*; can't be done from code.
 - **DMG symlink trap:** `create_dmg` MUST use `shutil.copytree(..., symlinks=True)`. Python.framework
   uses symlinks (`Python -> Versions/Current/Python`, `Resources -> Versions/Current/Resources`,
   `Current -> Versions/3.x`); the default `symlinks=False` flattens them into real files, breaking
@@ -270,6 +273,9 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 - **Verifying a notarized DMG:** `spctl --assess --type execute <dmg>` reports "rejected (…does not seem to be an
   app)" / "Insufficient Context" — expected for a disk image. The authoritative DMG check is
   `xcrun stapler validate <dmg>` → "The validate action worked!". (`.app` uses spctl; `.dmg` uses stapler.)
+  Applied in `_final_verify`: the `.app` is gated on spctl/codesign/stapler, the `.dmg` ONLY on stapler
+  validate — do NOT regress to gating the DMG on spctl (it hard-fails the whole build on a valid DMG;
+  this exact bug shipped once and was caught by the CI release test).
 - **Background build exit codes:** don't end a backgrounded build with `; echo "exit=$?"` — the task reports the
   LAST command's exit (the echo = 0), masking a failed build. Make the build the final command and read its real
   exit/output (`tail` the output file, check for `BUILD COMPLETE` / hard-fail markers).

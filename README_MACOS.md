@@ -398,7 +398,9 @@ Two fork-added workflows live in `.github/workflows/`:
   build-relevant changes to `main` / PRs; catches build regressions cheaply. No secrets required.
 - **`release-macos.yml`** — on a pushed `v*` tag (or "Run workflow"): builds, signs, notarizes,
   staples, and attaches `Applio-<VERSION>.dmg` to the release. Auth uses the App Store Connect API
-  key inline (`build_macos.py --api-key …`), so it needs no keychain on the runner.
+  key inline (`build_macos.py --api-key …`), so it needs no keychain on the runner. **Validated
+  end-to-end 2026-07-27** (test tag → green → notarized DMG attached to the release). Each run pauses
+  for **approval** (required reviewers on the `signing` environment) before it builds.
 
 **One-time setup** (repo Settings → Environments → **create environment `signing`**, then add these
 secrets **to that environment** + add **Required Reviewers** so the cert can't be exfiltrated):
@@ -805,18 +807,47 @@ All included in `requirements_macos.txt`.
 
 ## Release Checklist
 
-1. Update `BUILD_NUMBER` in `build_macos.py` (bumps `VERSION` and the derived `CFBundleVersion`).
-2. Ensure prerequisites: **Developer ID Application** cert in Keychain + `applio-notarize` notarytool profile.
-3. Build, sign, notarize, staple (both `.app` and `.dmg`):
+### A. Cut a release via CI (recommended)
+
+`release-macos.yml` builds, signs, notarizes, and staples on a GitHub macOS runner and attaches the
+DMG to the release automatically.
+
+1. Bump `BUILD_NUMBER` in `build_macos.py` (and `version` in `assets/config_template.json` if the
+   Applio release changed). This drives `VERSION` (→ `Applio-<VERSION>.dmg`) and the derived
+   `CFBundleVersion`.
+2. Commit and push to `main`.
+3. Push a tag matching the version — `git tag v<VERSION> && git push --tags` — which triggers
+   `release-macos.yml`.
+4. **Approve the run** (the `signing` environment uses required reviewers): Actions tab → the run →
+   *Review deployments* → tick `signing` → *Approve and deploy*.
+5. ~15 min later: a signed + notarized + stapled `Applio-<VERSION>.dmg` is attached to the release.
+   The workflow's verify step already asserts Gatekeeper; optionally confirm after download:
+   ```bash
+   xcrun stapler validate "Applio-<VERSION>.dmg"     # the DMG (authoritative DMG check)
+   spctl -vvv --assess --type execute "Applio.app"    # after mounting the DMG (→ Notarized Developer ID)
+   ```
+
+### B. Cut a release locally (fallback)
+
+Use this if CI is unavailable or you want the artifact immediately.
+
+1. Ensure the **Developer ID Application** cert is in Keychain and the `applio-notarize` notarytool
+   profile exists.
+2. Build, sign, notarize, staple (both `.app` and `.dmg`):
    ```bash
    venv_macos/bin/python build_macos.py --sign --notarize --dmg
    ```
-4. Verify Gatekeeper (must show `source=Notarized Developer ID`):
+   (For inline API-key auth without a keychain profile — e.g. headless — add
+   `--api-key <file.p8> --api-key-id <ID> --api-issuer <UUID>`.)
+3. Confirm `git status` is clean (restore any dirty upstream file with `git checkout -- <file>`).
+4. Smoke-test the DMG on a clean Mac (drag to /Applications, launch — opens **without** `xattr -cr`).
+5. Create the release and upload the DMG:
    ```bash
-   spctl -vvv --assess --type execute dist/Applio.app
-   xcrun stapler validate dist/Applio.app
-   xcrun stapler validate "dist/Applio-<VERSION>.dmg"
+   gh release create v<VERSION> "dist/Applio-<VERSION>.dmg" --generate-notes
+   # if `gh release` 403s on scope: create via `gh api .../releases -X POST -f tag_name=v<VERSION>`,
+   # then curl-upload the asset to uploads.github.com (see CLAUDE.md "GitHub releases").
    ```
-5. Confirm `git status` is clean (the build restores upstream files; `git checkout -- <file>` any dirty upstream file).
-6. Smoke-test the DMG on a clean Mac (drag to /Applications, launch — should open **without** `xattr -cr`).
-7. Commit, push, then create a GitHub Release tagged `v<VERSION>` with `dist/Applio-<VERSION>.dmg` as the asset.
+
+> **Verification reference (either path):** the `.app` must report `source=Notarized Developer ID`
+> under `spctl`; the `.dmg` is verified with `xcrun stapler validate` (spctl on a disk image says
+> "rejected … does not seem to be an app" — that's expected, not a failure).
