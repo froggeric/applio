@@ -2852,7 +2852,7 @@ def _mods_to_mask(mods):
     return mask
 
 
-def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out, key_to_tag=None):
+def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out, key_to_tag=None, is_top_level=False):
     """Fill the passed-in `ns_menu` with items from a list of menu_spec.MenuItem.
 
     Recursion: submenus are built by calling _fill_ns_menu on a fresh NSMenu
@@ -2875,10 +2875,18 @@ def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out
         if mi.submenu:
             from AppKit import NSMenu
             sub = NSMenu.alloc().init()
-            if mi.title:
-                sub.setTitle_(mi.title)
-            _fill_ns_menu(mi.submenu, sub, target, dispatch, tag_counter, dynamic_out, key_to_tag)
-            parent_item = NSMenuItem.alloc().init()
+            _fill_ns_menu(mi.submenu, sub, target, dispatch, tag_counter, dynamic_out, key_to_tag, is_top_level=False)
+            if is_top_level:
+                # Top-level main-menu item: the menu BAR shows the submenu's title;
+                # the item itself is left untitled (and MENU[0] must stay untitled so
+                # macOS renders the bold app name from the bundle).
+                if mi.title:
+                    sub.setTitle_(mi.title)
+                parent_item = NSMenuItem.alloc().init()
+            else:
+                # Nested submenu (e.g. "Reveal in Finder" inside File): Cocoa shows
+                # the ITEM's title, not the submenu's, so set it explicitly.
+                parent_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(mi.title, "", "")
             parent_item.setSubmenu_(sub)
             ns_menu.addItem_(parent_item)
             continue
@@ -3503,7 +3511,7 @@ class ApplioLauncher:
         main_menu = NSMenu.alloc().init()
         _fill_ns_menu(
             menu_spec.MENU, main_menu, self._menu_handler, dispatch,
-            tag_counter, self._dynamic_items, self._key_to_tag,
+            tag_counter, self._dynamic_items, self._key_to_tag, is_top_level=True,
         )
         # The FIRST top-level submenu (MENU[0]) is untitled on purpose: macOS renders
         # it as the bold app-name menu (from CFBundleName). Do NOT setTitle_ it.
@@ -3682,7 +3690,29 @@ class ApplioLauncher:
         return _find_item_by_tag(main, target_tag)
 
     def _launch_time_update_check(self):
-        """Silent at-launch update check. Alert only if a newer version exists."""
+        """Silent at-launch update check. Alert only if a newer version exists.
+
+        Skipped when running from source (not frozen): there is no build_info.json,
+        so the version resolves to the upstream '3.6.3' and would false-positive
+        against the fork's tagged release (e.g. '3.6.3.5'). The shipped (frozen)
+        bundle reads its real version from build_info.json.
+
+        When frozen, the check is DEFERRED ~10 s (see launchUpdateCheckFire_) so any
+        alert appears AFTER the app/window is up. An alert shown at the very start of
+        the run loop (before any window) renders non-modal, and dismissing it can
+        terminate the app.
+        """
+        if not getattr(sys, "frozen", False):
+            return
+        try:
+            from AppKit import NSTimer
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                10.0, self, "launchUpdateCheckFire:", None, False)
+        except Exception as e:
+            logging.warning(f"[Launcher] launch-time update check scheduling failed: {e}")
+
+    def launchUpdateCheckFire_(self, timer):
+        """One-shot NSTimer callback: run the deferred launch-time update check."""
         try:
             _update_check().check_for_updates_at_launch()
         except Exception as e:
