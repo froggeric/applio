@@ -3213,6 +3213,8 @@ class ApplioLauncher:
 
         # 5. Run event loop
         logging.info("[Launcher] Starting event loop")
+        # Silent launch-time update check (daemon thread; alert only if newer).
+        AppHelper.callAfter(self._launch_time_update_check)
         AppHelper.runEventLoop(installInterrupt=True)
 
         # Run loop returned (Ctrl-C via installInterrupt, or NSApp.stop). Run the
@@ -3710,6 +3712,13 @@ class ApplioLauncher:
         from AppKit import NSApp
         main = NSApp.mainMenu()
         return _find_item_by_tag(main, target_tag)
+
+    def _launch_time_update_check(self):
+        """Silent at-launch update check. Alert only if a newer version exists."""
+        try:
+            _update_check().check_for_updates_at_launch()
+        except Exception as e:
+            logging.warning(f"[Launcher] launch-time update check failed: {e}")
 
     # =====================================================================
     # Menu Action Methods
