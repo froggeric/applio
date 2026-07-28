@@ -59,6 +59,7 @@ import time
 from pathlib import Path
 from collections import deque
 import weakref
+import menu_spec
 
 # Optional psutil for process verification
 try:
@@ -76,7 +77,7 @@ try:
         NSMiniaturizableWindowMask, NSBackingStoreBuffered, NSCenterTextAlignment,
         NSRightTextAlignment, NSFont, NSBezelBorder, NSApplicationActivationPolicyRegular,
         NSAccessibilityAnnouncementRequestedNotification,
-        NSCommandKeyMask, NSShiftKeyMask, NSBox, NSColor,
+        NSCommandKeyMask, NSShiftKeyMask, NSAlternateKeyMask, NSBox, NSColor,
         NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
     )
     from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
@@ -133,6 +134,11 @@ if getattr(sys, "frozen", False):
     os.chdir(BASE_PATH)
 else:
     BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+
+
+def _update_check():
+    import applio_update_check
+    return applio_update_check
 
 # =================================================================
 # 2. Subprocess Mode Detection (MUST BE BEFORE LOGGING)
@@ -2833,6 +2839,75 @@ class ProcessDashboardController:
 # 5.6. Menu Action Handler (NSObject Proxy)
 # =================================================================
 
+def _mods_to_mask(mods):
+    """Translate menu_spec mod tokens to a PyObjC key-equivalent modifier mask."""
+    from AppKit import NSCommandKeyMask, NSShiftKeyMask, NSAlternateKeyMask
+    mask = 0
+    if "cmd" in mods:
+        mask |= NSCommandKeyMask
+    if "shift" in mods:
+        mask |= NSShiftKeyMask
+    if "option" in mods:
+        mask |= NSAlternateKeyMask
+    return mask
+
+
+def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out, key_to_tag=None):
+    """Fill the passed-in `ns_menu` with items from a list of menu_spec.MenuItem.
+
+    Recursion: submenus are built by calling _fill_ns_menu on a fresh NSMenu
+    (no item-by-item moving). The FIRST top-level submenu is the app menu; leave
+    it UNTITLED so macOS renders the bold app name from the bundle (matches the
+    original _setup_menu + spec section 5.1 - do NOT setTitle_ it).
+
+    Per leaf:
+    - dispatch[key] == str  -> standard AppKit selector, target None (responder chain)
+    - dispatch[key] callable -> tagged item, action runDispatch:, target = target;
+      also records key_to_tag[key] = tag (so the timer can find items by action key)
+    - dispatch[key] missing  -> display-only item (e.g. process.status): disabled, no action
+    - dynamic items are recorded in dynamic_out[key] = (ns_item, hint)
+    """
+    from AppKit import NSMenuItem
+    for mi in spec_menu:
+        if mi.separator:
+            ns_menu.addItem_(NSMenuItem.separatorItem())
+            continue
+        if mi.submenu:
+            from AppKit import NSMenu
+            sub = NSMenu.alloc().init()
+            if mi.title:
+                sub.setTitle_(mi.title)
+            _fill_ns_menu(mi.submenu, sub, target, dispatch, tag_counter, dynamic_out, key_to_tag)
+            parent_item = NSMenuItem.alloc().init()
+            parent_item.setSubmenu_(sub)
+            ns_menu.addItem_(parent_item)
+            continue
+        # leaf
+        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            mi.title, "", mi.shortcut or ""
+        )
+        if mi.shortcut and mi.mods:
+            item.setKeyEquivalentModifierMask_(_mods_to_mask(mi.mods))
+        handler = dispatch.get(mi.key)
+        if isinstance(handler, str):
+            item.setAction_(handler)
+            item.setTarget_(None)
+        elif callable(handler):
+            tag = next(tag_counter)
+            item.setTag_(tag)
+            item.setAction_("runDispatch:")
+            item.setTarget_(target)
+            target._dispatch_table[tag] = handler
+            if key_to_tag is not None and mi.key:
+                key_to_tag[mi.key] = tag
+        else:
+            # display-only (status) item: disabled, no action
+            item.setEnabled_(False)
+        if mi.dynamic and mi.key:
+            dynamic_out[mi.key] = (item, mi.dynamic)
+        ns_menu.addItem_(item)
+
+
 class MenuActionHandler(NSObject):
     """NSObject proxy to handle menu item actions.
     
@@ -2854,17 +2929,27 @@ class MenuActionHandler(NSObject):
         self = objc.super(MenuActionHandler, self).init()
         if self is not None:
             self._launcher_ref = weakref.ref(launcher)
+            self._dispatch_table = {}
         return self
-    
+
     def _get_launcher(self):
         """Safely get launcher reference.
-        
+
         Returns:
             ApplioLauncher instance or None if deallocated
         """
         if hasattr(self, '_launcher_ref'):
             return self._launcher_ref()
         return None
+
+    def runDispatch_(self, sender):
+        """Generic menu dispatch keyed by the NSMenuItem's tag."""
+        fn = getattr(self, "_dispatch_table", {}).get(sender.tag() if sender else None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception as e:
+                logging.error(f"[Launcher] menu dispatch failed: {e}")
     
     # =================================================================
     # Menu Action Methods (forward to launcher)
@@ -3427,111 +3512,27 @@ class ApplioLauncher:
             app.setDelegate_(self._app_delegate)
             logging.info("[Launcher] NSApplicationDelegate attached (reopen/terminate)")
 
-        # Create main menu bar
+        import itertools
+        from AppKit import NSMenu
+
+        self._dynamic_items = {}   # action_key -> (NSMenuItem, hint); mutated by the 2 s timer
+        self._key_to_tag = {}      # action_key -> NSMenuItem tag; lets the timer find items
+        tag_counter = itertools.count(1)
+        dispatch = self._build_launcher_dispatch()
+
         main_menu = NSMenu.alloc().init()
-
-        # =====================================================================
-        # App menu (named "Applio" in menu bar)
-        # =====================================================================
-        app_menu = NSMenu.alloc().init()
-
-        app_item = NSMenuItem.alloc().init()
-        app_item.setSubmenu_(app_menu)
-        main_menu.addItem_(app_item)
-
-        # About Applio
-        about_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "About Applio", "showAbout:", ""
+        _fill_ns_menu(
+            menu_spec.MENU, main_menu, self._menu_handler, dispatch,
+            tag_counter, self._dynamic_items, self._key_to_tag,
         )
-        about_item.setTarget_(self._menu_handler)
-        about_item.setAccessibilityHelp_("Show information about Applio version and credits")
-        app_menu.addItem_(about_item)
+        # The FIRST top-level submenu (MENU[0]) is untitled on purpose: macOS renders
+        # it as the bold app-name menu (from CFBundleName). Do NOT setTitle_ it.
 
-        # Check for Updates...
-        update_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Check for Updates...", "checkUpdates:", ""
-        )
-        update_item.setTarget_(self._menu_handler)
-        update_item.setAccessibilityHelp_("Open the releases page to check for new versions")
-        app_menu.addItem_(update_item)
-
-        app_menu.addItem_(NSMenuItem.separatorItem())
-
-        # Quit Applio (Cmd+Q)
-        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Quit Applio", "terminate:", "q"
-        )
-        quit_item.setAccessibilityHelp_("Exit Applio (Command Q)")
-        app_menu.addItem_(quit_item)
-
-        # =====================================================================
-        # File menu
-        # =====================================================================
-        file_menu = NSMenu.alloc().initWithTitle_("File")
-
-        file_item = NSMenuItem.alloc().init()
-        file_item.setSubmenu_(file_menu)
-        main_menu.addItem_(file_item)
-
-        # Set Data Location...
-        data_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Set Data Location...", "setDataLocation:", ""
-        )
-        data_item.setTarget_(self._menu_handler)
-        data_item.setAccessibilityHelp_("Choose a folder to store Applio data including models and training files")
-        file_menu.addItem_(data_item)
-
-        # =====================================================================
-        # Window menu
-        # =====================================================================
-        window_menu = NSMenu.alloc().initWithTitle_("Window")
-
-        window_item = NSMenuItem.alloc().init()
-        window_item.setSubmenu_(window_menu)
-        main_menu.addItem_(window_item)
-
-        # Progress Monitor (Cmd+Shift+P) - always enabled, shows dashboard
-        # Note: Using Cmd+Shift+P to avoid conflict with system Cmd+M (Minimize)
-        self.progress_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Progress Monitor", "showProgressMonitor:", "P"
-        )
-        self.progress_menu_item.setTarget_(self._menu_handler)
-        self.progress_menu_item.setKeyEquivalentModifierMask_(
-            NSCommandKeyMask | NSShiftKeyMask
-        )
-        self.progress_menu_item.setEnabled_(True)  # Always enabled - dashboard works in idle state
-        self.progress_menu_item.setAccessibilityHelp_("Open the progress monitoring dashboard to view active and recent processes")
-        window_menu.addItem_(self.progress_menu_item)
-
-        window_menu.addItem_(NSMenuItem.separatorItem())
-
-        # Show Main Window (Cmd+Shift+W)
-        main_window_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Show Main Window", "showMainWindow:", "w"
-        )
-        main_window_item.setTarget_(self._menu_handler)
-        # Cmd+Shift+W modifier
-        main_window_item.setKeyEquivalentModifierMask_(1048576 | 131072)  # Command | Shift
-        main_window_item.setAccessibilityHelp_("Bring the main Applio window to front (Command Shift W)")
-        window_menu.addItem_(main_window_item)
-
-        # Minimize (Cmd+M would conflict, use no shortcut or different)
-        minimize_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Minimize", "performMiniaturize:", ""
-        )
-        minimize_item.setAccessibilityHelp_("Minimize the current window")
-        window_menu.addItem_(minimize_item)
-
-        # Set the menu
         NSApp.setMainMenu_(main_menu)
-
-        # Update progress menu item state based on active processes
         self._update_menu_state()
-
-        # Start periodic menu state updates
         self._start_menu_update_timer()
+        logging.info("[Launcher] Menu bar setup complete (spec-driven)")
 
-        logging.info("[Launcher] Menu bar setup complete")
 
     def _start_menu_update_timer(self):
         """Start timer to periodically update menu state."""
@@ -3678,6 +3679,94 @@ class ApplioLauncher:
     # Menu Action Methods
     # =====================================================================
 
+    def _build_launcher_dispatch(self):
+        """Map action keys -> handler (callable) or standard selector (str).
+
+        IMPORTANT: every callable is invoked by runDispatch_ as `fn()` with NO
+        arguments. The AppKit-style methods (showAbout_/checkUpdates_/etc.) are
+        defined as `def X_(self, sender)`, so they MUST be wrapped to drop sender.
+        """
+        d = {}
+        # Standard AppKit actions (responder chain / NSApp) - selector strings,
+        # never go through runDispatch_.
+        for key, sel in menu_spec.STANDARD_SELECTOR_KEYS.items():
+            d[key] = sel
+        # Custom actions - ALL zero-arg callables.
+        d["app.about"] = lambda: self.showAbout_(None)
+        d["app.check_updates"] = lambda: self.checkUpdates_(None)
+        d["file.set_data_location"] = lambda: self.setDataLocation_(None)
+        d["process.open_dashboard"] = lambda: self.showProgressMonitor_(None)
+        d["process.open_logs"] = self._open_training_logs     # already zero-arg
+        d["window.show_main"] = lambda: self.showMainWindow_(None)
+        d["help.guide"] = self._open_guide                     # already zero-arg
+        d["help.docs"] = lambda: self._open_url("https://docs.applio.org")
+        d["help.report_issue"] = lambda: self._open_url("https://github.com/froggeric/applio-macOS-native-app/issues")
+        d["help.discord"] = lambda: self._open_url("https://discord.gg/IAHispano")
+        for key in ("file.reveal_logs", "file.reveal_datasets", "file.reveal_pretraineds",
+                    "file.reveal_inference", "file.reveal_root"):
+            d[key] = (lambda k=key: self._reveal(k))
+        return d
+
+    def _resolve_data_dir(self):
+        """Fresh data-dir resolution (env -> runtime_paths.json -> ~/Applio).
+        NOT a captured startup value (the env var is stale until restart)."""
+        env = os.environ.get("APPLIO_DATA_PATH")
+        if env:
+            return env
+        for cfg in (os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+                    os.path.expanduser("~/.applio/runtime_paths.json")):
+            if os.path.exists(cfg):
+                try:
+                    with open(cfg, "r") as f:
+                        dp = json.load(f).get("data_path")
+                        if dp:
+                            return dp
+                except (json.JSONDecodeError, IOError):
+                    pass
+        return os.path.expanduser("~/Applio")
+
+    def _first_run_done(self):
+        """True once the wrapper has written runtime_paths.json (first-run complete)."""
+        for cfg in (os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+                    os.path.expanduser("~/.applio/runtime_paths.json")):
+            if os.path.exists(cfg):
+                return True
+        return False
+
+    def _reveal(self, action_key):
+        sub = menu_spec.REVEAL_PATHS.get(action_key, "")
+        path = os.path.join(self._resolve_data_dir(), sub) if sub else self._resolve_data_dir()
+        try:
+            os.makedirs(path, exist_ok=True)
+            subprocess.Popen(["open", path])
+        except Exception as e:
+            logging.error(f"[Launcher] reveal {action_key} failed: {e}")
+
+    def _open_training_logs(self):
+        logs = os.path.expanduser("~/Library/Logs/Applio")
+        try:
+            subprocess.Popen(["open", logs])
+        except Exception as e:
+            logging.error(f"[Launcher] open logs failed: {e}")
+
+    def _open_guide(self):
+        path = os.path.join(BASE_PATH, "STUDIO_PRODUCTION_GUIDE.html")
+        if not os.path.exists(path):
+            path = os.path.join(BASE_PATH, "STUDIO_PRODUCTION_GUIDE.md")
+        if not os.path.exists(path):
+            logging.warning("[Launcher] Studio Production Guide is not bundled")
+            return
+        try:
+            subprocess.Popen(["open", path])
+        except Exception as e:
+            logging.error(f"[Launcher] open guide failed: {e}")
+
+    def _open_url(self, url):
+        try:
+            subprocess.Popen(["open", url])
+        except Exception as e:
+            logging.error(f"[Launcher] open url failed: {e}")
+
     def showAbout_(self, sender):
         """Show About dialog."""
         if not NATIVE_APIS_AVAILABLE:
@@ -3724,25 +3813,25 @@ class ApplioLauncher:
         alert.runModal()
 
     def checkUpdates_(self, sender):
-        """Check for updates."""
-        if not NATIVE_APIS_AVAILABLE:
-            return
-
-        from AppKit import NSAlert, NSAlertStyleInformational
-
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_("Check for Updates")
-        alert.setInformativeText_(
-            "To check for updates, visit:\n\n"
-            "https://github.com/froggeric/applio-macOS-native-app/releases"
-        )
-        alert.setAlertStyle_(NSAlertStyleInformational)
-        alert.addButtonWithTitle_("OK")
-        alert.runModal()
+        """Check for updates - real GitHub check (shared module)."""
+        _update_check().check_for_updates_interactive()
 
     def setDataLocation_(self, sender):
         """Open dialog to set data location."""
         if not NATIVE_APIS_AVAILABLE:
+            return
+
+        if not self._first_run_done():
+            from AppKit import NSAlert, NSAlertStyleInformational
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Choose a Data Location First")
+            alert.setInformativeText_(
+                "Applio is asking you to choose where to store its data. "
+                "Please complete that prompt first, then you can change it here."
+            )
+            alert.setAlertStyle_(NSAlertStyleInformational)
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
             return
 
         from AppKit import NSOpenPanel, NSFileHandlingPanelOKButton
