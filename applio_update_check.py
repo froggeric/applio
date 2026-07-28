@@ -24,32 +24,55 @@ except Exception:  # pragma: no cover - packaging is bundled, but stay safe
     _parse_version = None
 
 
+def _version_roots():
+    """Candidate dirs to search for build_info.json / config (frozen-CWD-safe).
+
+    sys._MEIPASS is Contents/Frameworks for these processes, but build_info.json is
+    written to Contents/Resources by build_macos.py — so also derive the bundle's
+    Contents/{Resources,Frameworks} from sys.executable and search them all.
+    """
+    roots = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(meipass)
+    try:
+        # sys.executable == .../Applio.app/Contents/MacOS/Applio
+        contents = os.path.dirname(os.path.dirname(sys.executable))
+        roots.append(os.path.join(contents, "Resources"))
+        roots.append(os.path.join(contents, "Frameworks"))
+    except Exception:
+        pass
+    seen = set()
+    out = []
+    for r in roots:
+        if r and r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out or [os.path.dirname(os.path.abspath(__file__))]
+
+
 def _get_version_info():
-    """Read the full build version from build_info.json (ported verbatim from
-    macos_wrapper.py:197)."""
-    for _rel in ("build_info.json", os.path.join("assets", "build_info.json")):
-        _candidate = os.path.join(_base_path(), _rel)
-        try:
-            with open(_candidate, "r", encoding="utf-8") as f:
-                _info = json.load(f)
-                _full = _info.get("full_version") or _info.get("version")
-                if _full:
-                    return _full
-        except Exception:
-            continue
-    for _cfg in ("assets/config.json", "assets/config_template.json"):
-        try:
-            with open(os.path.join(_base_path(), _cfg), "r", encoding="utf-8") as f:
-                return json.load(f).get("version", "3.6.3")
-        except Exception:
-            continue
+    """Read the full build version (e.g. '3.6.3.5') from build_info.json."""
+    for root in _version_roots():
+        for _rel in ("build_info.json", os.path.join("assets", "build_info.json")):
+            try:
+                with open(os.path.join(root, _rel), "r", encoding="utf-8") as f:
+                    _info = json.load(f)
+                    _full = _info.get("full_version") or _info.get("version")
+                    if _full:
+                        return _full
+            except Exception:
+                continue
+    # Last resort: upstream config version (no build number).
+    for root in _version_roots():
+        for _cfg in ("assets/config.json", "assets/config_template.json",
+                     "config.json", "config_template.json"):
+            try:
+                with open(os.path.join(root, _cfg), "r", encoding="utf-8") as f:
+                    return json.load(f).get("version", "3.6.3")
+            except Exception:
+                continue
     return "3.6.3"
-
-
-def _base_path():
-    """Frozen-CWD-safe base (sys._MEIPASS when frozen, else this file's dir).
-    `sys` is imported at module top (used at call time, not import time)."""
-    return getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 
 
 VERSION = _get_version_info()
