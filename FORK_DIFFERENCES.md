@@ -27,6 +27,8 @@ This fork maintains a **minimal delta** from upstream - only macOS native app ad
 |------|---------|
 | `applio_launcher.py` | Native macOS launcher with progress window, process group leader, native menu bar |
 | `macos_wrapper.py` | Native macOS app wrapper using PyWebView with native dialogs (NSAlert/NSWindow), external data location, process tracking |
+| `menu_spec.py` | Single source of truth for the native menu (Applio/File/Process/Window/Help); rendered by both the PyObjC launcher (full + dynamic) and the pywebview standalone wrapper (static subset) |
+| `applio_update_check.py` | Shared update-check logic (queries GitHub releases; uses `packaging.version` to compare). Manual `Check for Updates…` + a silent launch-time check both call it; network runs off the main thread |
 | `build_macos.py` | PyInstaller build script for creating `Applio.app` bundle with DMG/PKG options |
 | `requirements_macos.txt` | macOS-specific dependencies (pywebview, pyinstaller, pyobjc) |
 | `README_MACOS.md` | Build instructions, troubleshooting, and usage documentation |
@@ -71,6 +73,13 @@ This fork maintains a **minimal delta** from upstream - only macOS native app ad
 | `assets/entitlements.plist` | macOS code signing entitlements (hardened-runtime: JIT, unsigned-executable-memory, disable-library-validation; + network/camera — no microphone; see README_MACOS.md) |
 | `assets/loading.html` | HTML/CSS loading screen shown during backend startup |
 | `assets/pretrains_macos_additions.json` | Additional pretrained model definitions for Download tab |
+| `STUDIO_PRODUCTION_GUIDE.html` | Rendered (build-time) HTML guide opened from Help → Studio Production Guide; source is the `STUDIO_PRODUCTION_GUIDE.md`, rendered by `build_macos.py:render_guide_html` and bundled via `datas` |
+
+### Tests
+
+| File | Purpose |
+|------|---------|
+| `tests/test_menu_spec.py` | Pure-Python gate for the menu: asserts `menu_spec.py` structure + taxonomy (Applio/File/Process/Window/Help, key contracts) and the `packaging.version` update-compare. Run: `venv_macos/bin/python tests/test_menu_spec.py` |
 
 ## Modified Files (from Upstream)
 
@@ -87,6 +96,10 @@ This fork maintains a **minimal delta** from upstream - only macOS native app ad
 - `build_macos.py` - Build script (NEW, not in upstream)
 - `macos_wrapper.py` - Native wrapper (NEW, not in upstream)
 - `models_installer.py` - Models installer (NEW, not in upstream)
+- `menu_spec.py` - Shared menu spec (NEW, not in upstream)
+- `applio_update_check.py` - Shared update-check logic (NEW, not in upstream)
+- `tests/test_menu_spec.py` - Menu structure + version-compare test (NEW, not in upstream)
+- `STUDIO_PRODUCTION_GUIDE.html` - Bundled help guide (NEW, not in upstream)
 - All `patches/*.py` files (NEW, not in upstream)
 
 **Upstream files that MUST use build-time patches:**
@@ -130,7 +143,7 @@ On first launch, users select where to store all Applio data (models, datasets, 
 
 3. **Native macOS Dialogs:**
    - About dialog: Native NSPanel with version info, GitHub link, update check
-   - Check for Updates: Native NSAlert with version comparison
+   - Check for Updates: Native NSAlert with **`packaging.version`** comparison (was a buggy string `!=`); shared logic in `applio_update_check.py`, also runs silently at launch
    - Close confirmation: Native NSAlert when closing with active processes
    - Progress monitor: Native NSWindow with pause/resume/terminate controls
 
@@ -154,6 +167,28 @@ On first launch, users select where to store all Applio data (models, datasets, 
 6. **Subprocess Support:**
    - Training scripts run from app bundle (not user data location)
    - Script path resolution with fallback to BASE_PATH
+
+### Native Menu Bar (spec-driven)
+
+The menu is defined **once** in `menu_spec.py` and rendered by two thin renderers, so the
+launcher and the standalone wrapper never drift:
+
+- **Applio** — About, Check for Updates…, Hide ⌘H, Quit ⌘Q
+- **File** — Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …)
+- **Process** — live `● Training: <name>` status (disabled when idle) + Open Dashboard ⌘⇧P
+- **Window** — Minimize ⌘M, Zoom, Show Main
+- **Help** — Studio Production Guide, Online Docs, Report an Issue, Discord
+
+**Launcher (`applio_launcher.py`, PyObjC):** renders the **full + dynamic** menu — binds the
+keyboard shortcuts, and a 2 s `NSTimer` refreshes the Process status line and toggles each
+Reveal-in-Finder item on whether its folder exists. The old dead "Menu B" (`get_native_menu`)
+is deleted.
+
+**Standalone wrapper (`macos_wrapper.py`, pywebview):** renders a **static subset** — pywebview's
+`Menu`/`MenuAction` are immutable and can't bind shortcuts or update labels, so shortcuts and the
+live Process status are launcher-only. The standalone renderer titles the app menu `__app__`,
+sets `webview.settings['SHOW_DEFAULT_MENUS']=False`, and omits the app.* items pywebview injects
+(see CLAUDE.md → "Pywebview gotchas").
 
 ### `build_macos.py` - Build Options
 

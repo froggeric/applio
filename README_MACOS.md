@@ -595,6 +595,33 @@ quit cascade) are per-process:
   `WKWebView`, with its own native menu. Reachable from the launcher via a 2 s-polled
   `runtime_paths.json` flag + `NSDistributedNotificationCenter`.
 
+### Native Menu
+
+The menu bar is defined once in `menu_spec.py` and rendered by both processes, so the bundled app
+and the standalone dev wrapper stay in sync. Five menus:
+
+| Menu | Items |
+|------|-------|
+| **Applio** | About, Check for Updates…, Hide ⌘H, Quit ⌘Q |
+| **File** | Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …) |
+| **Process** | Live `● Training: <name>` status + Open Dashboard ⌘⇧P (pause/resume/terminate controls stay in the dashboard) |
+| **Window** | Minimize ⌘M, Zoom, Show Main |
+| **Help** | Studio Production Guide, Online Docs, Report an Issue, Discord |
+
+**Dynamic behavior (bundled app only):** the launcher binds the keyboard shortcuts and runs a
+2 s `NSTimer` that refreshes the Process status line and enables each Reveal-in-Finder item only
+when its folder actually exists. The **File → data items are disabled until first run** (i.e. until
+you've chosen a data location).
+
+**Standalone dev mode** (`python macos_wrapper.py`) shows a **static subset** of the same menu —
+pywebview's `Menu`/`MenuAction` are immutable, so it has no keyboard shortcuts and no live Process
+status. For the full dynamic menu, run the built app.
+
+**Update checking:** `Check for Updates…` queries GitHub Releases and shows a tri-state NSAlert
+(newer / up-to-date / error). A **silent launch-time check** also runs and alerts you **only** if a
+newer version exists. Version comparison uses `packaging.version` (the old string compare falsely
+flagged downgrades as updates). Network runs off the main thread.
+
 ### Frozen-CWD invariant
 In the frozen app the working directory is the bundle, not the data dir — so upstream's CWD-relative
 paths (`logs/`, `assets/config.json`, dataset folders) break. The wrapper does `os.chdir(DATA_PATH)`

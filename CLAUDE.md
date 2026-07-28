@@ -82,7 +82,7 @@ assets/
 | App configuration | `assets/config.json` |
 | Platform setup | `rvc/lib/platform.py` |
 | macOS native wrapper | `macos_wrapper.py` |
-| Build specification | `Applio.spec` |
+| Build configuration | `build_macos.py` (datas / HIDDEN_IMPORTS / pyinstaller_args) — **NOT `Applio.spec`** (gitignored at `.gitignore:34` and never read by the build; the build runs `PyInstaller.__main__.run(pyinstaller_args)` from `build_macos.py`). `menu_spec` and `applio_update_check` (lazy-imported) are in `HIDDEN_IMPORTS`. |
 
 ## Code Conventions
 
@@ -128,6 +128,7 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 **Safe-to-modify files** (macOS-only, not in upstream):
 - `assets/entitlements.plist`
 - `patches/`, `macos_wrapper.py`, `build_macos.py`, `Applio.spec`
+- `menu_spec.py`, `applio_update_check.py`, `tests/test_menu_spec.py`, `STUDIO_PRODUCTION_GUIDE.html`
 - `install_applio_mac.sh`, `requirements_macos.txt`, `CLAUDE.md`
 
 **Verify file origin:** `git ls-tree upstream/main --name-only | grep <path>`
@@ -301,6 +302,8 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 
 **Pywebview gotchas:**
 - Menu callbacks need lambda wrappers: `MenuAction("About", lambda: show_about_dialog())` not `MenuAction("About", show_about_dialog)`
+- **Menu is spec-driven (`menu_spec.py`):** ONE source of truth rendered by both processes. The launcher renders the full dynamic menu (PyObjC); the standalone wrapper renders a STATIC subset (pywebview `Menu`/`MenuAction` are immutable and cannot bind shortcuts — `venv_macos/.../webview/menu.py`). Standalone renderer MUST: title the app menu `__app__` (NOT "Applio" — that duplicates it), set `webview.settings['SHOW_DEFAULT_MENUS']=False` BEFORE `webview.start` (else pywebview auto-adds View/Edit; note: `webview.start` has NO `webview_settings` kwarg — use `webview.settings[...]`), and omit `app.about/hide/hide_others/quit` from its `__app__` payload (pywebview's unconditional `_add_app_menu` injects them). Verify with `venv_macos/bin/python tests/test_menu_spec.py`.
+- **Update-check version compare must use `packaging.version`** (already a hiddenimport). The old `check_for_updates` used string `!=` (flagged downgrades as updates). Shared logic lives in `applio_update_check.py`; the manual item + a silent launch-time check both use it; network runs off the main thread (NSAutoreleasePool on the worker thread).
 
 **Native macOS dialogs (PyObjC):**
 - All dialogs use native NSAlert/NSWindow/NSPanel instead of pywebview HTML

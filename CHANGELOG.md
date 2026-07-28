@@ -6,6 +6,14 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 ## [Unreleased]
 
 ### Added
+- **Native menu overhaul:** one shared `menu_spec.py` rendered by a PyObjC renderer
+  (launcher) and a pywebview static-subset renderer (standalone). New Process + Help menus;
+  Reveal-in-Finder rescued; Hide ⌘H / Minimize ⌘M; the dead Menu B deleted.
+- **Real update checking:** manual `Check for Updates…` queries GitHub releases, and a silent
+  launch-time check alerts only if a newer version exists. Version comparison fixed (was a buggy
+  string compare; now `packaging.version`).
+- **Studio Production Guide** bundled (rendered HTML) under Help.
+- `tests/test_menu_spec.py` — pure-Python structure + version-compare gate.
 - **CI: macOS build + signed/notarized releases via GitHub Actions.**
   - `.github/workflows/ci-macos.yml` — path-filtered, build-only smoke test (ad-hoc, no cert) with
     `CFBundleVersion` + `codesign` assertions.
