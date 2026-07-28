@@ -57,6 +57,27 @@ def test_app_menu_const():
     assert PYWEBVIEW_APP_KEY == "__app__"
     assert APP_NAME == "Applio"
 
+# ---- version-compare tests (applio_update_check) ----
+from applio_update_check import is_update_available
+
+def test_update_available_basic():
+    assert is_update_available("3.6.9", "3.6.10")[0] is True
+
+def test_update_equal():
+    assert is_update_available("3.6.9", "3.6.9")[0] is False
+
+def test_update_downgrade():
+    assert is_update_available("3.6.9", "3.6.8")[0] is False
+
+def test_update_double_digit():
+    # lexical string compare would get this wrong: "3.6.10" > "3.6.9"
+    assert is_update_available("3.6.9", "3.6.10")[0] is True
+    assert is_update_available("3.6.10", "3.6.9")[0] is False
+
+def test_update_malformed_tag_failsafe():
+    assert is_update_available("3.6.9", "v3.6.3-rc1")[0] is False
+    assert is_update_available("3.6.9", "latest")[0] is False
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
