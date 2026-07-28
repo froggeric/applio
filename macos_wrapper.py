@@ -30,6 +30,8 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import subprocess
+import webbrowser
 
 # =================================================================
 # 1.1. Activation Policy for Subprocess Mode
@@ -1486,60 +1488,6 @@ def show_about_dialog():
     _about_controller.show()
 
 # =================================================================
-# Menu Callback Wrappers
-# =================================================================
-# These module-level functions are used as menu callbacks to avoid
-# issues with lambda serialization in pywebview's menu system.
-
-def _menu_callback_about():
-    """Menu callback for About Applio.
-
-    CRITICAL: This runs in a background thread (pywebview menu handler).
-    We must use AppHelper.callAfter() to schedule UI work on the main thread.
-    """
-    logging.info("[About Menu] _menu_callback_about() called")
-
-    def _show_on_main_thread():
-        """Execute show_about_dialog() on the main thread."""
-        try:
-            show_about_dialog()
-            logging.info("[About Menu] _menu_callback_about() completed successfully")
-        except Exception as e:
-            logging.error(f"[About Menu] _menu_callback_about() failed: {e}")
-            logging.exception(e)
-
-    # Schedule on main thread using AppHelper
-    if NATIVE_APIS_AVAILABLE:
-        AppHelper.callAfter(_show_on_main_thread)
-    else:
-        # Fallback for non-macOS platforms
-        _show_on_main_thread()
-
-def _menu_callback_check_updates():
-    """Menu callback for Check for Updates.
-
-    CRITICAL: This runs in a background thread (pywebview menu handler).
-    We must use AppHelper.callAfter() to schedule UI work on the main thread.
-    """
-    logging.info("[Update Menu] _menu_callback_check_updates() called")
-
-    def _check_on_main_thread():
-        """Execute check_for_updates() on the main thread."""
-        try:
-            check_for_updates()
-            logging.info("[Update Menu] _menu_callback_check_updates() completed successfully")
-        except Exception as e:
-            logging.error(f"[Update Menu] _menu_callback_check_updates() failed: {e}")
-            logging.exception(e)
-
-    # Schedule on main thread using AppHelper
-    if NATIVE_APIS_AVAILABLE:
-        AppHelper.callAfter(_check_on_main_thread)
-    else:
-        # Fallback for non-macOS platforms
-        _check_on_main_thread()
-
-# =================================================================
 # 2.5. Progress Monitor IPC Signal
 # =================================================================
 
@@ -1626,65 +1574,112 @@ def _show_progress_monitor_info():
         print("Progress Monitor requires running under the Applio launcher.")
 
 
-def get_native_menu():
+def render_pywebview():
+    """Build the standalone pywebview menu from menu_spec (static subset).
+
+    pywebview Menu/MenuAction are immutable and cannot bind shortcuts; the menu
+    rebuilds only on windowDidBecomeKey (webview/platforms/cocoa.py). So this is
+    a STATIC render: no dynamic status, no shortcuts. pywebview's unconditional
+    _add_app_menu already injects About/Hide/HideOthers/Quit, so the __app__
+    payload carries only the Applio-specific app-menu item (Check for Updates).
+    """
     from webview.menu import Menu, MenuAction, MenuSeparator
+    from menu_spec import MENU, PYWEBVIEW_APP_KEY, REVEAL_PATHS
+
     def open_in_finder(subpath: str):
-        """Open a subpath of DATA_PATH in Finder."""
         if ApplioApp.DATA_PATH:
             full_path = os.path.join(ApplioApp.DATA_PATH, subpath)
             FinderHelper.open_path(full_path)
+
     def change_data_location():
-        """Show dialog to change data location."""
         new_path = select_data_folder(ApplioApp.DATA_PATH)
         if new_path and new_path != ApplioApp.DATA_PATH:
-            prefs = PreferencesManager()
-            prefs.set_data_path(new_path)
-            logging.info(f"Data location changed to: {new_path}")
-            logging.info("Please restart Applio for changes to take effect.")
-    return [
-        Menu("File", [
-            MenuAction("Set Data Location...", change_data_location),
-            MenuSeparator(),
-            Menu("Open in Finder", [
-                MenuAction("Training Models", lambda: open_in_finder("logs")),
-                MenuAction("Datasets", lambda: open_in_finder("assets/datasets")),
-                MenuAction("Pretrained Models", lambda: open_in_finder("rvc/models/pretraineds")),
-                MenuAction("Inference Outputs", lambda: open_in_finder("assets/audios")),
-                MenuSeparator(),
-                MenuAction("Root Data Folder", lambda: open_in_finder("")),
-            ]),
-        ]),
-        Menu("Applio", [
-            MenuAction("About Applio", _menu_callback_about),
-            MenuAction("Check for Updates...", _menu_callback_check_updates),
-            MenuSeparator(),
-            MenuAction("Services", lambda: None),
-            MenuSeparator(),
-            MenuAction("Hide Applio", lambda: None),
-            MenuAction("Hide Others", lambda: None),
-            MenuSeparator(),
-            MenuAction("Quit Applio", lambda: _request_launcher_quit())
-        ]),
-        Menu("Edit", [
-            MenuAction("Undo", lambda: None),
-            MenuAction("Redo", lambda: None),
-            MenuSeparator(),
-            MenuAction("Cut", lambda: None),
-            MenuAction("Copy", lambda: None),
-            MenuAction("Paste", lambda: None),
-            MenuAction("Select All", lambda: None)
-        ]),
-        Menu("Window", [
-            MenuAction("Progress Monitor", lambda: (
-                _signal_show_progress_monitor() 
-                if os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER") 
-                else _show_progress_monitor_info()
-            )),
-            MenuSeparator(),
-            MenuAction("Minimize", lambda: None),
-            MenuAction("Zoom", lambda: None),
-        ])
-    ]
+            PreferencesManager().set_data_path(new_path)
+            logging.info(f"Data location changed to: {new_path} (restart required)")
+
+    dispatch = _build_wrapper_dispatch(open_in_finder, change_data_location)
+
+    def build(nodes, is_app_payload=False):
+        items = []
+        for mi in nodes:
+            if mi.separator:
+                # Collapse leading/consecutive separators (app-menu payload omits
+                # about/hide/hide_others/quit, which would leave dangling separators).
+                if items and not isinstance(items[-1], MenuSeparator):
+                    items.append(MenuSeparator())
+                continue
+            if mi.submenu:
+                items.append(Menu(mi.title, build(mi.submenu)))
+                continue
+            if not mi.key:
+                continue  # display-only status line: pywebview can't mutate it; skip
+            fn = dispatch.get(mi.key)
+            if fn is None:
+                continue  # keys pywebview injects (about/hide/hide_others/quit) -> omit
+            items.append(MenuAction(mi.title, (lambda f=fn: f())))
+        if items and isinstance(items[-1], MenuSeparator):
+            items.pop()  # drop a trailing separator
+        return items
+
+    out = []
+    for idx, top in enumerate(MENU):
+        if idx == 0:
+            out.append(Menu(PYWEBVIEW_APP_KEY, build(top.submenu, is_app_payload=True)))
+        else:
+            out.append(Menu(top.title, build(top.submenu)))
+    return out
+
+
+def _build_wrapper_dispatch(open_in_finder, change_data_location):
+    import applio_update_check
+    d = {}
+    d["app.check_updates"] = applio_update_check.check_for_updates_interactive
+    d["file.set_data_location"] = change_data_location
+    for key, sub in REVEAL_PATHS.items():
+        d[key] = (lambda s=sub: open_in_finder(s))
+    d["process.open_dashboard"] = _show_progress_monitor_info
+    d["process.open_logs"] = lambda: subprocess.Popen(["open", os.path.expanduser("~/Library/Logs/Applio")])
+    # pywebview Window exposes show()/restore()/minimize(). Wire the two window
+    # actions we CAN implement; OMIT window.zoom and window.bring_all_to_front
+    # (no pywebview API) rather than ship no-ops.
+    d["window.minimize"] = _minimize_main_window
+    d["window.show_main"] = _focus_main_window
+    d["help.guide"] = lambda: _open_bundled_guide()
+    d["help.docs"] = lambda: webbrowser.open("https://docs.applio.org")
+    d["help.report_issue"] = lambda: webbrowser.open("https://github.com/froggeric/applio-macOS-native-app/issues")
+    d["help.discord"] = lambda: webbrowser.open("https://discord.gg/IAHispano")
+    return d
+
+
+def _focus_main_window():
+    """Best-effort: restore + show the first pywebview window (standalone)."""
+    try:
+        for w in webview.windows:
+            try:
+                w.restore()
+            except Exception:
+                pass
+            w.show()
+    except Exception as e:
+        logging.warning(f"[Wrapper] show main window failed: {e}")
+
+
+def _minimize_main_window():
+    """Best-effort: minimize the first pywebview window (standalone)."""
+    try:
+        for w in webview.windows:
+            w.minimize()
+    except Exception as e:
+        logging.warning(f"[Wrapper] minimize failed: {e}")
+
+
+def _open_bundled_guide():
+    for name in ("STUDIO_PRODUCTION_GUIDE.html", "STUDIO_PRODUCTION_GUIDE.md"):
+        p = os.path.join(BASE_PATH, name)
+        if os.path.exists(p):
+            webbrowser.open("file://" + p)
+            return
+    logging.warning("[Wrapper] Studio Production Guide is not bundled")
 
 # =================================================================
 # 3. App Core Class
@@ -1993,7 +1988,9 @@ class ApplioApp:
             logging.info("Running under launcher - menu will signal launcher via IPC")
         else:
             logging.info("Running standalone - creating pywebview menu")
-        webview.start(menu=get_native_menu(), debug=False)
+        import webview
+        webview.settings['SHOW_DEFAULT_MENUS'] = False   # suppress auto View/Edit menus
+        webview.start(menu=render_pywebview(), debug=False)
 
 if __name__ == "__main__":
     app = ApplioApp()
