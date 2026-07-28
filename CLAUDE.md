@@ -282,6 +282,15 @@ re-align to upstream's exact pins; that needs `brew install python@3.11` + a fre
 - **Cert-free gates for signing changes:** a plain `build_macos.py` run (no `--sign`) is safe (`--help`/`py_compile`
   exit before the module-level build) and verifies `CFBundleVersion` in the built Info.plist + git-cleanliness
   without the cert; unit-test Mach-O detection by copying the fn to a temp script (`import build_macos` runs the build).
+- **GHA macOS runners have no `rg`:** use `grep -E`/`grep -Eq` in workflow steps (a `rg -q` in
+  `ci-macos.yml` once failed the run with "command not found"; locally `rg` exists, so this is CI-only).
+- **Monitoring a CI run:** `gh run watch <id> -R froggeric/applio-macOS-native-app --exit-status`
+  (make it the LAST command — a trailing `echo` masks its real exit). `status=waiting` = the `signing`
+  environment's required-reviewer gate (approve in the Actions UI, not from code); `status=queued` =
+  waiting for a runner. `gh run view <id> --log-failed` pulls the failed step's output.
+- **Testing `release-macos.yml`:** push a throwaway tag (`git tag vX-citest && git push --tags`),
+  approve the run, confirm, then tear down with `gh release delete vX-citest --cleanup-tag -y` (unlike
+  `gh release create`, `gh release delete` needs no workflow scope). Don't use a real version tag for tests.
 - **Upstream 3.6.3 changed `subprocess.run` calls:** upstream now assigns
   `result = subprocess.run(...)` and adds `if result.returncode != 0: return ...` after each.
   Patches that anchored on bare `subprocess.run(command)\n return f"..."` must be re-pointed to
