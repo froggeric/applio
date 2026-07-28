@@ -4,13 +4,13 @@
     {
       "id": 64,
       "subject": "Task 1: menu_spec.py + structure test",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Create the platform-neutral menu definition and a pure-Python test that locks its structure, taxonomy, and action-key contracts.\n\n**Files:** Create `menu_spec.py`; Test `tests/test_menu_spec.py`\n\n**Acceptance Criteria:** menu_spec imports with no AppKit dep; top-level order Applio/File/Process/Window/Help; no app.settings, no Edit; key contracts hold; `venv_macos/bin/python tests/test_menu_spec.py` exits 0.\n\n**Verify:** `venv_macos/bin/python tests/test_menu_spec.py` → `All menu_spec tests passed.`\n\n```json:metadata\n{\"files\": [\"menu_spec.py\", \"tests/test_menu_spec.py\"], \"verifyCommand\": \"venv_macos/bin/python tests/test_menu_spec.py\", \"acceptanceCriteria\": [\"menu_spec imports with no AppKit dependency\", \"top-level order correct\", \"no app.settings, no Edit\", \"key contracts hold\", \"test exits 0\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 65,
       "subject": "Task 2: applio_update_check.py + version-compare test",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Port the existing GitHub update check into a shared module with a corrected packaging.version comparison, locked by tests.\n\n**Files:** Create `applio_update_check.py`; Modify `tests/test_menu_spec.py`; port source `macos_wrapper.py:729-830`, `197-229`.\n\n**Acceptance Criteria:** is_update_available uses packaging.version (fail-safe); fetch_latest_release returns dict/None; check_for_updates_interactive runs network off main thread; constants resolve as today; version-compare tests pass.\n\n**Verify:** `venv_macos/bin/python tests/test_menu_spec.py` → exit 0 (incl. version tests).\n\n```json:metadata\n{\"files\": [\"applio_update_check.py\", \"tests/test_menu_spec.py\"], \"verifyCommand\": \"venv_macos/bin/python tests/test_menu_spec.py\", \"acceptanceCriteria\": [\"packaging.version compare, fail-safe\", \"fetch returns dict/None\", \"interactive runs off main thread\", \"constants resolve\", \"version tests pass\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
