@@ -547,6 +547,8 @@ datas = [
     ("core.py", "."),
     ("app.py", "."),
     ("macos_wrapper.py", "."),  # Spawned by applio_launcher.py
+    ("STUDIO_PRODUCTION_GUIDE.html", "."),  # Help → Studio Production Guide
+    ("STUDIO_PRODUCTION_GUIDE.md", "."),     # Fallback if .html render unavailable
 ]
 
 # In lite mode, we need to handle rvc/ differently to exclude models
