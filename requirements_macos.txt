@@ -50,3 +50,4 @@ pyinstaller>=6.3.0
 pyobjc-framework-AVFoundation
 pyobjc-framework-Cocoa
 Pillow>=10.0.0  # Required for icon conversion during build
+markdown  # Render STUDIO_PRODUCTION_GUIDE.md -> .html at build time

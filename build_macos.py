@@ -592,6 +592,51 @@ pyinstaller_args = [
 
 
 # =================================================================
+# Pre-build: Render STUDIO_PRODUCTION_GUIDE.md -> .html
+# =================================================================
+def render_guide_html(repo_root=None):
+    """Convert STUDIO_PRODUCTION_GUIDE.md -> .html (idempotent; fallback to copy).
+
+    `repo_root` defaults to the directory containing this script — build_macos.py
+    lives at the repo root, so this is correct regardless of CWD. (There is no
+    `now_dir` variable in build_macos.py; the build runs at module scope with
+    CWD = repo root and uses relative paths like 'dist'.)
+    """
+    if repo_root is None:
+        repo_root = os.path.dirname(os.path.abspath(__file__))
+    md = os.path.join(repo_root, "STUDIO_PRODUCTION_GUIDE.md")
+    html = os.path.join(repo_root, "STUDIO_PRODUCTION_GUIDE.html")
+    if not os.path.exists(md):
+        print("[build] STUDIO_PRODUCTION_GUIDE.md not found; skipping guide render")
+        return
+    # Idempotent: skip if html is newer than md (so a build with unchanged md
+    # leaves the committed html untouched -> `git status` stays clean).
+    if os.path.exists(html) and os.path.getmtime(html) >= os.path.getmtime(md):
+        print("[build] guide html up to date")
+        return
+    try:
+        import markdown as _md  # noqa
+        with open(md, "r", encoding="utf-8") as f:
+            body = _md.markdown(f.read(), extensions=["fenced_code", "tables"])
+        doc = (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<style>body{font:15px -apple-system,Helvetica,Arial,sans-serif;"
+            "max-width:780px;margin:32px auto;padding:0 16px;color:#222;"
+            "line-height:1.5}pre{background:#f4f4f4;padding:10px;overflow:auto;"
+            "border-radius:6px}code{font:13px Menlo,monospace}table{border-collapse:collapse}"
+            "th,td{border:1px solid #ccc;padding:6px 10px}h1,h2,h3{color:#111}</style>"
+            f"</head><body>{body}</body></html>"
+        )
+        with open(html, "w", encoding="utf-8") as f:
+            f.write(doc)
+        print("[build] rendered STUDIO_PRODUCTION_GUIDE.html")
+    except Exception as e:
+        print(f"[build] markdown render failed ({e}); copying .md as fallback")
+        import shutil
+        shutil.copyfile(md, html)
+
+
+# =================================================================
 # Pre-build: Patch source files before PyInstaller bundles them
 # =================================================================
 def pre_build_patch():
@@ -735,6 +780,7 @@ print()
 
 # PATCH SOURCE FILES BEFORE BUILD
 patched_files = pre_build_patch()
+render_guide_html()
 
 print("\nStarting PyInstaller build...")
 PyInstaller.__main__.run(pyinstaller_args)
