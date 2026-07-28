@@ -506,6 +506,8 @@ HIDDEN_IMPORTS = [
     "soundfile",
     "_soundfile",
     "webview.platforms.cocoa",
+    "menu_spec",  # Spec-driven native menu (imported by launcher + wrapper)
+    "applio_update_check",  # Shared update check (lazy-imported -> PyInstaller can't trace it)
     "wget",  # Used by rvc/lib/utils.py for downloads
     "resampy",  # Audio resampling library
     "librosa",  # Audio analysis library
