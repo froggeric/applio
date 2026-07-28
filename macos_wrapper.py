@@ -1338,7 +1338,7 @@ def render_pywebview():
     payload carries only the Applio-specific app-menu item (Check for Updates).
     """
     from webview.menu import Menu, MenuAction, MenuSeparator
-    from menu_spec import MENU, PYWEBVIEW_APP_KEY, REVEAL_PATHS
+    from menu_spec import MENU, PYWEBVIEW_APP_KEY
 
     def open_in_finder(subpath: str):
         if ApplioApp.DATA_PATH:
@@ -1386,6 +1386,7 @@ def render_pywebview():
 
 def _build_wrapper_dispatch(open_in_finder, change_data_location):
     import applio_update_check
+    from menu_spec import REVEAL_PATHS
     d = {}
     d["app.check_updates"] = applio_update_check.check_for_updates_interactive
     d["file.set_data_location"] = change_data_location
