@@ -50,7 +50,8 @@ LAUNCHER_ACTION_KEYS = (APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP
 # Standalone wrapper handles everything EXCEPT the four app-menu items pywebview injects
 # (About / Hide / Hide Others / Quit). Verified: webview/platforms/cocoa.py _add_app_menu
 # runs unconditionally and provides those.
-WRAPPER_ACTION_KEYS = LAUNCHER_ACTION_KEYS - {"app.about", "app.hide", "app.hide_others", "app.quit"}
+# also omit window.zoom / window.bring_all_to_front — no pywebview Window API for them
+WRAPPER_ACTION_KEYS = LAUNCHER_ACTION_KEYS - {"app.about", "app.hide", "app.hide_others", "app.quit", "window.zoom", "window.bring_all_to_front"}
 
 # Reveal targets (relative to the resolved data dir).
 REVEAL_PATHS = {
@@ -103,7 +104,7 @@ MENU = [
         MenuItem(key="process.status", title="No active processes", dynamic="status"),
         MenuItem(separator=True),
         MenuItem(key="process.open_dashboard", title="Open Progress Dashboard", shortcut="p", mods=("cmd", "shift")),
-        MenuItem(key="process.open_logs", title="Open Training Logs…"),
+        MenuItem(key="process.open_logs", title="Open Debug Logs…"),
     ]),
     MenuItem(title="Window", submenu=[
         MenuItem(key="window.minimize", title="Minimize", shortcut="m", mods=("cmd",)),

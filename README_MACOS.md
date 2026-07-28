@@ -604,7 +604,7 @@ and the standalone dev wrapper stay in sync. Five menus:
 |------|-------|
 | **Applio** | About, Check for Updates…, Hide ⌘H, Quit ⌘Q |
 | **File** | Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …) |
-| **Process** | Live `● Training: <name>` status + Open Dashboard ⌘⇧P (pause/resume/terminate controls stay in the dashboard) |
+| **Process** | Live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`) + Open Dashboard ⌘⇧P (pause/resume/terminate controls stay in the dashboard) |
 | **Window** | Minimize ⌘M, Zoom, Show Main |
 | **Help** | Studio Production Guide, Online Docs, Report an Issue, Discord |
 

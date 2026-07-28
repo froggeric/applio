@@ -69,6 +69,7 @@ def is_update_available(current_version, latest_version=None, release_url=None):
     if _parse_version is None:
         # Without packaging, fall back to a strict "different AND not a downgrade
         # heuristic" — but packaging is bundled, so this is defensive only.
+        logging.warning("[Update] packaging.version unavailable; falling back to degraded string compare")
         return (latest_version != current_version, latest_version, release_url or RELEASES_URL)
     try:
         return (_parse_version(latest_version) > _parse_version(current_version),

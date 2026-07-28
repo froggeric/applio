@@ -2963,40 +2963,6 @@ class MenuActionHandler(NSObject):
                 fn()
             except Exception as e:
                 logging.error(f"[Launcher] menu dispatch failed: {e}")
-    
-    # =================================================================
-    # Menu Action Methods (forward to launcher)
-    # =================================================================
-    
-    def showAbout_(self, sender):
-        """Show About dialog."""
-        launcher = self._get_launcher()
-        if launcher:
-            launcher.showAbout_(sender)
-    
-    def checkUpdates_(self, sender):
-        """Check for updates."""
-        launcher = self._get_launcher()
-        if launcher:
-            launcher.checkUpdates_(sender)
-    
-    def setDataLocation_(self, sender):
-        """Open dialog to set data location."""
-        launcher = self._get_launcher()
-        if launcher:
-            launcher.setDataLocation_(sender)
-    
-    def showProgressMonitor_(self, sender):
-        """Show the progress monitor dashboard."""
-        launcher = self._get_launcher()
-        if launcher:
-            launcher.showProgressMonitor_(sender)
-    
-    def showMainWindow_(self, sender):
-        """Show main Gradio window."""
-        launcher = self._get_launcher()
-        if launcher:
-            launcher.showMainWindow_(sender)
 
 
 # =================================================================
@@ -3678,8 +3644,10 @@ class ApplioLauncher:
             item, _hint = status
             active = get_active_processes()
             if active:
-                name = (active[0].get("model_name") or "active job").strip() or "active job"
-                item.setTitle_(f"● Training: {name}")
+                entry = active[0]
+                typ = (entry.get("type") or "process").capitalize()
+                name = (entry.get("model_name") or "active job").strip() or "active job"
+                item.setTitle_(f"● {typ}: {name}")
             else:
                 item.setTitle_("No active processes")
 

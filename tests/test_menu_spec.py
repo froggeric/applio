@@ -44,7 +44,7 @@ def test_action_key_contracts():
     for k in leaves:
         assert k in LAUNCHER_ACTION_KEYS or k in DISPLAY_KEYS, f"orphan key {k!r}"
     assert LAUNCHER_ACTION_KEYS <= leaves, f"launcher keys missing from MENU: {LAUNCHER_ACTION_KEYS - leaves}"
-    injected = {"app.about", "app.hide", "app.hide_others", "app.quit"}
+    injected = {"app.about", "app.hide", "app.hide_others", "app.quit", "window.zoom", "window.bring_all_to_front"}
     assert WRAPPER_ACTION_KEYS == LAUNCHER_ACTION_KEYS - injected, "wrapper contract mismatch"
     assert injected <= LAUNCHER_ACTION_KEYS, "injected keys must be in launcher set"
 

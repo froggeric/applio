@@ -175,7 +175,7 @@ launcher and the standalone wrapper never drift:
 
 - **Applio** — About, Check for Updates…, Hide ⌘H, Quit ⌘Q
 - **File** — Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …)
-- **Process** — live `● Training: <name>` status (disabled when idle) + Open Dashboard ⌘⇧P
+- **Process** — live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`; disabled when idle) + Open Dashboard ⌘⇧P
 - **Window** — Minimize ⌘M, Zoom, Show Main
 - **Help** — Studio Production Guide, Online Docs, Report an Issue, Discord
 
