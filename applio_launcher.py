@@ -2908,6 +2908,19 @@ def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out
         ns_menu.addItem_(item)
 
 
+def _find_item_by_tag(ns_menu, tag):
+    for i in range(ns_menu.numberOfItems()):
+        item = ns_menu.itemAtIndex_(i)
+        if item.tag() == tag and item.action() is not None:
+            return item
+        sub = item.submenu()
+        if sub:
+            found = _find_item_by_tag(sub, tag)
+            if found is not None:
+                return found
+    return None
+
+
 class MenuActionHandler(NSObject):
     """NSObject proxy to handle menu item actions.
     
@@ -3112,7 +3125,6 @@ class ApplioLauncher:
     def __init__(self):
         self.wrapper_process = None
         self.progress_window = None
-        self.progress_menu_item = None  # Reference to update state
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
         self._terminating = False  # Reentry protection for signal handlers
@@ -3633,47 +3645,71 @@ class ApplioLauncher:
         return False
 
     def _update_menu_state(self):
-        """Update menu item states based on running processes."""
-        if not self.progress_menu_item:
-            return
-
-        # Check if wrapper requested to show Progress Monitor via IPC
+        """Update dynamic menu items from the 2 s timer."""
+        # Keep existing IPC + hidden-window handling (was already here).
         if self._check_show_progress_monitor_signal():
-            logging.info("[Launcher] Showing dashboard via IPC signal from wrapper")
             try:
-                # Create dashboard on first use
                 if not self._dashboard_controller:
                     self._create_dashboard()
-                # Show the dashboard
                 if self._dashboard_controller:
                     self._dashboard_controller.update_process_list()
                     self._dashboard_controller.show()
             except Exception as e:
-                logging.error(f"[Launcher] Failed to show dashboard via IPC: {e}")
-
-        # Check if wrapper window was hidden - if so, show progress window
+                logging.error(f"[Launcher] dashboard via IPC failed: {e}")
         if self._check_wrapper_window_hidden():
             active = get_active_processes()
-            logging.info(f"[Launcher] Wrapper hidden detected, found {len(active)} active processes")
             if active:
                 try:
                     self._show_progress_window_for_processes(active)
-                    logging.info("[Launcher] Progress window creation completed")
                 except Exception as e:
-                    logging.error(f"[Launcher] Failed to show progress window: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    logging.error(f"[Launcher] progress window failed: {e}")
 
-        active = get_active_processes()
-        
-        # Always enable Progress Monitor - shows dashboard even in idle state
-        self.progress_menu_item.setEnabled_(True)
+        dyn = getattr(self, "_dynamic_items", {})
+        if not dyn:
+            return
 
-        # Update title to show count
-        if active:
-            self.progress_menu_item.setTitle_(f"Progress Monitor ({len(active)} active)")
-        else:
-            self.progress_menu_item.setTitle_("Progress Monitor")
+        # process.status — TITLE ONLY (a display line; built disabled, stays disabled).
+        # model_name from active_processes.json (no epoch/ETA; those require log parsing
+        # that belongs in the dashboard, not the menu).
+        status = dyn.get("process.status")
+        if status:
+            item, _hint = status
+            active = get_active_processes()
+            if active:
+                name = (active[0].get("model_name") or "active job").strip() or "active job"
+                item.setTitle_(f"● Training: {name}")
+            else:
+                item.setTitle_("No active processes")
+
+        first_run = self._first_run_done()
+        data_dir = self._resolve_data_dir() if first_run else None
+        # Drive exists:<subpath> reveal items + first-run gating. SKIP status items
+        # here — their enabled state is "disabled" (set at build time) and must not
+        # be flipped on by the else branch.
+        for key, (item, hint) in dyn.items():
+            if hint == "status":
+                continue
+            if not first_run:
+                item.setEnabled_(False)
+                continue
+            if hint and hint.startswith("exists:"):
+                sub = hint.split("exists:", 1)[1]
+                item.setEnabled_(os.path.exists(os.path.join(data_dir, sub)))
+            else:
+                item.setEnabled_(True)
+        # set_data_location is a callable-dispatch item but not dynamic-flagged; gate it directly.
+        sdl = self._find_item_by_key("file.set_data_location")
+        if sdl is not None:
+            sdl.setEnabled_(first_run)
+
+    def _find_item_by_key(self, key):
+        """Find the live NSMenuItem for an action key via self._key_to_tag, else None."""
+        target_tag = getattr(self, "_key_to_tag", {}).get(key)
+        if target_tag is None:
+            return None
+        from AppKit import NSApp
+        main = NSApp.mainMenu()
+        return _find_item_by_tag(main, target_tag)
 
     # =====================================================================
     # Menu Action Methods
