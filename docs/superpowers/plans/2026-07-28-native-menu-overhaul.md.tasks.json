@@ -1,0 +1,59 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-28-native-menu-overhaul.md",
+  "tasks": [
+    {
+      "id": 64,
+      "subject": "Task 1: menu_spec.py + structure test",
+      "status": "pending",
+      "description": "**Goal:** Create the platform-neutral menu definition and a pure-Python test that locks its structure, taxonomy, and action-key contracts.\n\n**Files:** Create `menu_spec.py`; Test `tests/test_menu_spec.py`\n\n**Acceptance Criteria:** menu_spec imports with no AppKit dep; top-level order Applio/File/Process/Window/Help; no app.settings, no Edit; key contracts hold; `venv_macos/bin/python tests/test_menu_spec.py` exits 0.\n\n**Verify:** `venv_macos/bin/python tests/test_menu_spec.py` → `All menu_spec tests passed.`\n\n```json:metadata\n{\"files\": [\"menu_spec.py\", \"tests/test_menu_spec.py\"], \"verifyCommand\": \"venv_macos/bin/python tests/test_menu_spec.py\", \"acceptanceCriteria\": [\"menu_spec imports with no AppKit dependency\", \"top-level order correct\", \"no app.settings, no Edit\", \"key contracts hold\", \"test exits 0\"], \"modelTier\": \"mechanical\"}\n```"
+    },
+    {
+      "id": 65,
+      "subject": "Task 2: applio_update_check.py + version-compare test",
+      "status": "pending",
+      "description": "**Goal:** Port the existing GitHub update check into a shared module with a corrected packaging.version comparison, locked by tests.\n\n**Files:** Create `applio_update_check.py`; Modify `tests/test_menu_spec.py`; port source `macos_wrapper.py:729-830`, `197-229`.\n\n**Acceptance Criteria:** is_update_available uses packaging.version (fail-safe); fetch_latest_release returns dict/None; check_for_updates_interactive runs network off main thread; constants resolve as today; version-compare tests pass.\n\n**Verify:** `venv_macos/bin/python tests/test_menu_spec.py` → exit 0 (incl. version tests).\n\n```json:metadata\n{\"files\": [\"applio_update_check.py\", \"tests/test_menu_spec.py\"], \"verifyCommand\": \"venv_macos/bin/python tests/test_menu_spec.py\", \"acceptanceCriteria\": [\"packaging.version compare, fail-safe\", \"fetch returns dict/None\", \"interactive runs off main thread\", \"constants resolve\", \"version tests pass\"], \"modelTier\": \"mechanical\"}\n```"
+    },
+    {
+      "id": 66,
+      "subject": "Task 3: Launcher PyObjC renderer + action wiring",
+      "status": "pending",
+      "blockedBy": [64, 65],
+      "description": "**Goal:** Render MENU with PyObjC (shortcuts + standard selectors + tag-based dispatch), replace `_setup_menu`, add launcher action methods, rewire `checkUpdates_`, gate data items on first-run.\n\n**Files:** Modify `applio_launcher.py` (import NSAlternateKeyMask + `import menu_spec`; MenuActionHandler runDispatch_+_dispatch_table; _setup_menu body; _mods_to_mask/_fill_ns_menu/_find_item_by_tag; _build_launcher_dispatch with ZERO-ARG callables (wrap sender-taking `*_` methods as `lambda: self.X_(None)`); checkUpdates_ rewire; setDataLocation_ guard; app menu left UNTITLED).\n\n**Acceptance Criteria:** menu order + shortcuts work; Check for Updates shows real alert; data items disabled until first-run + reveal resolves fresh dir; guide opens bundled html; git status clean.\n\n**Verify:** `venv_macos/bin/python applio_launcher.py` (foreground) → menu/shortcuts; `git status -sb` clean.\n\n```json:metadata\n{\"files\": [\"applio_launcher.py\"], \"verifyCommand\": \"venv_macos/bin/python applio_launcher.py\", \"acceptanceCriteria\": [\"menu order + shortcuts\", \"real update alert\", \"first-run gating + fresh reveal\", \"guide opens\", \"git clean\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 67,
+      "subject": "Task 4: Launcher dynamic state",
+      "status": "pending",
+      "blockedBy": [66],
+      "description": "**Goal:** Drive process.status and exists: reveal items from the 2s timer via self._dynamic_items.\n\n**Files:** Modify `applio_launcher.py` `_update_menu_state` (locate by signature `def _update_menu_state(self):`; was ~L3634 pre-Task-3); add `_find_item_by_key` (reads `self._key_to_tag`, populated by Task 3's `_fill_ns_menu`) + module-level `_find_item_by_tag`; SKIP status items in the enable loop (title-only, stays disabled).\n\n**Acceptance Criteria:** status shows No active processes / ● Training: <name>; status line stays DISABLED; reveal items enable/disable by exists: path; first-run gating; timer never raises.\n\n**Verify:** Launch, start training → status updates within ~2s; create assets/audios → Inference Outputs enables.\n\n```json:metadata\n{\"files\": [\"applio_launcher.py\"], \"verifyCommand\": \"venv_macos/bin/python applio_launcher.py\", \"acceptanceCriteria\": [\"status line correct\", \"reveal exists enabling\", \"first-run gating\", \"timer never raises\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 68,
+      "subject": "Task 5: Launch-time update check",
+      "status": "pending",
+      "blockedBy": [65, 66],
+      "description": "**Goal:** On launcher startup, silently check GitHub on a daemon thread; alert only if newer.\n\n**Files:** Modify `applio_launcher.py` `run()` (~L3095-3119, hook before runEventLoop); add `_launch_time_update_check`.\n\n**Acceptance Criteria:** silent at current version; one alert with fake-low version; silent offline; no startup/timer blocking.\n\n**Verify:** Force VERSION=0.0.1 → one alert; restore → silent.\n\n```json:metadata\n{\"files\": [\"applio_launcher.py\"], \"verifyCommand\": \"venv_macos/bin/python applio_launcher.py\", \"acceptanceCriteria\": [\"silent at current\", \"alert on fake-low\", \"silent offline\", \"no blocking\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 69,
+      "subject": "Task 6: Wrapper pywebview renderer (standalone static subset)",
+      "status": "pending",
+      "blockedBy": [64, 65],
+      "description": "**Goal:** Replace get_native_menu() with a spec-driven static pywebview renderer, suppress auto View/Edit, use shared update check.\n\n**Files:** Modify `macos_wrapper.py:1629-1687` (render_pywebview + _build_wrapper_dispatch + _open_bundled_guide); webview.start site (~L1996); set `webview.settings['SHOW_DEFAULT_MENUS']=False` BEFORE start (NOT a `webview.start` kwarg — verified); wire window.minimize/show_main to real pywebview Window actions (zoom/bring_all_to_front omitted, not no-ops); add top-level `import subprocess` + `import webbrowser`.\n\n**Acceptance Criteria:** standalone shows correct order, single bold app menu, no View/Edit; Check for Updates uses shared check; no lambda:None no-ops; get_native_menu gone; standalone Window = Minimize + Show Main Window (real actions).\n\n**Verify:** `venv_macos/bin/python macos_wrapper.py` (standalone) → correct menu; `rg -n \"lambda: None\" macos_wrapper.py` no menu matches.\n\n```json:metadata\n{\"files\": [\"macos_wrapper.py\"], \"verifyCommand\": \"venv_macos/bin/python macos_wrapper.py\", \"acceptanceCriteria\": [\"standalone menu correct\", \"no View/Edit, single app menu\", \"shared update check\", \"no no-ops; get_native_menu gone\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 70,
+      "subject": "Task 7: Bundle the Studio Production Guide",
+      "status": "pending",
+      "description": "**Goal:** Ship STUDIO_PRODUCTION_GUIDE.html (build-time conversion) and wire datas.\n\n**Files:** Modify `Applio.spec:4` (datas); `build_macos.py` (add render_guide_html + call after pre_build_patch); `requirements_macos.txt` (add markdown).\n\n**Acceptance Criteria:** html exists in bundle + renders; conversion idempotent + .md fallback; Help opens it; git clean post-build.\n\n**Verify:** `venv_macos/bin/python build_macos.py` then `ls dist/Applio.app/Contents/Resources/STUDIO_PRODUCTION_GUIDE.html`. Never `import build_macos` to test.\n\n```json:metadata\n{\"files\": [\"Applio.spec\", \"build_macos.py\", \"requirements_macos.txt\", \"STUDIO_PRODUCTION_GUIDE.html\"], \"verifyCommand\": \"venv_macos/bin/python build_macos.py && ls dist/Applio.app/Contents/Resources/STUDIO_PRODUCTION_GUIDE.html\", \"acceptanceCriteria\": [\"html in bundle renders\", \"idempotent + fallback\", \"Help opens it\", \"git clean\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 71,
+      "subject": "Task 8: Documentation",
+      "status": "pending",
+      "blockedBy": [66, 67, 68, 69, 70],
+      "description": "**Goal:** Document the new menu architecture, static standalone subset, update-check move + version-compare fix, and guide.\n\n**Files:** Modify README_MACOS.md, FORK_DIFFERENCES.md, CLAUDE.md, CHANGELOG.md.\n\n**Acceptance Criteria:** README documents menu + architecture + guide + update check; FORK_DIFFERENCES lists new fork-only files + corrects menu; CLAUDE.md gains menu_spec/static-standalone/packaging.version gotchas; CHANGELOG [Unreleased] entry.\n\n**Verify:** `rg -n menu_spec README_MACOS.md FORK_DIFFERENCES.md CLAUDE.md` shows new references.\n\n```json:metadata\n{\"files\": [\"README_MACOS.md\", \"FORK_DIFFERENCES.md\", \"CLAUDE.md\", \"CHANGELOG.md\"], \"verifyCommand\": \"rg -n menu_spec README_MACOS.md FORK_DIFFERENCES.md CLAUDE.md\", \"acceptanceCriteria\": [\"README documents menu\", \"FORK_DIFFERENCES updated\", \"CLAUDE.md gotchas\", \"CHANGELOG entry\"], \"modelTier\": \"low\"}\n```"
+    }
+  ],
+  "lastUpdated": "2026-07-28"
+}
