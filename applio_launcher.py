@@ -1933,7 +1933,7 @@ class ProgressWindowController:
 # 5.5. Process Dashboard Controller (Persistent Window)
 # =================================================================
 
-class ProcessDashboardController:
+class ProcessDashboardController(NSObject):
     """Persistent dashboard window with idle/active/completed states.
     
     This window is always accessible from the Window menu and shows:
@@ -1948,12 +1948,17 @@ class ProcessDashboardController:
     - Single instance managed by ApplioLauncher
     """
     
-    def __init__(self, launcher):
-        """Initialize the dashboard controller.
-        
-        Args:
-            launcher: Reference to ApplioLauncher instance
+    def initWithLauncher_(self, launcher):
+        """Initialize the dashboard controller (NSObject init pattern).
+
+        Create via ``.alloc().initWithLauncher_(launcher)`` — required so the
+        controller can be an NSWindow delegate + NSTableView dataSource/delegate
+        + NSNotificationCenter observer (plain Python classes can't answer AppKit's
+        conformsToProtocol: / respondsToSelector:).
         """
+        self = objc.super(ProcessDashboardController, self).init()
+        if self is None:
+            return None
         if not NATIVE_APIS_AVAILABLE:
             raise RuntimeError("Native APIs not available")
         
@@ -2002,7 +2007,8 @@ class ProcessDashboardController:
         except Exception:
             self._cleanup()
             raise
-    
+        return self
+
     def _create_window(self):
         """Create the persistent dashboard window."""
         style = NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask
@@ -4121,7 +4127,7 @@ class ApplioLauncher:
         
         try:
             logging.info("[Launcher] Creating ProcessDashboardController")
-            self._dashboard_controller = ProcessDashboardController(self)
+            self._dashboard_controller = ProcessDashboardController.alloc().initWithLauncher_(self)
             logging.info("[Launcher] ProcessDashboardController created successfully")
         except Exception as e:
             logging.error(f"[Launcher] Failed to create dashboard: {e}")
