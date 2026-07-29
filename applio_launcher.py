@@ -78,6 +78,7 @@ try:
         NSRightTextAlignment, NSFont, NSBezelBorder, NSApplicationActivationPolicyRegular,
         NSAccessibilityAnnouncementRequestedNotification,
         NSCommandKeyMask, NSShiftKeyMask, NSAlternateKeyMask, NSBox, NSColor,
+        NSBoxPrimary, NSView, NSProgressIndicatorBarStyle,
         NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
     )
     from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
@@ -2467,7 +2468,7 @@ class ProcessDashboardController(NSObject):
         self.placeholder_view.setWantsLayer_(True)
         self.placeholder_view.layer().setCornerRadius_(12)
         self.placeholder_view.layer().setBackgroundColor_(
-            NSColor.controlBackgroundColor().cgColor()
+            NSColor.controlBackgroundColor().CGColor()
         )
         self.placeholder_view.setAccessibilityLabel_("Idle state container")
         self.window.contentView().addSubview_(self.placeholder_view)
@@ -2544,6 +2545,7 @@ class ProcessDashboardController(NSObject):
         
         # Create timer with coordinator callback
         # Use DETAIL_UPDATE_INTERVAL (faster) as base, throttle sidebar in callback
+        from AppKit import NSTimer
         self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             DETAIL_UPDATE_INTERVAL,
             self,
