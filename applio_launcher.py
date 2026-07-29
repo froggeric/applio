@@ -3112,6 +3112,12 @@ class ApplioAppDelegate(NSObject):
                 # Fall through to terminate — never block quit on a UI failure.
 
         # Confirmed or nothing active: run the cascade, then allow termination.
+        if APPLIO_SINGLE_PROCESS:
+            # Single-process (Task 2b): signal the Gradio supervisor to abort
+            # any retry/backoff loop as we tear the process down.
+            _applio = getattr(launcher, "_applio_app", None)
+            if _applio is not None:
+                _applio._stopping = True
         try:
             launcher._terminate_children()
         except Exception as e:

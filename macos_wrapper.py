@@ -32,6 +32,12 @@ import urllib.error
 import subprocess
 import webbrowser
 
+# Phase 2 single-process merge: when APPLIO_SINGLE_PROCESS=1 the Gradio GUI
+# runs in the launcher's process (no separate wrapper subprocess). This is a
+# read-only name binding (no side effects), so importing this module stays
+# import-safe (Step 0 invariant). Gate every shared-code change below on this.
+_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "0") == "1"
+
 # =================================================================
 # 1.1. Activation Policy for Subprocess Mode
 # =================================================================
@@ -601,6 +607,11 @@ def on_window_closing():
         # delegate's terminate cascade.
         logging.info("[Window] Single-process quit: deferring NSApp.terminate_")
         _launcher_ref._user_confirmed_quit = True
+        # Signal the Gradio supervisor (if mid backoff/retry) to stop so it
+        # doesn't restart the backend as we're tearing the process down.
+        _applio = getattr(_launcher_ref, "_applio_app", None)
+        if _applio is not None:
+            _applio._stopping = True
 
         def _deferred_terminate():
             try:
@@ -937,17 +948,28 @@ def setup_logging():
     # applio_wrapper.log stale — swallowing every error (incl. Gradio tracebacks).
     _root = logging.getLogger()
     _root.setLevel(logging.INFO)
-    for _h in list(_root.handlers):
-        _root.removeHandler(_h)
-    _fh = logging.FileHandler(log_file, mode="a")
-    _fh.setLevel(logging.INFO)
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    _root.addHandler(_fh)
-    _root.addHandler(logging.StreamHandler(sys.stdout))
-    # Redirect stdout/stderr to log for frozen builds
-    if getattr(sys, "frozen", False):
-        sys.stdout = open(log_file, "a")
-        sys.stderr = open(log_file, "a")
+    if _SINGLE_PROCESS:
+        # Additive (Task 2b / §6.11): keep the launcher's existing handlers
+        # (e.g. the applio_launcher.log FileHandler) and just add our wrapper
+        # FileHandler alongside them. Do NOT wipe root handlers and do NOT
+        # reassign stdout/stderr — the launcher owns those and the FileHandler
+        # captures the wrapper's output.
+        _fh = logging.FileHandler(log_file, mode="a")
+        _fh.setLevel(logging.INFO)
+        _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        _root.addHandler(_fh)
+    else:
+        for _h in list(_root.handlers):
+            _root.removeHandler(_h)
+        _fh = logging.FileHandler(log_file, mode="a")
+        _fh.setLevel(logging.INFO)
+        _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        _root.addHandler(_fh)
+        _root.addHandler(logging.StreamHandler(sys.stdout))
+        # Redirect stdout/stderr to log for frozen builds
+        if getattr(sys, "frozen", False):
+            sys.stdout = open(log_file, "a")
+            sys.stderr = open(log_file, "a")
 
     logging.info("--- Applio macOS Native Session Start ---")
     logging.info(f"Version: {VERSION}")
@@ -1289,6 +1311,42 @@ def _open_bundled_guide():
 # 3. App Core Class
 # =================================================================
 
+def _supervised_backend(app):
+    """Single-process Gradio supervisor: soft-restart up to 3x, then fatal.
+
+    Wraps ``app.start_backend()`` (which blocks for Gradio's lifetime and RAISES
+    on failure in single-process). On an exception it logs, backs off linearly
+    (3 s, 6 s), and retries; after 3 soft failures it escalates to a native
+    fatal alert + in-process terminate via ``_report_fatal_error``. Honors
+    ``app._stopping`` so a user-initiated quit aborts the retry/backoff loop.
+    """
+    attempts = 0
+    last_err = None
+    while not app._stopping and attempts < 3:
+        try:
+            app.start_backend()      # RAISES in single-process; blocks for Gradio's lifetime
+            return                    # clean shutdown
+        except Exception as e:
+            last_err = e
+            attempts += 1
+            # exc_info=True preserves the full traceback in the log (stdout/stderr is no longer
+            # redirected to the log in single-process, so the bare traceback would be lost).
+            logging.error(f"[Gradio] crashed (attempt {attempts}/3): {e}", exc_info=True)
+            # Non-transient errors (e.g. EADDRINUSE — port 6969 already bound by another instance;
+            # single-process has no orphan-wrapper reaper) won't resolve on retry — fail fast instead
+            # of wasting the 3 s/6 s backoff.
+            if isinstance(e, OSError):
+                break
+            if attempts < 3:
+                time.sleep(3 * attempts)  # linear backoff: 3 s, 6 s
+    # Fatal. Guard: the loop ALSO exits if the user quit mid-retry (_stopping flipped during the
+    # backoff) — don't show a spurious alert then; the quit path owns termination. Include the
+    # underlying error so the alert/log is actionable (e.g. "Address already in use").
+    if not app._stopping:
+        detail = f": {last_err}" if last_err else ""
+        app._report_fatal_error(f"The backend failed to start after {attempts} attempt(s){detail}.")
+
+
 class ApplioApp:
     # Class-level data path for menu callbacks
     DATA_PATH = None  # Set after initialization
@@ -1514,6 +1572,12 @@ class ApplioApp:
             if isinstance(e, OSError):
                 msg = (f"Applio could not bind port {self.server_port}. Another "
                        f"instance may already be running.\n\n{e}")
+            if _SINGLE_PROCESS:
+                # Single-process (Task 2b / §6.9): re-raise so _supervised_backend
+                # can soft-restart (up to 3x) before escalating to a fatal alert.
+                # The two-process path keeps the catch + _report_fatal_error (no
+                # supervisor loop exists there).
+                raise
             self._report_fatal_error(msg)
 
     def _report_fatal_error(self, message):
@@ -1528,12 +1592,34 @@ class ApplioApp:
                 alert.runModal()
             except Exception as ae:
                 logging.warning(f"[Wrapper] Could not show fatal alert: {ae}")
-            _request_launcher_quit()
+            if _SINGLE_PROCESS:
+                # Single-process (Task 2b / §6.9): terminate THIS process
+                # in-place -- the launcher owns the lifecycle, so there is no
+                # separate wrapper to signal. Defer NSApp.terminate_ to the next
+                # run-loop iteration (same closure/sender pattern as
+                # on_window_closing); runModal() above has already returned.
+                def _deferred_terminate():
+                    try:
+                        from AppKit import NSApp
+                        NSApp.terminate_(None)
+                    except Exception as te:
+                        logging.warning(f"[Wrapper] deferred NSApp.terminate_ failed: {te}")
+
+                AppHelper.callAfter(_deferred_terminate)
+            else:
+                _request_launcher_quit()
 
         try:
             AppHelper.callAfter(_show_and_quit)
         except Exception:
-            _request_launcher_quit()
+            if _SINGLE_PROCESS:
+                try:
+                    from AppKit import NSApp
+                    AppHelper.callAfter(lambda: NSApp.terminate_(None))
+                except Exception as fe:
+                    logging.warning(f"[Wrapper] fatal-alert schedule failed: {fe}")
+            else:
+                _request_launcher_quit()
 
     def monitor_transition(self):
         """Switches from loading screen to main app."""
@@ -1572,7 +1658,13 @@ class ApplioApp:
 
         # 2. Start Backend direct
         logging.info("Launching Backend directly...")
-        threading.Thread(target=self.start_backend, daemon=True).start()
+        if _SINGLE_PROCESS:
+            # Single-process (Task 2b / §6.9): wrap start_backend in the
+            # supervisor so a Gradio crash soft-restarts (up to 3x, linear
+            # backoff) before escalating to a fatal alert.
+            threading.Thread(target=lambda: _supervised_backend(self), daemon=True).start()
+        else:
+            threading.Thread(target=self.start_backend, daemon=True).start()
         threading.Thread(target=self.monitor_transition, daemon=True).start()
 
         # 3. Start IPC signal checker (for dashboard communication)
