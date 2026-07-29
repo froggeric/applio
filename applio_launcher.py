@@ -267,6 +267,14 @@ IPC_NOTIFICATION_NAME = "com.applio.wrapper.visibility"
 # Wrapper -> launcher: ask the whole app to quit (1.3 unified quit path).
 IPC_QUIT_REQUEST_NAME = "com.applio.wrapper.quit_request"
 
+# --- Phase 2 single-process spike ------------------------------------------------
+# When True, the launcher process runs the pywebview GUI itself instead of
+# spawning macos_wrapper.py as a child. OFF (default) == today's two-process
+# behavior, byte-for-byte unchanged. Gated behind an env flag so the crux
+# (does our NSApplicationDelegate survive webview.start()?) can be exercised
+# without disturbing the production path.
+APPLIO_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "0") == "1"
+
 # --- Single-instance lock (1.6) -----------------------------------------------
 # Fixed path (NOT the user-chosen data dir, which may not exist on first run).
 LAUNCHER_LOCK_PATH = os.path.expanduser("~/Library/Application Support/Applio/.launcher.lock")
@@ -3002,6 +3010,11 @@ class ApplioAppDelegate(NSObject):
             return self._launcher_ref()
         return None
 
+    def applicationSupportsSecureRestorableState_(self, sender):
+        # macOS requirement (pywebview's own delegate implements this). PyObjC
+        # accepts a Python bool for the BOOL return.
+        return True
+
     def applicationShouldHandleReopen_hasVisibleWindows_(self, sender, flag):
         """Dock-click / LaunchServices reopen when already running.
 
@@ -3010,6 +3023,7 @@ class ApplioAppDelegate(NSObject):
         bring this app to the front. Phase 2 makes this a direct
         makeKeyAndOrderFront: on a window this same process owns.
         """
+        logging.info("[AppDelegate] reopen fired (single-process=%s)", APPLIO_SINGLE_PROCESS)
         launcher = self._get_launcher()
         if launcher:
             try:
@@ -3031,6 +3045,7 @@ class ApplioAppDelegate(NSObject):
         equivalent to the NSTerminateLater+reply pattern but cannot hang the
         quit if a reply were ever missed.
         """
+        logging.info("[AppDelegate] terminate fired (single-process=%s)", APPLIO_SINGLE_PROCESS)
         launcher = self._get_launcher()
         if not launcher:
             return 1  # NSTerminateNow
@@ -3105,6 +3120,8 @@ class ApplioLauncher:
         self._dist_center = None  # NSDistributedNotificationCenter reference
         self._menu_handler = None  # NSObject proxy for menu actions (initialized in _setup_menu)
         self._app_delegate = None  # NSApplicationDelegate (reopen/terminate), attached in _setup_menu
+        self._applio_app = None  # Single-process: the in-process GUI (ApplioApp) from start_gui
+        self._main_window = None  # Single-process: pywebview window handle (None in two-process)
         self._quit_confirmed = False  # Wrapper already confirmed quit -> skip re-prompt in delegate
         self._wrapper_died = False  # Wrapper exited/crashed; checked by a main-thread timer, NOT the signal handler
         self._wrapper_died_pid = None
@@ -3177,19 +3194,34 @@ class ApplioLauncher:
             logging.info(f"[Launcher] Found {len(active)} active processes")
             self._show_progress_window_for_processes(active)
 
-        # 3.5. Crash recovery (1.6): reap a leftover wrapper from a prior
-        # (crashed) session before spawning a fresh one, so the new wrapper can
-        # bind port 6969 cleanly.
-        self._reap_orphan_wrapper(state)
+        if APPLIO_SINGLE_PROCESS:
+            # --- single-process spike: the launcher process IS the GUI process ---
+            # No wrapper to spawn/reap; this process runs pywebview + Gradio
+            # directly. webview.start drives the run loop below (NO menu= — we
+            # keep our native NSMenu; _reassert_menu_and_delegate re-seats the
+            # delegate + menu after webview clobbers them on window creation).
+            import macos_wrapper, webview
+            self._applio_app = macos_wrapper.start_gui(launcher=self)
+            self._main_window = getattr(self._applio_app, "window", None)
+            logging.info("[Launcher] Starting webview event loop (single-process)")
+            # Silent launch-time update check (daemon thread; alert only if newer).
+            AppHelper.callAfter(self._launch_time_update_check)
+            webview.start(func=self._reassert_menu_and_delegate, debug=False)
+        else:
+            # --- two-process (unchanged) ---
+            # 3.5. Crash recovery (1.6): reap a leftover wrapper from a prior
+            # (crashed) session before spawning a fresh one, so the new wrapper
+            # can bind port 6969 cleanly.
+            self._reap_orphan_wrapper(state)
 
-        # 4. Spawn wrapper process
-        self._spawn_wrapper()
+            # 4. Spawn wrapper process
+            self._spawn_wrapper()
 
-        # 5. Run event loop
-        logging.info("[Launcher] Starting event loop")
-        # Silent launch-time update check (daemon thread; alert only if newer).
-        AppHelper.callAfter(self._launch_time_update_check)
-        AppHelper.runEventLoop(installInterrupt=True)
+            # 5. Run event loop
+            logging.info("[Launcher] Starting event loop")
+            # Silent launch-time update check (daemon thread; alert only if newer).
+            AppHelper.callAfter(self._launch_time_update_check)
+            AppHelper.runEventLoop(installInterrupt=True)
 
         # Run loop returned (Ctrl-C via installInterrupt, or NSApp.stop). Run the
         # termination cascade before exit — signal handlers may not fire reliably
@@ -3500,6 +3532,23 @@ class ApplioLauncher:
             app.setDelegate_(self._app_delegate)
             logging.info("[Launcher] NSApplicationDelegate attached (reopen/terminate)")
 
+        main_menu = self._build_native_menu()
+        # The FIRST top-level submenu (MENU[0]) is untitled on purpose: macOS renders
+        # it as the bold app-name menu (from CFBundleName). Do NOT setTitle_ it.
+
+        NSApp.setMainMenu_(main_menu)
+        self._update_menu_state()
+        self._start_menu_update_timer()
+        logging.info("[Launcher] Menu bar setup complete (spec-driven)")
+
+    def _build_native_menu(self):
+        """Build and return the spec-driven native NSMenu.
+
+        Pure build (no NSApp side effects): used by _setup_menu for the initial
+        install AND by _reassert_menu_and_delegate to rebuild it after
+        webview.start clobbers the main menu. Resets _dynamic_items / _key_to_tag
+        on each build so the 2 s timer repopulates state on a fresh menu.
+        """
         import itertools
         from AppKit import NSMenu
 
@@ -3513,13 +3562,40 @@ class ApplioLauncher:
             menu_spec.MENU, main_menu, self._menu_handler, dispatch,
             tag_counter, self._dynamic_items, self._key_to_tag, is_top_level=True,
         )
-        # The FIRST top-level submenu (MENU[0]) is untitled on purpose: macOS renders
-        # it as the bold app-name menu (from CFBundleName). Do NOT setTitle_ it.
+        return main_menu
 
-        NSApp.setMainMenu_(main_menu)
-        self._update_menu_state()
-        self._start_menu_update_timer()
-        logging.info("[Launcher] Menu bar setup complete (spec-driven)")
+    def _reassert_menu_and_delegate(self):
+        """Re-seat our NSApplicationDelegate + native menu AFTER webview.start
+        clobbers them.
+
+        Passed to webview.start(func=...), so it runs on a webview WORKER thread;
+        we marshal the NSApp-touching work onto the main run-loop thread via
+        AppHelper.callAfter. pywebview clobbers NSApp.delegate() once on window
+        creation and wipes the main menu once in first_show, so re-seating both
+        here restores our reopen/terminate handling and our native menu (with
+        shortcuts) for the lifetime of the window.
+
+        REUSES the stored self._app_delegate: NSApplication.delegate is a WEAK
+        (assign) ref, so the delegate object must be kept alive by Python — never
+        inline a fresh ApplioAppDelegate.alloc()... here (its only ref would be
+        GC'd, leaving a dangling delegate that crashes on the next reopen/quit).
+        """
+        from PyObjCTools import AppHelper
+
+        def _do():
+            try:
+                from AppKit import NSApp
+                if self._app_delegate is not None:
+                    NSApp.setDelegate_(self._app_delegate)
+                NSApp.setMainMenu_(self._build_native_menu())
+                self._update_menu_state()  # apply dynamic state now (else ~2 s till next timer tick)
+                logging.info("[Launcher] Re-asserted delegate + native menu after webview.start")
+            except Exception:
+                # callAfter prints uncaught exceptions to stderr, NOT the app log — capture so the
+                # spike gate ("did the re-assert stick?") is diagnosable from applio_launcher.log.
+                logging.exception("[Launcher] _reassert_menu_and_delegate failed")
+
+        AppHelper.callAfter(_do)
 
 
     def _start_menu_update_timer(self):
@@ -3538,7 +3614,9 @@ class ApplioLauncher:
     def menuUpdateTimerFired_(self, timer):
         """Periodic menu state update + wrapper-death check."""
         self._update_menu_state()
-        self._check_wrapper_died()
+        # No wrapper subprocess in single-process mode — skip the death check.
+        if not APPLIO_SINGLE_PROCESS:
+            self._check_wrapper_died()
 
     def _check_wrapper_window_hidden(self):
         """Check if wrapper window was hidden (Keep Running clicked).
@@ -3632,7 +3710,8 @@ class ApplioLauncher:
                     self._dashboard_controller.show()
             except Exception as e:
                 logging.error(f"[Launcher] dashboard via IPC failed: {e}")
-        if self._check_wrapper_window_hidden():
+        # No wrapper subprocess in single-process mode — skip the hidden-window check.
+        if not APPLIO_SINGLE_PROCESS and self._check_wrapper_window_hidden():
             active = get_active_processes()
             if active:
                 try:
