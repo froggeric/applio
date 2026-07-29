@@ -266,6 +266,8 @@ LOG_SCROLL_INTERVAL = 5
 IPC_NOTIFICATION_NAME = "com.applio.wrapper.visibility"
 # Wrapper -> launcher: ask the whole app to quit (1.3 unified quit path).
 IPC_QUIT_REQUEST_NAME = "com.applio.wrapper.quit_request"
+# 2nd instance -> 1st instance (single-process only): surface the main window.
+IPC_BRING_TO_FRONT_NAME = "com.applio.bring_to_front"
 
 # --- Phase 2 single-process spike ------------------------------------------------
 # When True, the launcher process runs the pywebview GUI itself instead of
@@ -3200,7 +3202,20 @@ class ApplioLauncher:
         # the lock, signal it to surface its window and exit.
         if not acquire_single_instance_lock():
             logging.warning("[Launcher] Another instance is already running; signaling it and exiting.")
-            self._signal_show_main_window()
+            if APPLIO_SINGLE_PROCESS:
+                # Single-process: the 1st instance's window is in-process, so the
+                # two-process file flag (_signal_show_main_window) is a no-op.
+                # Post a distributed notification; the 1st instance surfaces its
+                # own main window via bringToFront_.
+                try:
+                    from Foundation import NSDistributedNotificationCenter
+                    NSDistributedNotificationCenter.defaultCenter().postNotificationName_object_(
+                        IPC_BRING_TO_FRONT_NAME, None
+                    )
+                except Exception as e:
+                    logging.warning(f"[Launcher] bring_to_front post failed: {e}")
+            else:
+                self._signal_show_main_window()
             sys.exit(0)
 
         # 1. Validate existing processes
@@ -3293,6 +3308,15 @@ class ApplioLauncher:
                 None,
                 4  # NSNotificationSuspensionBehaviorDeliverImmediately
             )
+            # Also observe a 2nd instance's bring_to_front request (single-process
+            # single-instance surfacing). Inert in two-process (never posted there).
+            self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
+                self,
+                "bringToFront:",
+                IPC_BRING_TO_FRONT_NAME,
+                None,
+                4  # NSNotificationSuspensionBehaviorDeliverImmediately
+            )
             logging.info("[Launcher] IPC observer registered for distributed notifications")
         except ImportError:
             logging.warning("[Launcher] NSDistributedNotificationCenter not available, using file-based IPC only")
@@ -3318,6 +3342,23 @@ class ApplioLauncher:
                     AppHelper.callAfter(self._show_progress_window_for_processes, active)
         except Exception as e:
             logging.warning(f"[Launcher] Error handling visibility change: {e}")
+
+    def bringToFront_(self, notification):
+        """Single-process: a 2nd instance failed the lock and asked us to surface.
+
+        Inert in two-process (that path never posts this notification). The
+        main window is in-process (self._main_window), so we surface it on the
+        main thread via AppHelper.callAfter, matching the reopen pattern.
+        """
+        try:
+            if APPLIO_SINGLE_PROCESS and getattr(self, "_main_window", None):
+                from PyObjCTools import AppHelper
+                from AppKit import NSApp
+                AppHelper.callAfter(self._main_window.show)
+                NSApp.activateIgnoringOtherApps_(True)
+                logging.info("[Launcher] bring_to_front: surfacing main window")
+        except Exception as e:
+            logging.warning(f"[Launcher] bring_to_front failed: {e}")
 
     def wrapperQuitRequested_(self, notification):
         """The wrapper asked the whole app to quit (1.3 unified quit path).
