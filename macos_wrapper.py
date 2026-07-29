@@ -13,8 +13,7 @@ Handles PyInstaller-specific requirements including:
 # =================================================================
 # CRITICAL: This must run before any other imports or code.
 
-import multiprocessing
-multiprocessing.freeze_support()
+import multiprocessing  # freeze_support() is called from start_gui(), not at import time
 
 # =================================================================
 # 1. Minimal Imports & Environment Setup
@@ -72,8 +71,8 @@ def _configure_activation_policy():
     except ImportError:
         pass  # PyObjC not available
 
-# Call BEFORE importing webview or other AppKit code
-_configure_activation_policy()
+# Called from start_gui() BEFORE `import webview` (activation-policy ordering
+# is load-bearing; see start_gui).
 
 # =================================================================
 # 1.2. PyWebView Activation Policy Patch (CRITICAL)
@@ -152,8 +151,7 @@ def _unpatch_pywebview_activation_policy():
     except:
         pass
 
-# Apply patch before any AppKit imports that might trigger webview
-_patch_pywebview_activation_policy()
+# Applied from start_gui() BEFORE `import webview` (see start_gui).
 
 # macOS native APIs for preferences and dialogs
 # These are conditional imports - only needed for GUI mode
@@ -165,30 +163,26 @@ try:
 except ImportError:
     NATIVE_APIS_AVAILABLE = False
 
-# Performance tuning for Apple Silicon
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-os.environ["PYTORCH_ENABLE_METAL_ACCELERATOR"] = "1"
+# Performance tuning / cache redirection / path hygiene are applied in
+# start_gui() (env vars, makedirs, and the frozen os.chdir(BASE_PATH)) so that
+# importing this module is side-effect-free. BASE_PATH is resolved read-only
+# here because _get_version_info() and bundled-resource lookups need it.
 
-# GRADIO SECURITY & FILE ACCESS
-os.environ["GRADIO_ALLOWED_PATHS"] = "/,/,/private/var/folders,/var/folders,/tmp,/private/tmp"
-os.environ["GRADIO_TEMP_DIR"] = os.path.expanduser("~/Library/Caches/Applio/gradio")
-os.makedirs(os.environ["GRADIO_TEMP_DIR"], exist_ok=True)
-
-# Redirect Cache Directories to User Library
-APP_SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/Applio")
-os.makedirs(APP_SUPPORT_DIR, exist_ok=True)
-os.environ["HF_HOME"] = os.path.join(APP_SUPPORT_DIR, "huggingface")
-os.environ["HF_DATASETS_CACHE"] = os.path.join(APP_SUPPORT_DIR, "huggingface", "datasets")
-os.environ["TRANSFORMERS_CACHE"] = os.path.join(APP_SUPPORT_DIR, "huggingface", "models")
-os.environ["MPLCONFIGDIR"] = os.path.join(APP_SUPPORT_DIR, "matplotlib")
-os.environ["TORCH_HOME"] = os.path.join(APP_SUPPORT_DIR, "torch")
-
-# Path Hygiene for PyInstaller
+# Path Hygiene for PyInstaller (read-only resolution; frozen os.chdir runs in
+# start_gui()).
 if getattr(sys, "frozen", False):
     BASE_PATH = sys._MEIPASS
-    os.chdir(BASE_PATH)
 else:
     BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+
+# Resolved by start_gui() at GUI bootstrap; kept None at import time so the
+# name exists for module-level references (setup_bundled_resources, etc.).
+DATA_PATH = None
+
+# pywebview is imported inside start_gui() (its import forces Regular activation policy +
+# sharedApplication, so it must not run at module import). Kept None at import time so the name
+# exists for module-level references (render_pywebview, _focus_main_window, run_until_window_created).
+webview = None
 
 # =================================================================
 # 1.4. Version Configuration
@@ -495,6 +489,7 @@ class ProcessController:
 # Global references to prevent garbage collection
 _main_window_ref = None
 _shutting_down = False  # Global flag to prevent multiple shutdown attempts
+_launcher_ref = None    # Launcher handle exposed by start_gui() for on_window_closing (Phase 2)
 
 
 # Return codes for close confirmation dialog
@@ -730,30 +725,11 @@ class FinderHelper:
 
 # =================================================================
 # 1.6. Early Data Path Setup (BEFORE subprocess mode detection)
-
-# =================================================================
-# 1.6. Early Data Path Setup (BEFORE subprocess mode detection)
 # =================================================================
 # CRITICAL: This must happen before subprocess mode detection so that
-# APPLIO_LOGS_PATH is available to subprocess scripts. When a subprocess
-# script is detected, it runs via runpy.run_path() BEFORE the GUI mode
-# setup (section 4) would normally set these environment variables.
-
-if getattr(sys, "frozen", False):
-    _early_prefs = PreferencesManager()
-    _early_data_path = _early_prefs.get_data_path() or os.path.expanduser("~/Applio")
-    # Debug logging only when APPLIO_DEBUG env var is set
-    if os.environ.get("APPLIO_DEBUG"):
-        with open("/tmp/applio_debug.txt", "a") as f:
-            f.write(f"=== Early env setup ===\n")
-            f.write(f"_early_data_path={_early_data_path}\n")
-            f.write(f"APPLIO_LOGS_PATH={os.path.join(_early_data_path, 'logs')}\n")
-            f.write(f"PID={os.getpid()}\n")
-    os.environ["APPLIO_DATA_PATH"] = _early_data_path
-    os.environ["APPLIO_LOGS_PATH"] = os.path.join(_early_data_path, "logs")
-    # Also set these for subprocess scripts that may need them
-    os.environ["APPLIO_DATASETS_PATH"] = os.path.join(_early_data_path, "assets", "datasets")
-    os.environ["APPLIO_AUDIOS_PATH"] = os.path.join(_early_data_path, "assets", "audios")
+# APPLIO_LOGS_PATH is available to subprocess scripts. The frozen early-prefs
+# block now runs inside start_gui() (before the subprocess-script dispatch)
+# so importing this module is side-effect-free.
 
 # =================================================================
 # 1.7. Write Runtime Configuration File (PROCESS-SAFE)
@@ -912,9 +888,8 @@ def _check_and_handle_show_main_window():
             logging.warning(f"[runtime_config] Error checking show_main_window: {e}")
 
 
-# Write config in frozen mode (ensures it's available for all subprocesses)
-if getattr(sys, "frozen", False):
-    _write_runtime_config()
+# The frozen _write_runtime_config() call now runs inside start_gui() (after
+# the early-prefs block, before the subprocess-script dispatch).
 
 # =================================================================
 # 2. Logging Configuration (BEFORE script execution)
@@ -955,7 +930,9 @@ def setup_logging():
     logging.info(f"sys.frozen: {getattr(sys, 'frozen', False)}")
     logging.info(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'N/A')}")
 
-setup_logging()
+
+# setup_logging() is called from start_gui() (after activation-policy setup,
+# before the subprocess-script dispatch) so importing this module is a no-op.
 
 # =================================================================
 # 3. Subprocess Script Execution Mode Detection
@@ -964,171 +941,30 @@ setup_logging()
 # When subprocess.run([sys.executable, "script.py"]) is called, it
 # re-launches the entire app. We detect this and run the script instead.
 # This must happen AFTER logging setup so script output is captured.
-
-if len(sys.argv) > 1:
-    potential_script = sys.argv[1]
-
-    # Check if it's a Python script path
-    if potential_script.endswith('.py'):
-        script_path = None
-
-        # First try: relative to current working directory
-        if os.path.exists(potential_script):
-            script_path = potential_script
-        # Second try: relative to BASE_PATH (app bundle)
-        # This is needed for subprocess calls after cwd change to DATA_PATH
-        elif os.path.exists(os.path.join(BASE_PATH, potential_script)):
-            script_path = os.path.join(BASE_PATH, potential_script)
-
-        if script_path:
-            script_args = sys.argv[2:]
-
-            logging.info(f"Subprocess mode detected: script={script_path}")
-            logging.info(f"Script arguments: {script_args}")
-
-            # === PATH VALIDATION FOR PREPROCESSING ===
-            # Detect preprocessing script by exact path match
-            if script_path.endswith('rvc/train/preprocess/preprocess.py') and len(script_args) >= 2:
-                dataset_path = script_args[1]
-                original_path = dataset_path
-
-                # First check: does path exist as-is?
-                if not os.path.exists(dataset_path):
-                    # Second check: try resolving relative path from DATA_PATH (user's data location)
-                    if not os.path.isabs(dataset_path):
-                        data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
-                        resolved_from_data = os.path.normpath(os.path.join(data_path, dataset_path))
-                        if os.path.exists(resolved_from_data):
-                            dataset_path = resolved_from_data
-                            script_args[1] = resolved_from_data
-                            logging.info(f"Dataset path resolved from DATA_PATH: {original_path} -> {resolved_from_data}")
-                        else:
-                            # Third check: try resolving relative path from BASE_PATH (app bundle)
-                            resolved_from_base = os.path.normpath(os.path.join(BASE_PATH, dataset_path))
-                            if os.path.exists(resolved_from_base):
-                                dataset_path = resolved_from_base
-                                script_args[1] = resolved_from_base
-                                logging.info(f"Dataset path resolved from BASE_PATH: {original_path} -> {resolved_from_base}")
-                            else:
-                                logging.error(f"Dataset path not found: {original_path}")
-                                logging.error(f"  Tried DATA_PATH: {resolved_from_data}")
-                                logging.error(f"  Tried BASE_PATH: {resolved_from_base}")
-                                print(f"Error: Dataset path does not exist: {original_path}")
-                                print(f"  Tried: {resolved_from_data}")
-                                print(f"  Tried: {resolved_from_base}")
-                                print(f"  Please use an absolute path to your dataset folder.")
-                                sys.exit(1)
-                    else:
-                        logging.error(f"Dataset path not found: {dataset_path}")
-                        print(f"Error: Dataset path does not exist: {dataset_path}")
-                        sys.exit(1)
-                else:
-                    logging.info(f"Dataset path validated: {dataset_path}")
-            # === END PATH VALIDATION ===
-
-            # Convert script_path to ABSOLUTE path BEFORE any CWD changes
-            # This is critical - the script lives in the app bundle (BASE_PATH),
-            # not in the user's data directory. If we change CWD first, the
-            # relative path will resolve incorrectly.
-            script_path_abs = os.path.abspath(script_path)
-
-            # Adjust sys.argv for the script's perspective
-            sys.argv = [script_path_abs] + script_args
-
-            # Add script's directory to sys.path for relative imports
-            # This mimics the behavior of `python script.py` which adds the script's dir to sys.path
-            script_dir = os.path.dirname(script_path_abs)
-            if script_dir not in sys.path:
-                sys.path.insert(0, script_dir)
-
-            # Change CWD to data path for correct path resolution in subprocess
-            # This ensures os.getcwd() returns DATA_PATH, not BASE_PATH
-            _data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
-            _original_cwd = os.getcwd()
-            os.chdir(_data_path)
-            logging.info(f"Changed CWD for subprocess: {_data_path}")
-
-            # Ensure config file is written before running subprocess script
-            # This handles the case where subprocess starts before main GUI
-            _write_runtime_config()
-
-            try:
-                runpy.run_path(script_path_abs, run_name='__main__')
-                logging.info(f"Script completed successfully: {script_path_abs}")
-                sys.exit(0)
-            except SystemExit as e:
-                # SystemExit is raised by sys.exit() in the script
-                # Non-zero exit codes indicate failure
-                if e.code != 0 and e.code is not None:
-                    logging.error(f"Script exited with code {e.code}: {script_path_abs}")
-                else:
-                    logging.info(f"Script exited normally: {script_path_abs}")
-                sys.exit(e.code if e.code is not None else 0)
-            except Exception as e:
-                logging.error(f"Script execution failed: {script_path_abs}")
-                logging.exception(e)
-                sys.exit(1)
-            finally:
-                os.chdir(_original_cwd)  # Restore original CWD
+#
+# The dispatch (if len(sys.argv) > 1: ... runpy.run_path ... sys.exit) now
+# runs inside start_gui() after setup_logging() and the frozen early-prefs
+# block, so importing this module is side-effect-free (no sys.exit at import).
 
 # =================================================================
 # 4. External Data Location Setup (GUI mode only)
 # =================================================================
-# This section only runs in GUI mode (not in subprocess mode)
-
-# Initialize preferences
-_prefs = PreferencesManager()
-DATA_PATH = _prefs.get_data_path()
-
-if not DATA_PATH:
-    # First run - prompt for location
-    default_location = os.path.expanduser("~/Applio")
-    DATA_PATH = select_data_folder(default_location)
-
-    if not DATA_PATH:
-        # User cancelled - use default
-        DATA_PATH = default_location
-        logging.info(f"User cancelled folder selection, using default: {DATA_PATH}")
-
-    # Validate path is writable
-    try:
-        os.makedirs(DATA_PATH, exist_ok=True)
-        test_file = os.path.join(DATA_PATH, ".write_test")
-        with open(test_file, 'w') as f:
-            f.write("test")
-        os.remove(test_file)
-    except (IOError, OSError) as e:
-        logging.error(f"Selected path not writable: {DATA_PATH}, error: {e}")
-        DATA_PATH = default_location
-        os.makedirs(DATA_PATH, exist_ok=True)
-
-    # Save preference
-    _prefs.set_data_path(DATA_PATH)
-    _prefs.mark_first_run_complete()
-    logging.info(f"Data location set to: {DATA_PATH}")
-
-# Create directory structure
-create_data_structure(DATA_PATH)
-
-# Change working directory to user data location
-# This causes all relative paths (now_dir = os.getcwd()) to resolve here
-os.chdir(DATA_PATH)
-logging.info(f"Working directory changed to: {DATA_PATH}")
-
-# Set APPLIO_LOGS_PATH environment variable for core.py
-# This ensures logs_path is set correctly regardless of import timing
-os.environ["APPLIO_LOGS_PATH"] = os.path.join(DATA_PATH, "logs")
+# This section only runs in GUI mode (not in subprocess mode). The data-path
+# resolution, first-run picker, create_data_structure, os.chdir(DATA_PATH),
+# setup_bundled_resources, env sync, and _write_runtime_config now run inside
+# start_gui() so importing this module is side-effect-free (no folder picker,
+# no os.chdir at import time).
 
 # =================================================================
 # 5. GUI Mode Initialization
 # =================================================================
-# Only reached if not in script execution mode
-
+# Only reached if not in script execution mode. webview is imported inside
+# start_gui() (after activation-policy configure+patch) because pywebview's
+# cocoa.py forces setActivationPolicy_(0) + sharedApplication at import time.
 import threading
 import socket
 import http.server
 import socketserver
-import webview
 
 # =================================================================
 # 5.1. Post-webview Activation Policy Cleanup
@@ -1136,23 +972,9 @@ import webview
 # pywebview's cocoa.py called setActivationPolicy_(0) at import time.
 # Our monkey-patch should have blocked it, but let's ensure Accessory policy
 # is set and restore the original method.
-
-# Restore original setActivationPolicy_ method
-_unpatch_pywebview_activation_policy()
-
-# Ensure Accessory policy is set (safety net)
-if os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
-    try:
-        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
-        app = NSApplication.sharedApplication()
-        current_policy = app.activationPolicy()
-        if current_policy != NSApplicationActivationPolicyAccessory:
-            app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-            logging.info("[Wrapper] Corrected activation policy to Accessory")
-        else:
-            logging.info("[Wrapper] Activation policy confirmed: Accessory")
-    except ImportError:
-        pass
+#
+# The unpatch + Accessory re-assert now run inside start_gui() AFTER
+# `import webview` (see start_gui).
 
 # =================================================================
 # 1.5. Copy bundled static resources to user's data location
@@ -1238,7 +1060,8 @@ def setup_bundled_resources():
     for bundled_rel, dest_rel, desc in dirs_to_copy:
         copy_dir(bundled_rel, dest_rel, desc)
 
-setup_bundled_resources()
+
+# setup_bundled_resources() is called from start_gui() after os.chdir(DATA_PATH).
 
 
 # =================================================================
@@ -1444,7 +1267,7 @@ class ApplioApp:
     # Class-level data path for menu callbacks
     DATA_PATH = None  # Set after initialization
 
-    def __init__(self):
+    def __init__(self, launcher=None):
         self.server_host = "127.0.0.1"
         self.server_port = 6969
         self.loading_port = 5678
@@ -1456,6 +1279,10 @@ class ApplioApp:
         self.progress = 0
         self.stage = "1/4"
         self.log_file = os.path.expanduser("~/Library/Logs/Applio/applio_wrapper.log")
+        # Launcher handle (None in standalone / two-process wrapper mode).
+        self.launcher = launcher
+        # Reentrancy guard for shutdown (used by later Phase 2 tasks).
+        self._stopping = False
         # Store DATA_PATH for menu access
         ApplioApp.DATA_PATH = DATA_PATH
 
@@ -1705,7 +1532,14 @@ class ApplioApp:
             except Exception as e:
                 logging.warning(f"[IPC] Error checking signals: {e}")
 
-    def run(self):
+    def run_until_window_created(self):
+        """Start helper/backend threads and create the pywebview window.
+
+        Does NOT block and does NOT call ``webview.start`` -- the caller owns
+        running the webview event loop (so the launcher / __main__ can drive it).
+        Contains everything the old ``run()`` did except the final
+        ``webview.start(...)`` line.
+        """
         # 1. Start Helpers
         threading.Thread(target=self.start_loading_server, daemon=True).start()
         threading.Thread(target=self.tail_logs, daemon=True).start()
@@ -1729,7 +1563,7 @@ class ApplioApp:
             text_select=True,
             vibrancy=True
         )
-        
+
         self.window.events.closing += on_window_closing
         global _main_window_ref
         _main_window_ref = self.window
@@ -1744,8 +1578,294 @@ class ApplioApp:
         else:
             logging.info("Running standalone - creating pywebview menu")
         webview.settings['SHOW_DEFAULT_MENUS'] = False   # suppress auto View/Edit menus
+
+    def run(self):
+        # Convenience: window bootstrap + blocking webview loop. Requires start_gui() to have run
+        # first (it sets up env/DATA_PATH and imports webview). Currently UNUSED — __main__ and the
+        # launcher both call start_gui() + webview.start(...) directly. Candidate for removal in Task 1+.
+        self.run_until_window_created()
         webview.start(menu=render_pywebview(), debug=False)
 
+def start_gui(launcher=None):
+    """Bootstrap the GUI in the calling process. Does NOT block.
+
+    Returns the ApplioApp instance. The caller holds ``app.window`` and runs
+    ``webview.start(...)`` (which blocks until the window closes).
+
+    This consolidates every module-level side effect (multiprocessing
+    freeze_support, env/cache setup, activation-policy configure+patch,
+    logging, frozen early data-path setup, the subprocess-script dispatch,
+    data-path resolution + ``os.chdir``, bundled-resource copy, and
+    ``import webview``) so that merely importing ``macos_wrapper`` is
+    side-effect-free. Ordering is load-bearing:
+
+      * ``os.chdir(DATA_PATH)`` and activation-policy configure+patch happen
+        BEFORE ``import webview`` (pywebview's cocoa.py forces
+        setActivationPolicy_(0) + sharedApplication at import time, and the
+        frozen CWD must be the data dir before Gradio is imported in a worker).
+      * Activation-policy unpatch + Accessory re-assert happen AFTER.
+
+    Under ``APPLIO_LAUNCHED_BY_LAUNCHER`` the activation-policy functions keep
+    this process Accessory (single dock icon) -- the same conditional behavior
+    as before, just relocated here.
+    """
+    # 0. Multiprocessing safety (must run before any workers are spawned; was
+    #    the very first statement at module scope).
+    multiprocessing.freeze_support()
+
+    # 1. Performance tuning + cache/env redirection (moved from the module-level
+    #    env/makedirs block). APP_SUPPORT_DIR was only used here -> local.
+    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+    os.environ["PYTORCH_ENABLE_METAL_ACCELERATOR"] = "1"
+    os.environ["GRADIO_ALLOWED_PATHS"] = "/,/,/private/var/folders,/var/folders,/tmp,/private/tmp"
+    os.environ["GRADIO_TEMP_DIR"] = os.path.expanduser("~/Library/Caches/Applio/gradio")
+    os.makedirs(os.environ["GRADIO_TEMP_DIR"], exist_ok=True)
+    _app_support_dir = os.path.expanduser("~/Library/Application Support/Applio")
+    os.makedirs(_app_support_dir, exist_ok=True)
+    os.environ["HF_HOME"] = os.path.join(_app_support_dir, "huggingface")
+    os.environ["HF_DATASETS_CACHE"] = os.path.join(_app_support_dir, "huggingface", "datasets")
+    os.environ["TRANSFORMERS_CACHE"] = os.path.join(_app_support_dir, "huggingface", "models")
+    os.environ["MPLCONFIGDIR"] = os.path.join(_app_support_dir, "matplotlib")
+    os.environ["TORCH_HOME"] = os.path.join(_app_support_dir, "torch")
+
+    # Frozen PyInstaller CWD hygiene: cwd to the bundle before any relative
+    # reads (build_info.json, configs). Was at module scope right after the
+    # BASE_PATH assignment; DATA_PATH chdir follows below.
+    if getattr(sys, "frozen", False):
+        os.chdir(BASE_PATH)
+
+    # 2. Activation policy: configure + patch -- BEFORE ``import webview``.
+    _configure_activation_policy()
+    _patch_pywebview_activation_policy()
+
+    # 3. Logging (must precede subprocess-script dispatch so output is captured).
+    setup_logging()
+
+    # Frozen early data-path setup (moved from the early-prefs block): makes
+    # APPLIO_LOGS_PATH / APPLIO_DATA_PATH available to subprocess scripts that
+    # run via the dispatch below BEFORE the GUI data-path resolution.
+    if getattr(sys, "frozen", False):
+        _early_prefs = PreferencesManager()
+        _early_data_path = _early_prefs.get_data_path() or os.path.expanduser("~/Applio")
+        # Debug logging only when APPLIO_DEBUG env var is set
+        if os.environ.get("APPLIO_DEBUG"):
+            with open("/tmp/applio_debug.txt", "a") as f:
+                f.write(f"=== Early env setup ===\n")
+                f.write(f"_early_data_path={_early_data_path}\n")
+                f.write(f"APPLIO_LOGS_PATH={os.path.join(_early_data_path, 'logs')}\n")
+                f.write(f"PID={os.getpid()}\n")
+        os.environ["APPLIO_DATA_PATH"] = _early_data_path
+        os.environ["APPLIO_LOGS_PATH"] = os.path.join(_early_data_path, "logs")
+        # Also set these for subprocess scripts that may need them
+        os.environ["APPLIO_DATASETS_PATH"] = os.path.join(_early_data_path, "assets", "datasets")
+        os.environ["APPLIO_AUDIOS_PATH"] = os.path.join(_early_data_path, "assets", "audios")
+
+        # Write config in frozen mode (ensures it's available for all subprocesses).
+        _write_runtime_config()
+
+    # Subprocess script execution mode (moved from module scope). If launched as
+    # ``macos_wrapper.py <script.py> [args...]``, run that script and exit.
+    # Preserves the path-resolution + ``os.chdir(_data_path)`` logic exactly.
+    if len(sys.argv) > 1:
+        potential_script = sys.argv[1]
+
+        # Check if it's a Python script path
+        if potential_script.endswith('.py'):
+            script_path = None
+
+            # First try: relative to current working directory
+            if os.path.exists(potential_script):
+                script_path = potential_script
+            # Second try: relative to BASE_PATH (app bundle)
+            # This is needed for subprocess calls after cwd change to DATA_PATH
+            elif os.path.exists(os.path.join(BASE_PATH, potential_script)):
+                script_path = os.path.join(BASE_PATH, potential_script)
+
+            if script_path:
+                script_args = sys.argv[2:]
+
+                logging.info(f"Subprocess mode detected: script={script_path}")
+                logging.info(f"Script arguments: {script_args}")
+
+                # === PATH VALIDATION FOR PREPROCESSING ===
+                # Detect preprocessing script by exact path match
+                if script_path.endswith('rvc/train/preprocess/preprocess.py') and len(script_args) >= 2:
+                    dataset_path = script_args[1]
+                    original_path = dataset_path
+
+                    # First check: does path exist as-is?
+                    if not os.path.exists(dataset_path):
+                        # Second check: try resolving relative path from DATA_PATH (user's data location)
+                        if not os.path.isabs(dataset_path):
+                            data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+                            resolved_from_data = os.path.normpath(os.path.join(data_path, dataset_path))
+                            if os.path.exists(resolved_from_data):
+                                dataset_path = resolved_from_data
+                                script_args[1] = resolved_from_data
+                                logging.info(f"Dataset path resolved from DATA_PATH: {original_path} -> {resolved_from_data}")
+                            else:
+                                # Third check: try resolving relative path from BASE_PATH (app bundle)
+                                resolved_from_base = os.path.normpath(os.path.join(BASE_PATH, dataset_path))
+                                if os.path.exists(resolved_from_base):
+                                    dataset_path = resolved_from_base
+                                    script_args[1] = resolved_from_base
+                                    logging.info(f"Dataset path resolved from BASE_PATH: {original_path} -> {resolved_from_base}")
+                                else:
+                                    logging.error(f"Dataset path not found: {original_path}")
+                                    logging.error(f"  Tried DATA_PATH: {resolved_from_data}")
+                                    logging.error(f"  Tried BASE_PATH: {resolved_from_base}")
+                                    print(f"Error: Dataset path does not exist: {original_path}")
+                                    print(f"  Tried: {resolved_from_data}")
+                                    print(f"  Tried: {resolved_from_base}")
+                                    print(f"  Please use an absolute path to your dataset folder.")
+                                    sys.exit(1)
+                        else:
+                            logging.error(f"Dataset path not found: {dataset_path}")
+                            print(f"Error: Dataset path does not exist: {dataset_path}")
+                            sys.exit(1)
+                    else:
+                        logging.info(f"Dataset path validated: {dataset_path}")
+                # === END PATH VALIDATION ===
+
+                # Convert script_path to ABSOLUTE path BEFORE any CWD changes
+                # This is critical - the script lives in the app bundle (BASE_PATH),
+                # not in the user's data directory. If we change CWD first, the
+                # relative path will resolve incorrectly.
+                script_path_abs = os.path.abspath(script_path)
+
+                # Adjust sys.argv for the script's perspective
+                sys.argv = [script_path_abs] + script_args
+
+                # Add script's directory to sys.path for relative imports
+                # This mimics the behavior of `python script.py` which adds the script's dir to sys.path
+                script_dir = os.path.dirname(script_path_abs)
+                if script_dir not in sys.path:
+                    sys.path.insert(0, script_dir)
+
+                # Change CWD to data path for correct path resolution in subprocess
+                # This ensures os.getcwd() returns DATA_PATH, not BASE_PATH
+                _data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+                _original_cwd = os.getcwd()
+                os.chdir(_data_path)
+                logging.info(f"Changed CWD for subprocess: {_data_path}")
+
+                # Ensure config file is written before running subprocess script
+                # This handles the case where subprocess starts before main GUI
+                _write_runtime_config()
+
+                try:
+                    runpy.run_path(script_path_abs, run_name='__main__')
+                    logging.info(f"Script completed successfully: {script_path_abs}")
+                    sys.exit(0)
+                except SystemExit as e:
+                    # SystemExit is raised by sys.exit() in the script
+                    # Non-zero exit codes indicate failure
+                    if e.code != 0 and e.code is not None:
+                        logging.error(f"Script exited with code {e.code}: {script_path_abs}")
+                    else:
+                        logging.info(f"Script exited normally: {script_path_abs}")
+                    sys.exit(e.code if e.code is not None else 0)
+                except Exception as e:
+                    logging.error(f"Script execution failed: {script_path_abs}")
+                    logging.exception(e)
+                    sys.exit(1)
+                finally:
+                    os.chdir(_original_cwd)  # Restore original CWD
+
+    # 4. GUI data-path resolution + chdir + bundled resources (moved from the
+    #    module-level GUI block). First-run picker runs here, NOT at import.
+    global DATA_PATH
+    _prefs = PreferencesManager()
+    DATA_PATH = _prefs.get_data_path()
+
+    if not DATA_PATH:
+        # First run - prompt for location
+        default_location = os.path.expanduser("~/Applio")
+        DATA_PATH = select_data_folder(default_location)
+
+        if not DATA_PATH:
+            # User cancelled - use default
+            DATA_PATH = default_location
+            logging.info(f"User cancelled folder selection, using default: {DATA_PATH}")
+
+        # Validate path is writable
+        try:
+            os.makedirs(DATA_PATH, exist_ok=True)
+            test_file = os.path.join(DATA_PATH, ".write_test")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+        except (IOError, OSError) as e:
+            logging.error(f"Selected path not writable: {DATA_PATH}, error: {e}")
+            DATA_PATH = default_location
+            os.makedirs(DATA_PATH, exist_ok=True)
+
+        # Save preference
+        _prefs.set_data_path(DATA_PATH)
+        _prefs.mark_first_run_complete()
+        logging.info(f"Data location set to: {DATA_PATH}")
+
+    # Create directory structure
+    create_data_structure(DATA_PATH)
+
+    # Change working directory to user data location
+    # This causes all relative paths (now_dir = os.getcwd()) to resolve here.
+    # frozen-CWD invariant: BEFORE import webview / Gradio (deferred
+    # `from app import launch_gradio` fires in start_backend's thread).
+    os.chdir(DATA_PATH)
+    logging.info(f"Working directory changed to: {DATA_PATH}")
+
+    # Set APPLIO_LOGS_PATH for core.py — ensures logs_path is correct regardless of import
+    # timing. Byte-for-byte Step 0: this UNCONDITIONAL GUI-block write existed in the original
+    # (L1120) and MUST be kept — core.py's _get_logs_path() prefers this env var, so without it
+    # dev-mode never sets it and frozen-first-run can be left with the stale ~/Applio guess.
+    # (APPLIO_DATA_PATH has NO unconditional GUI write in the original [frozen-early-block only],
+    # so it is intentionally NOT exported here; its unconditional resolved-path export is a
+    # Task 2 / §6.12 change for single-process training subs.)
+    os.environ["APPLIO_LOGS_PATH"] = os.path.join(DATA_PATH, "logs")
+
+    # Copy bundled static resources to the data location (was called at module
+    # scope after import webview; CWD-independent, so safe before it).
+    setup_bundled_resources()
+    # Byte-for-byte Step 0: the original GUI block did NOT call _write_runtime_config() here —
+    # only the frozen early-prefs block and the subprocess-script dispatch do (both preserved in
+    # their own branches above). The single-process skeleton's unconditional _write_runtime_config()
+    # in this GUI path is deferred to Task 1+. Omitting it matches the original; the launcher's
+    # runtime_paths.json read is already covered by the frozen early-block write.
+
+    # 5. import webview -- pywebview forces Regular + sharedApplication here;
+    #    our patch (step 2) blocks the Regular override under the launcher.
+    #    `global webview` so the import binds the MODULE global used by run(),
+    #    render_pywebview(), _focus_main_window(), etc.
+    global webview
+    import webview
+
+    # 6. Activation policy: unpatch + re-assert -- AFTER ``import webview``.
+    _unpatch_pywebview_activation_policy()
+    if os.environ.get("APPLIO_LAUNCHED_BY_LAUNCHER"):
+        try:
+            from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+            _nsapp = NSApplication.sharedApplication()
+            current_policy = _nsapp.activationPolicy()
+            if current_policy != NSApplicationActivationPolicyAccessory:
+                _nsapp.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+                logging.info("[Wrapper] Corrected activation policy to Accessory")
+            else:
+                logging.info("[Wrapper] Activation policy confirmed: Accessory")
+        except ImportError:
+            pass
+
+    # 7. Expose launcher to the module-level on_window_closing (used by later tasks).
+    global _launcher_ref
+    _launcher_ref = launcher
+
+    # 8. The app: create window + start helper/backend threads (does NOT block,
+    #    does NOT call webview.start -- the caller owns that).
+    app = ApplioApp(launcher=launcher)
+    app.run_until_window_created()
+    return app
+
+
 if __name__ == "__main__":
-    app = ApplioApp()
-    app.run()
+    app = start_gui()
+    webview.start(menu=render_pywebview(), debug=False)
