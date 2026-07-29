@@ -576,15 +576,41 @@ def on_window_closing():
             # Hide the main window instead of closing
             if _main_window_ref:
                 _main_window_ref.hide()
-            # Notify launcher via IPC (fast)
-            _notify_launcher_visibility(False)
-            # Also write to file as fallback
-            _set_wrapper_window_visible(False)
+            if _launcher_ref is None:
+                # Two-process only: tell the launcher the window went hidden so
+                # it can surface the progress window for active processes.
+                _notify_launcher_visibility(False)
+                _set_wrapper_window_visible(False)
             logging.info("[Window] Main window hidden, processes continue in background")
             return False  # Cancel close, window is just hidden
 
         # CLOSE_QUIT - fall through to terminate and exit
         logging.info("[Window] User chose to terminate and quit")
+
+    # Quit path. CLOSE_QUIT (user chose to terminate) and the no-active-processes
+    # case (no dialog shown) both land here.
+    if _launcher_ref is not None:
+        # Single-process (Phase 2): on_window_closing runs ON THE MAIN THREAD
+        # (inside webview's windowWillClose_ callback). A synchronous
+        # NSApp.terminate_() would block this close event for the whole terminate
+        # cascade AND re-enter AppKit -> spinning cursor. Defer it to the next
+        # run-loop iteration; set the launcher's confirmed-quit flag so
+        # applicationShouldTerminate_ skips its modal (no double-prompt); and
+        # cancel THIS close (return False) so pywebview does not tear the window
+        # down before terminate reaps the process. The run loop stops via the
+        # delegate's terminate cascade.
+        logging.info("[Window] Single-process quit: deferring NSApp.terminate_")
+        _launcher_ref._user_confirmed_quit = True
+
+        def _deferred_terminate():
+            try:
+                from AppKit import NSApp
+                NSApp.terminate_(None)
+            except Exception as e:
+                logging.warning(f"[Window] deferred NSApp.terminate_ failed: {e}")
+
+        AppHelper.callAfter(_deferred_terminate)
+        return False
 
     # Unified quit path (1.3): forward to the launcher, which owns the dock icon
     # and the process-group cascade. The wrapper does NOT os._exit here — the

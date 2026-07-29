@@ -2606,6 +2606,17 @@ class ProcessDashboardController:
         
         Signals the wrapper process to show its window via runtime_paths.json.
         """
+        launcher = self._launcher
+        if APPLIO_SINGLE_PROCESS and launcher is not None and getattr(launcher, "_main_window", None):
+            # Phase 2: the window lives in THIS process — show it directly.
+            logging.info("[Dashboard] Open Main Window (single-process)")
+            try:
+                AppHelper.callAfter(launcher._main_window.show)
+                from AppKit import NSApp
+                NSApp.activateIgnoringOtherApps_(True)
+            except Exception as e:
+                logging.warning(f"[Dashboard] Open Main Window failed: {e}")
+            return
         import json
         
         logging.info("[Dashboard] Open Main Window button clicked")
@@ -3026,10 +3037,19 @@ class ApplioAppDelegate(NSObject):
         logging.info("[AppDelegate] reopen fired (single-process=%s)", APPLIO_SINGLE_PROCESS)
         launcher = self._get_launcher()
         if launcher:
-            try:
-                launcher._signal_show_main_window()
-            except Exception as e:
-                logging.warning(f"[AppDelegate] reopen signal failed: {e}")
+            if APPLIO_SINGLE_PROCESS and getattr(launcher, "_main_window", None):
+                # Phase 2: the main window lives in THIS process — show it
+                # directly, no file-IPC detour. callAfter keeps the show off
+                # the AppKit reopen callback's stack.
+                try:
+                    AppHelper.callAfter(launcher._main_window.show)
+                except Exception as e:
+                    logging.warning(f"[AppDelegate] reopen show failed: {e}")
+            else:
+                try:
+                    launcher._signal_show_main_window()
+                except Exception as e:
+                    logging.warning(f"[AppDelegate] reopen signal failed: {e}")
             try:
                 from AppKit import NSApp
                 NSApp.activateIgnoringOtherApps_(True)
@@ -3050,8 +3070,14 @@ class ApplioAppDelegate(NSObject):
         if not launcher:
             return 1  # NSTerminateNow
 
-        # If the wrapper already forwarded a quit (1.3), skip re-prompting.
-        confirmed = getattr(launcher, "_quit_confirmed", False)
+        # If the user already confirmed a quit, skip re-prompting. Two flags:
+        #   - _quit_confirmed: two-process, set by wrapperQuitRequested_ (the
+        #     wrapper asked us to quit via distributed notification).
+        #   - _user_confirmed_quit: single-process, set by on_window_closing
+        #     right before it defers NSApp.terminate_ (window-close Terminate).
+        confirmed = getattr(launcher, "_quit_confirmed", False) or getattr(
+            launcher, "_user_confirmed_quit", False
+        )
         try:
             active = [] if confirmed else get_active_processes()
         except Exception:
@@ -3123,6 +3149,7 @@ class ApplioLauncher:
         self._applio_app = None  # Single-process: the in-process GUI (ApplioApp) from start_gui
         self._main_window = None  # Single-process: pywebview window handle (None in two-process)
         self._quit_confirmed = False  # Wrapper already confirmed quit -> skip re-prompt in delegate
+        self._user_confirmed_quit = False  # Single-process window-close Terminate -> skip re-prompt
         self._wrapper_died = False  # Wrapper exited/crashed; checked by a main-thread timer, NOT the signal handler
         self._wrapper_died_pid = None
         self._wrapper_relaunched = False  # Once-guard for automatic wrapper relaunch
@@ -4024,8 +4051,17 @@ class ApplioLauncher:
         This menu item is primarily for user awareness; the wrapper handles window visibility.
         """
         logging.info("[Launcher] Show Main Window requested")
-        # The main window lives in the wrapper subprocess; signal it to show.
-        self._signal_show_main_window()
+        if APPLIO_SINGLE_PROCESS and self._main_window:
+            # Phase 2: the window lives in THIS process — show it directly.
+            try:
+                AppHelper.callAfter(self._main_window.show)
+                from AppKit import NSApp
+                NSApp.activateIgnoringOtherApps_(True)
+            except Exception as e:
+                logging.warning(f"[Launcher] Show Main Window failed: {e}")
+        else:
+            # The main window lives in the wrapper subprocess; signal it to show.
+            self._signal_show_main_window()
 
     def _create_dashboard(self):
         """Create the ProcessDashboardController instance.
