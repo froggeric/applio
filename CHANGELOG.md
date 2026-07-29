@@ -6,6 +6,15 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 ## [Unreleased]
 
 ### Added
+- **Phase 2 single-process merge (WIP, behind `APPLIO_SINGLE_PROCESS=1`):** merges the
+  two-process launcher+wrapper into one native process (fixes Hide-not-hiding + menu-swaps-by-focus).
+  Done + dev-validated on hardware: `macos_wrapper` import side-effect-free (`start_gui(launcher=)`);
+  single-process GUI path with `NSApplicationDelegate` + native menu re-asserted after `webview.start`
+  (the merge's feasibility crux — confirmed viable); direct in-process reopen (`window.show()`,
+  no file-IPC); in-process quit (`callAfter(terminate)`, no double-prompt, no spinning cursor);
+  Gradio supervisor (N=3 soft-restart → fatal, `OSError` fail-fast); unified additive logging.
+  Flag OFF = unchanged two-process. Remaining: single-instance surfacing, Apple-Silicon frozen-app
+  validation, dead two-process code removal + drop the flag. Plan: `~/.claude/plans/phase2-single-process-merge.md`.
 - **Native menu overhaul:** one shared `menu_spec.py` rendered by a PyObjC renderer
   (launcher) and a pywebview static-subset renderer (standalone). New Process + Help menus;
   Reveal-in-Finder rescued; Hide ⌘H / Minimize ⌘M; the dead Menu B deleted.

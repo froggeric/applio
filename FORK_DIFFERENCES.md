@@ -12,6 +12,13 @@ This fork maintains a **minimal delta** from upstream - only macOS native app ad
 
 **Important:** Fork-only files (`applio_launcher.py`, `build_macos.py`, `macos_wrapper.py`, etc.) can be modified directly. Upstream files (like `core.py`, `tabs/train/train.py`) must only be modified via patches at build time.
 
+**Phase 2 — single-process merge (WIP, behind `APPLIO_SINGLE_PROCESS=1`):** `applio_launcher.py`
+and `macos_wrapper.py` additionally contain a single-process code path (gated on the flag; flag OFF
+= unchanged two-process). `macos_wrapper` is now an import-safe library (`start_gui(launcher=)`); the
+launcher runs `webview.start(func=_reassert_menu_and_delegate)` to re-seat its delegate + native menu
+after pywebview clobbers them. Functionally complete in dev (Step 0 → Task 2b); Tasks 3–4 remain.
+See CLAUDE.md "Phase 2" and `~/.claude/plans/phase2-single-process-merge.md`.
+
 | Category | Count |
 |----------|-------|
 | Added Files | 16+ |

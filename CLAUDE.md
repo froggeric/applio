@@ -153,6 +153,18 @@ versions instead: **numpy 2.2.6, scipy 1.15.3, numba 0.66.0, matplotlib 3.10.9, 
 `pandas._libs.tslibs.vectorized` failures.) If the fork ever moves to Python 3.11, these can
 re-align to upstream's exact pins; that needs `brew install python@3.11` + a fresh `venv_macos`.
 
+**Phase 2 — single-process merge (WIP, behind `APPLIO_SINGLE_PROCESS`):**
+Merging the two-process launcher+wrapper into ONE native process (fixes: Hide doesn't hide the
+Gradio window; the menu swaps by which process is frontmost). Gated on `APPLIO_SINGLE_PROCESS=1`;
+flag OFF (default) = unchanged two-process. **Status:** functionally complete in DEV runs
+(Step 0 → Task 2b done, spec+quality reviewed + user GUI-gated); Tasks 3–4 remain (single-instance
+surfacing, Apple-Silicon *frozen*-app validation, dead-code removal, drop the flag). Self-contained
+plan + task breakdown: `~/.claude/plans/phase2-single-process-merge.md`. Branch `feat/phase2-single-process`.
+- **Run single-process (dev):** `APPLIO_SINGLE_PROCESS=1 venv_macos/bin/python applio_launcher.py`
+- **Run single-process (built app, no rebuild):** `launchctl setenv APPLIO_SINGLE_PROCESS 1 && open dist/Applio.app` (unset after: `launchctl unsetenv APPLIO_SINGLE_PROCESS`).
+- **Architecture:** the launcher calls `macos_wrapper.start_gui(launcher=self)` (import-safe since Step 0 — `import macos_wrapper` has zero side effects) then `webview.start(func=self._reassert_menu_and_delegate)`. pywebview clobbers `NSApp.delegate()` and wipes the main menu once at `first_show`; the func re-seats both on the main thread via `AppHelper.callAfter`. With NO `menu=` passed, pywebview does NOT re-wipe on focus (`windowDidBecomeKey_`'s `if i and i.menu` guard is False when `i.menu` is None) — verified against `venv_macos/.../webview/platforms/cocoa.py`.
+- **Gotchas:** (1) `NSApplication.delegate` is a WEAK (assign) ref — REUSE `self._app_delegate` (created in `_setup_menu`); NEVER inline `ApplioAppDelegate.alloc()…` in `_reassert_menu_and_delegate` (its only Python ref would GC → dangling delegate → crash on next reopen/quit). (2) `on_window_closing` runs on the MAIN thread — quit via `AppHelper.callAfter(lambda: NSApp.terminate_(None))`, NEVER synchronous (the ≤5 s `killpg`-wait would block the close event + re-enter AppKit → spinning cursor); `_user_confirmed_quit` (set before the deferred terminate) prevents the double-prompt. (3) The Gradio supervisor `_supervised_backend` (N=3, linear backoff) wraps `start_backend`, which RAISES in single-process (two-process swallows + `_request_launcher_quit`); `OSError` (e.g. EADDRINUSE) fails fast; `exc_info=True` keeps the traceback. (4) `setup_logging` is ADDITIVE in single-process (no `removeHandler`, no `sys.stdout`/`stderr` reassign) so launcher logs reach `applio_launcher.log`. (5) Every shared-code change is gated on `APPLIO_SINGLE_PROCESS` (launcher) / `_SINGLE_PROCESS` (wrapper) — flag OFF is byte-for-byte two-process. (6) A hard GUI crash (segfault) is unrecoverable in single-process (was isolated to the wrapper) — accepted tradeoff; training checkpoints + `active_processes.json` mitigate data loss.
+
 **macOS Development:**
 - Use `requirements_macos.txt` (includes pywebview, pyinstaller, pyobjc)
 - PyTorch uses MPS (Metal Performance Shaders) on Apple Silicon
