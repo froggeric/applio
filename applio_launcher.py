@@ -3811,34 +3811,51 @@ class ApplioLauncher:
             logging.error(f"[Launcher] open url failed: {e}")
 
     def showAbout_(self, sender):
-        """Show About dialog."""
+        """Show About dialog.
+
+        Deferred via callAfter so the modal is presented AFTER menu tracking
+        finishes — calling runModal() synchronously from within a menu-item action
+        (while the menu is still tracking) fails to display the alert.
+        Check-for-Updates works for the same reason: it defers via callAfter.
+        """
+        logging.info("[Launcher] showAbout_ invoked")
         if not NATIVE_APIS_AVAILABLE:
+            logging.warning("[Launcher] showAbout_: NATIVE_APIS_AVAILABLE is False")
             return
-
-        from AppKit import NSAlert, NSAlertStyleInformational, NSApp
-
-        # Single source of truth: applio_update_check.VERSION reads
-        # Contents/Resources/build_info.json -> "3.6.3.5" (multi-root search).
-        version = _update_check().VERSION
-
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_("Applio")
-        alert.setInformativeText_(
-            f"Version {version}\n\n"
-            "Voice Conversion Application\n"
-            "Based on RVC (Retrieval-Based Voice Conversion)\n\n"
-            "© 2024-2025 IA Hispano"
-        )
-        alert.setAlertStyle_(NSAlertStyleInformational)
-        alert.addButtonWithTitle_("OK")
-        alert.setAccessibilityHelp_("About Applio dialog showing version and copyright information")
-        # The Gradio window (wrapper subprocess) can hold focus; bring the launcher
-        # forward so this modal alert is actually visible.
         try:
-            NSApp.activateIgnoringOtherApps_(True)
-        except Exception:
-            pass
-        alert.runModal()
+            from PyObjCTools import AppHelper
+            AppHelper.callAfter(self._show_about_alert)
+        except Exception as e:
+            logging.error(f"[Launcher] showAbout defer failed: {e}")
+
+    def _show_about_alert(self):
+        """Build + run the About alert (on the main loop via callAfter)."""
+        logging.info("[Launcher] _show_about_alert running")
+        try:
+            from AppKit import NSAlert, NSAlertStyleInformational, NSApp
+            # Single source of truth: applio_update_check.VERSION reads
+            # Contents/Resources/build_info.json -> "3.6.3.5" (multi-root search).
+            version = _update_check().VERSION
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Applio")
+            alert.setInformativeText_(
+                f"Version {version}\n\n"
+                "Voice Conversion Application\n"
+                "Based on RVC (Retrieval-Based Voice Conversion)\n\n"
+                "Native macOS port by Frédéric Guigand\n"
+                "© 2024-2026 IA Hispano"
+            )
+            alert.setAlertStyle_(NSAlertStyleInformational)
+            alert.addButtonWithTitle_("OK")
+            # The Gradio window (wrapper subprocess) can hold focus; bring the
+            # launcher forward so the modal is actually visible.
+            try:
+                NSApp.activateIgnoringOtherApps_(True)
+            except Exception:
+                pass
+            alert.runModal()
+        except Exception as e:
+            logging.error(f"[Launcher] About alert failed: {e}")
 
     def checkUpdates_(self, sender):
         """Check for updates - real GitHub check (shared module)."""
