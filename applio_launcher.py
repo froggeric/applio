@@ -2495,7 +2495,32 @@ class ProcessDashboardController(NSObject):
         there is no log / the process is not training / nothing has been logged
         yet. Uses the module-level _parse_training_log_line helper (shared with
         ProgressWindowController) - frozen-safe, no rvc import.
+
+        For a HISTORICAL (completed) process, prefers the durability snapshot
+        stored in its history entry (best_epoch/best_loss/final_epoch written by
+        patches/patch_process_tracking.py on completion). This survives a retrain
+        that overwrites the per-model training.log — re-parsing the log would
+        otherwise show the *new* run's metrics against an old history entry.
+        Active processes never carry snapshot fields, so the snapshot branch is
+        only taken for genuine history entries.
         """
+        # Historical snapshot first (survives retrain / log overwrite).
+        if proc.get("best_epoch") is not None and proc.get("best_loss") is not None:
+            try:
+                return {
+                    "epoch": int(proc.get("final_epoch"))
+                    if proc.get("final_epoch") is not None
+                    else None,
+                    "step": None,
+                    "training_speed": None,
+                    "best_epoch": int(proc.get("best_epoch")),
+                    "best_loss": float(proc.get("best_loss")),
+                    "best_step": None,
+                    "from_snapshot": True,
+                }
+            except (TypeError, ValueError):
+                pass  # Malformed snapshot -> fall back to live log parse
+
         log_path = proc.get("log_file") or proc.get("log_path")
         if not log_path:
             return None

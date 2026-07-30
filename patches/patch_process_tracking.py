@@ -190,6 +190,53 @@ def _add_to_history(entry):
             history["history"] = history["history"][:_HISTORY_MAX_ENTRIES]
         _write_process_history(history)
 
+def _snapshot_training_metrics(log_file_path):
+    """Snapshot final best-epoch metrics from a training.log into history.
+
+    Mirrors applio_launcher._parse_training_log_line semantics but uses
+    string-split parsing (no regex) so it embeds cleanly into this injected
+    triple-quoted template without backslash-escape issues. Runs in the
+    training subprocess (core.py) which cannot import the launcher helper.
+    Frozen-safe: stdlib only (os). Returns None when the log is missing or
+    has no evaluated epochs. epoch_points is [[epoch, best_loss], ...] for the
+    dashboard's loss-vs-epoch graph (Feature 3) and survives a retrain that
+    overwrites the per-model training.log (Feature 1 durability).
+    """
+    if not log_file_path or not os.path.exists(log_file_path):
+        return None
+    points = []
+    last_epoch = None
+    best_epoch = None
+    best_loss = None
+    try:
+        with open(log_file_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                # Only full evaluation lines carry lowest_value (epoch > 1).
+                if "epoch=" not in line or "lowest_value=" not in line:
+                    continue
+                try:
+                    after_epoch = line.split("epoch=", 1)[1]
+                    epoch = int(after_epoch.split("|", 1)[0].strip())
+                    after_lv = line.split("lowest_value=", 1)[1]
+                    loss = float(after_lv.split("(", 1)[0].strip())
+                    after_be = after_lv.split("epoch", 1)[1]
+                    best_epoch = int(after_be.split("and", 1)[0].strip())
+                except (ValueError, IndexError):
+                    continue
+                last_epoch = epoch
+                best_loss = loss
+                points.append([epoch, loss])
+    except (IOError, OSError):
+        return None
+    if last_epoch is None:
+        return None
+    return {
+        "best_epoch": best_epoch,
+        "best_loss": best_loss,
+        "final_epoch": last_epoch,
+        "epoch_points": points,
+    }
+
 # === End Process History Tracking ===
 # === End Process Tracking ===
 
@@ -331,8 +378,8 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1finally:
 \1    _log_file.close()
 \1    _untrack_process("training")
-\1# Add to history on completion
-\1_add_to_history({
+\1# Add to history on completion (with best-epoch snapshot for durability)
+\1_history_entry = {
 \1    "type": "training",
 \1    "model_name": model_name,
 \1    "started_at": _started_at,
@@ -340,7 +387,15 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1    "status": "completed" if _proc.returncode == 0 else "failed",
 \1    "log_path": _log_file_path,
 \1    "total_epoch": total_epoch
-\1})
+\1}
+\1# Snapshot final metrics so they survive a retrain overwriting training.log
+\1_snapshot = _snapshot_training_metrics(_log_file_path)
+\1if _snapshot:
+\1    _history_entry["best_epoch"] = _snapshot["best_epoch"]
+\1    _history_entry["best_loss"] = _snapshot["best_loss"]
+\1    _history_entry["final_epoch"] = _snapshot["final_epoch"]
+\1    _history_entry["epoch_points"] = _snapshot["epoch_points"]
+\1_add_to_history(_history_entry)
 \1if _proc.returncode != 0:
 \1    return f"Error: Training failed with code {_proc.returncode}"
 
