@@ -1982,6 +1982,10 @@ class ProcessDashboardController(NSObject):
         self._selected_process = None
         self._shutdown_event = threading.Event()
         self._update_counter = 0  # For timer-based throttling
+        # Feature 2: auto-show gating. True once the user has opened the dashboard
+        # this session — only then do we surface it on a new job (single-process).
+        # Stays False if the user never opens it (respect their choice).
+        self._opened_this_session = False
         
         # Window and UI elements (initialized in _create_window)
         self.window = None
@@ -2895,10 +2899,31 @@ class ProcessDashboardController(NSObject):
         
         logging.info(f"[Dashboard] Showing window (state: {self._current_state})")
         self.window.makeKeyAndOrderFront_(None)
-        
+
+        # User has shown interest in the dashboard this session — enable auto-show.
+        self._opened_this_session = True
+
         # Restart timer if in active state
         if self._current_state == "active":
             self._start_update_timer()
+
+    def _surface_window(self):
+        """Aggressively bring the dashboard to front (single-process auto-show).
+
+        orderFrontRegardless brings the window forward even when the app is not
+        frontmost; activateIgnoringOtherApps_ steals focus so the user notices a
+        job just started. Used ONLY on the idle->active transition in
+        single-process mode, and only when the user opened the dashboard this
+        session. See update_process_list / menuUpdateTimerFired_.
+        """
+        if not self.window:
+            return
+        try:
+            self.window.orderFrontRegardless()
+            from AppKit import NSApp
+            NSApp.activateIgnoringOtherApps_(True)
+        except Exception as e:
+            logging.warning(f"[Dashboard] auto-show surface failed: {e}")
     
     def hide(self):
         """Hide the dashboard window without destroying.
@@ -3055,24 +3080,27 @@ class ProcessDashboardController(NSObject):
     
     def update_process_list(self):
         """Refresh the process list and update dashboard state.
-        
+
         Handles:
         - Process list refresh errors
         - State transitions (idle <-> active)
         - Null checks for UI elements
+        - Single-process auto-show on idle->active (Feature 2)
         """
+        # Capture pre-transition state for idle->active detection (Feature 2).
+        was_active = self._current_state == "active"
         try:
             self._active_processes = get_active_processes()
         except Exception as e:
             logging.warning(f"[Dashboard] Could not get active processes: {e}")
             self._active_processes = []
-        
+
         try:
             self._recent_processes = get_recent_processes(limit=5)
         except Exception as e:
             logging.warning(f"[Dashboard] Could not get recent processes: {e}")
             self._recent_processes = []
-        
+
         # Update state based on process count
         if self._active_processes:
             if self._current_state != "active":
@@ -3080,6 +3108,18 @@ class ProcessDashboardController(NSObject):
         else:
             if self._current_state == "active":
                 self.transition_to_idle()
+
+        # Feature 2: in single-process mode, surface the dashboard when a job
+        # appears (idle->active), but only if the user opened it this session
+        # (never force-open for a user who doesn't use the dashboard).
+        if (
+            APPLIO_SINGLE_PROCESS
+            and not was_active
+            and self._current_state == "active"
+            and self._opened_this_session
+        ):
+            logging.info("[Dashboard] idle->active transition: auto-showing (single-process)")
+            self._surface_window()
     
     def get_state(self) -> str:
         """Get current dashboard state."""
@@ -3918,6 +3958,16 @@ class ApplioLauncher:
     def menuUpdateTimerFired_(self, timer):
         """Periodic menu state update + wrapper-death check."""
         self._update_menu_state()
+        # Feature 2: single-process heartbeat for the dashboard. Keeps its state
+        # fresh (idle<->active transitions) so it can auto-show on a new job.
+        # Strictly gated on APPLIO_SINGLE_PROCESS and only drives an EXISTING
+        # controller — never force-creates the dashboard for a user who hasn't
+        # opened it. Two-process behavior is unchanged.
+        if APPLIO_SINGLE_PROCESS and self._dashboard_controller:
+            try:
+                self._dashboard_controller.update_process_list()
+            except Exception as e:
+                logging.warning(f"[Launcher] dashboard heartbeat failed: {e}")
         # No wrapper subprocess in single-process mode — skip the death check.
         if not APPLIO_SINGLE_PROCESS:
             self._check_wrapper_died()
