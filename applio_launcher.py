@@ -1977,42 +1977,6 @@ def _chart_text_attr(size, weight=None, color=None):
     }
 
 
-def _draw_chart_hover_label(width, height, sx, sy, epoch, loss):
-    """Draw the hover label near a plotted chart point.
-
-    A rounded-rect background (controlBackgroundColor, mostly opaque) plus the
-    text "Epoch N — Loss X.XXX". Positioned above the point and clamped into the
-    view bounds; flips to below / shifts horizontally near an edge so it never
-    overflows. Module-scope (not a LossChartView method) for the same PyObjC
-    selector-validation reason as _chart_text_attr.
-    """
-    text = u"Epoch {0} — Loss {1:.3f}".format(epoch, loss)
-    label = NSAttributedString.alloc().initWithString_attributes_(
-        text, _chart_text_attr(10, NSFontWeightMedium, NSColor.labelColor())
-    )
-    tsize = label.size()
-    tw, th = float(tsize.width), float(tsize.height)
-    pad_x, pad_y, gap, radius = 6.0, 3.0, 8.0, 4.0
-    box_w = tw + 2 * pad_x
-    box_h = th + 2 * pad_y
-    # Default: centered above the point (origin is bottom-left).
-    box_x = sx - box_w / 2.0
-    box_y = sy + gap
-    if box_y + box_h > height:        # not enough room above -> drop below
-        box_y = sy - gap - box_h
-    if box_y < 0:                     # still off-bottom -> pin above the point
-        box_y = sy + gap
-    # Horizontal clamp (flip-x near the right edge).
-    if box_x < 2.0:
-        box_x = 2.0
-    elif box_x + box_w > width - 2.0:
-        box_x = width - 2.0 - box_w
-    box_rect = ((box_x, box_y), (box_w, box_h))
-    NSColor.controlBackgroundColor().colorWithAlphaComponent_(0.92).setFill()
-    NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(box_rect, radius, radius).fill()
-    label.drawAtPoint_((box_x + pad_x, box_y + pad_y))
-
-
 class LossChartView(NSView):
     """Compact loss-vs-epoch line chart for the dashboard detail panel (Feature 3).
 
@@ -2029,11 +1993,6 @@ class LossChartView(NSView):
 
     CHART_HEIGHT = 140  # reserved height in the detail panel layout
 
-    # Hover tooltip: show "Epoch N — Loss X" when the cursor is within this many
-    # points (horizontal screen px) of a plotted dot. Generous enough to be easy
-    # to hover; tight enough not to fire while idling in the plot margins.
-    HOVER_PX = 18.0
-
     def initWithFrame_(self, frame):
         self = objc.super(LossChartView, self).initWithFrame_(frame)
         if self is None:
@@ -2045,22 +2004,32 @@ class LossChartView(NSView):
         # the chart shows its placeholder.
         self._screen_points = []  # [(sx, sy, epoch, loss), ...]
         self._tracking_area = None
-        # Hovered point as (epoch, loss) or None; drawRect_ resolves its current
-        # screen position from _screen_points so the drawn label always tracks
-        # the live geometry. Set by mouseMoved, cleared on exit / out-of-range.
-        self._hover_point = None
+        # Hover crosshair state. _hover_x is the cursor's x in view coords (the
+        # vertical line follows it); _hover_epoch is the nearest plotted point
+        # (epoch, loss) for the label, or None when no points. Cleared on exit.
+        self._hover_x = None
+        self._hover_epoch = None
+        self._mouse_moved_logged = False  # one-shot "did mouseMoved ever fire" log
         return self
+
+    def viewDidMoveToWindow(self):
+        """Fires exactly when this view is added to a window.
+
+        Force the hosting window to accept mouse-moved events + (re)build the
+        tracking area. This is the reliable hook: initWithFrame_ runs before the
+        view has a window, and AppKit's own updateTrackingAreas call can be
+        missed when the detail panel is created hidden then shown.
+        """
+        win = self.window()
+        if win is not None:
+            win.setAcceptsMouseMovedEvents_(True)
+        self.updateTrackingAreas()
 
     def updateTrackingAreas(self):
         """Maintain a single mouse-moved tracking area over the whole view.
 
-        AppKit calls this when the view is installed in a window (and on
-        geometry changes), so we rebuild our tracking area here rather than in
-        initWithFrame_ (the view has no window/frame-in-window yet then).
-
-        NSTrackingInVisibleRect makes the area auto-cover the visible rect, so
-        mouseMoved keeps firing across the whole chart even as it resizes/
-        scrolls without us re-adding the area each time.
+        NSTrackingInVisibleRect auto-covers the visible rect, so mouseMoved
+        keeps firing across the whole chart even as it resizes/scrolls.
         """
         if self._tracking_area is not None:
             self.removeTrackingArea_(self._tracking_area)
@@ -2084,9 +2053,10 @@ class LossChartView(NSView):
     def _nearest_epoch_for_x(self, x):
         """Return (epoch, loss) for the plotted point nearest screen x, or None.
 
-        Pure mapping over self._screen_points (no AppKit) so it can be unit
-        tested headlessly. Only matches when the nearest point is within
-        HOVER_PX of x (otherwise the cursor is in a margin, not over a point).
+        Pure mapping over self._screen_points (no AppKit) so it is unit-testable
+        headlessly. The hover is a crosshair that follows the cursor, so we
+        always resolve the nearest epoch (no distance threshold): sweeping across
+        the chart reads every evaluated epoch's value.
         """
         if not self._screen_points:
             return None
@@ -2097,30 +2067,30 @@ class LossChartView(NSView):
             if best is None or dx < best_dx:
                 best = (epoch, loss)
                 best_dx = dx
-        if best is None or best_dx is None or best_dx > self.HOVER_PX:
-            return None
         return best
 
     def mouseMovedWithEvent_(self, event):
-        """Mark the nearest plotted point + redraw so drawRect_ paints a label.
+        """Move the hover crosshair: track cursor x + nearest epoch, then redraw.
 
-        We draw the label ourselves (in drawRect_) rather than using setToolTip_:
-        AppKit caches a view's toolTip per tracking region and only shows it after
-        a fixed hover delay, so per-mouseMoved setToolTip_ calls either don't
-        refresh or feel dead in the frozen app. A drawn label is instant and
-        reliable. NSTrackingInVisibleRect guarantees mouseMoved fires here.
+        Drawn ourselves (vertical line + epoch label) rather than setToolTip_
+        (AppKit caches toolTip per tracking region + a hover delay, so it never
+        refreshed in the frozen app). mouseMoved delivery needs the window to
+        accept mouse-moved events -- forced on in viewDidMoveToWindow.
         """
+        if not self._mouse_moved_logged:
+            self._mouse_moved_logged = True
+            logging.info("[Dashboard] loss chart mouseMoved fired")
         loc = event.locationInWindow()
         pt = self.convertPoint_fromView_(loc, None)
-        new_hover = self._nearest_epoch_for_x(pt.x)  # (epoch, loss) or None
-        if new_hover != self._hover_point:
-            self._hover_point = new_hover
-            self.setNeedsDisplay_(True)
+        self._hover_x = float(pt.x)
+        self._hover_epoch = self._nearest_epoch_for_x(pt.x)  # (epoch, loss) or None
+        self.setNeedsDisplay_(True)
 
     def mouseExitedWithEvent_(self, event):
-        """Clear the hover label when the cursor leaves the chart."""
-        if self._hover_point is not None:
-            self._hover_point = None
+        """Clear the hover crosshair when the cursor leaves the chart."""
+        if self._hover_x is not None or self._hover_epoch is not None:
+            self._hover_x = None
+            self._hover_epoch = None
             self.setNeedsDisplay_(True)
 
     def set_points(self, points):
@@ -2268,16 +2238,36 @@ class LossChartView(NSView):
         )
         cur.drawAtPoint_((width - cur.size().width - 8.0, height - 14.0))
 
-        # Hover label (drawn, instant) for the point under the cursor. Resolve
-        # the hovered epoch's CURRENT screen position from screen_points so the
-        # label tracks the live geometry; skip silently if the epoch is no longer
-        # present (data changed) or nothing is hovered.
-        if self._hover_point is not None:
-            he, _hl = self._hover_point
-            _hit = [(sx, sy) for sx, sy, e, l in screen_points if e == he]
-            if _hit:
-                _hsx, _hsy = _hit[0]
-                _draw_chart_hover_label(width, height, _hsx, _hsy, he, _hl)
+        # Hover crosshair (drawn, instant): a vertical line that follows the
+        # cursor across the whole chart + an "Ep N — loss" label at its top for
+        # the nearest plotted epoch. mouseMoved sets _hover_x/_hover_epoch;
+        # mouseExited clears them. Skip silently when not hovering. The line is
+        # clamped to the plot span; the label is clamped so it never overflows.
+        if self._hover_x is not None:
+            hx = self._hover_x
+            if hx < plot_x:
+                hx = plot_x
+            elif hx > plot_x + plot_w:
+                hx = plot_x + plot_w
+            NSColor.secondaryLabelColor().colorWithAlphaComponent_(0.55).setStroke()
+            vline = NSBezierPath.bezierPath()
+            vline.moveToPoint_((hx, plot_y))
+            vline.lineToPoint_((hx, plot_y + plot_h))
+            vline.setLineWidth_(1.0)
+            vline.stroke()
+            if self._hover_epoch is not None:
+                he, hl = self._hover_epoch
+                vlbl = NSAttributedString.alloc().initWithString_attributes_(
+                    u"Ep {0} — {1:.3f}".format(he, hl),
+                    _chart_text_attr(9, NSFontWeightMedium, NSColor.labelColor()),
+                )
+                vw, vh = float(vlbl.size().width), float(vlbl.size().height)
+                vx = hx - vw / 2.0
+                if vx < plot_x:
+                    vx = plot_x
+                elif vx + vw > plot_x + plot_w:
+                    vx = plot_x + plot_w - vw
+                vlbl.drawAtPoint_((vx, plot_y + plot_h - vh - 3.0))
 
 
 class ProcessDashboardController(NSObject):
@@ -2401,6 +2391,12 @@ class ProcessDashboardController(NSObject):
         # Set accessibility
         self.window.setAccessibilityLabel_("Applio Dashboard")
         self.window.setAccessibilityHelp_("Monitor active training and inference processes")
+        # Deliver mouse-moved events so the loss chart's hover crosshair works.
+        # An NSWindow only routes mouseMoved to a tracking-area owner reliably
+        # when this is on; without it the chart's NSTrackingArea never fires
+        # (LossChartView also forces this on from viewDidMoveToWindow, so the
+        # chart works regardless of which window hosts it).
+        self.window.setAcceptsMouseMovedEvents_(True)
     
     def _create_sidebar(self):
         """Create the process list sidebar (initially hidden).
