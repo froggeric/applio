@@ -133,6 +133,9 @@ def _untrack_process(process_type):
 
 # === Process History Tracking ===
 _HISTORY_MAX_ENTRIES = 50
+# Cap on plotted epoch points in a history snapshot (matches the live path's
+# MAX_EPOCH_POINTS in applio_launcher). A real run evaluates far fewer.
+_SNAPSHOT_MAX_POINTS = 2000
 
 def _get_history_file_path():
     """Get path to process_history.json."""
@@ -190,7 +193,7 @@ def _add_to_history(entry):
             history["history"] = history["history"][:_HISTORY_MAX_ENTRIES]
         _write_process_history(history)
 
-def _snapshot_training_metrics(log_file_path):
+def _snapshot_training_metrics(log_file_path, prior_points=None):
     """Snapshot final best-epoch metrics from a training.log into history.
 
     Mirrors applio_launcher._parse_training_log_line semantics but uses
@@ -201,6 +204,12 @@ def _snapshot_training_metrics(log_file_path):
     has no evaluated epochs. epoch_points is [[epoch, best_loss], ...] for the
     dashboard's loss-vs-epoch graph (Feature 3) and survives a retrain that
     overwrites the per-model training.log (Feature 1 durability).
+
+    prior_points: optional [[epoch, loss], ...] captured by run_train_script
+    from the PREVIOUS training.log before this run truncated it. Resumed runs
+    reopen the log with mode "w", wiping every pre-resume epoch, so without
+    this the curve would show only the resumed tail (the original "~5 points"
+    symptom). We merge prior_points back in for a genuine resume (see below).
     """
     if not log_file_path or not os.path.exists(log_file_path):
         return None
@@ -230,6 +239,32 @@ def _snapshot_training_metrics(log_file_path):
         return None
     if last_epoch is None:
         return None
+    # Resume handling. training.log is truncated (open "w") on every run start,
+    # so a RESUMED run only contains its post-resume epochs here -- merge the
+    # prior lineage (captured before truncation) so the curve is whole. A fresh
+    # start's first evaluated epoch is 2 (epoch 1 has no lowest_value), so a
+    # current min epoch > 2 means this run picked up mid-way; a fresh retrain
+    # (min epoch 2) DISCARDS the prior lineage so retraining the same model
+    # never drags in a stale curve. On epoch overlap the current run wins.
+    if prior_points:
+        try:
+            cur_min = min(p[0] for p in points)
+        except ValueError:
+            cur_min = None
+        if cur_min is not None and cur_min > 2:
+            merged = {}
+            for pp in prior_points:
+                try:
+                    merged[int(pp[0])] = float(pp[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+            for e, l in points:
+                merged[e] = l
+            points = sorted([[e, l] for e, l in merged.items()])
+    # Bound output for pathologically long lineages (matches the live path's
+    # MAX_EPOCH_POINTS): keep the most recent evaluated epochs.
+    if len(points) > _SNAPSHOT_MAX_POINTS:
+        points = points[-_SNAPSHOT_MAX_POINTS:]
     return {
         "best_epoch": best_epoch,
         "best_loss": best_loss,
@@ -369,6 +404,15 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1_log_dir = os.path.join(logs_path, model_name)
 \1os.makedirs(_log_dir, exist_ok=True)
 \1_log_file_path = os.path.join(_log_dir, "training.log")
+\1# Capture this model's existing epoch curve BEFORE truncating the log below.
+\1# A resumed run reopens training.log with "w", wiping every pre-resume epoch;
+\1# handing those points to _snapshot_training_metrics lets it merge the full
+\1# lineage back together so the loss graph isn't just the resumed tail.
+\1_prior_points = []
+\1if os.path.exists(_log_file_path):
+\1    _prior_snap = _snapshot_training_metrics(_log_file_path)
+\1    if _prior_snap:
+\1        _prior_points = _prior_snap["epoch_points"]
 \1_log_file = open(_log_file_path, "w")
 \1_started_at = _applio_dt.datetime.now().isoformat()
 \1try:
@@ -388,8 +432,9 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1    "log_path": _log_file_path,
 \1    "total_epoch": total_epoch
 \1}
-\1# Snapshot final metrics so they survive a retrain overwriting training.log
-\1_snapshot = _snapshot_training_metrics(_log_file_path)
+\1# Snapshot final metrics so they survive a retrain overwriting training.log.
+\1# Pass the pre-truncation points so a resumed run's curve spans its lineage.
+\1_snapshot = _snapshot_training_metrics(_log_file_path, _prior_points)
 \1if _snapshot:
 \1    _history_entry["best_epoch"] = _snapshot["best_epoch"]
 \1    _history_entry["best_loss"] = _snapshot["best_loss"]
