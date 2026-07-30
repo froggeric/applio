@@ -2077,9 +2077,24 @@ class LossChartView(NSView):
             gp.setLineWidth_(0.5)
             gp.stroke()
             if not all_equal:
-                val = max_l - (i / 3.0) * (max_l - min_l)
+                # Track y_for exactly: min loss at the BOTTOM (i=0 -> plot_y),
+                # max at the top. The old max_l-(...) form drew the axis labels
+                # upside-down relative to the plotted points.
+                val = min_l + (i / 3.0) * (max_l - min_l)
                 t = NSAttributedString.alloc().initWithString_attributes_(f"{val:.3f}", label_attr)
                 t.drawAtPoint_((2.0, gy - 5.0))
+
+        # X-axis epoch legend (first + last epoch); compact for the small chart.
+        x_axis_attr = _chart_text_attr(8)
+        first_lbl = NSAttributedString.alloc().initWithString_attributes_(
+            "ep {}".format(min_e), x_axis_attr,
+        )
+        first_lbl.drawAtPoint_((plot_x, 1.0))
+        if max_e > min_e:
+            last_lbl = NSAttributedString.alloc().initWithString_attributes_(
+                "ep {}".format(max_e), x_axis_attr,
+            )
+            last_lbl.drawAtPoint_((plot_x + plot_w - last_lbl.size().width, 1.0))
 
         # Polyline (loss curve).
         NSColor.systemBlueColor().setStroke()
@@ -2307,6 +2322,9 @@ class ProcessDashboardController(NSObject):
         self.detail_panel = NSBox.alloc().initWithFrame_(detail_frame)
         self.detail_panel.setBoxType_(NSBoxPrimary)
         self.detail_panel.setBorderType_(0)  # No border
+        # NSBox defaults its title to "Title" — suppress it (NSNoTitle) so the
+        # panel doesn't render a stray "Title" caption.
+        self.detail_panel.setTitlePosition_(0)
         self.detail_panel.setContentView_(NSView.alloc().init())
         self.detail_panel.setAccessibilityLabel_("Process detail panel")
         self.window.contentView().addSubview_(self.detail_panel)
@@ -2498,6 +2516,14 @@ class ProcessDashboardController(NSObject):
         if not self._selected_process:
             if hasattr(self, 'detail_panel') and self.detail_panel:
                 self.detail_panel.setHidden_(True)
+            # In idle, bring the placeholder back so the area isn't blank after
+            # the user deselects a history row.
+            if (
+                self._current_state == "idle"
+                and hasattr(self, "placeholder_view")
+                and self.placeholder_view
+            ):
+                self.placeholder_view.setHidden_(False)
             return
         
         proc = self._selected_process
@@ -2537,6 +2563,11 @@ class ProcessDashboardController(NSObject):
 
         try:
             self.detail_panel.setHidden_(False)
+
+            # A process is selected for the detail view -> hide the idle
+            # placeholder so the two never overlap.
+            if hasattr(self, "placeholder_view") and self.placeholder_view:
+                self.placeholder_view.setHidden_(True)
             
             # Update name (with null check)
             model_name = proc.get("model_name", "")
@@ -3090,17 +3121,23 @@ class ProcessDashboardController(NSObject):
         
         This shows when no processes are active.
         """
-        # Calculate center area for placeholder content
-        content_width = DASHBOARD_WIDTH - 2 * PADDING
+        # Placeholder lives in the DETAIL-panel area (right of the sidebar) so
+        # the history sidebar can stay visible + selectable in idle. Sizing is
+        # relative to content_width, so the centered labels rescale cleanly.
+        detail_area_w = DASHBOARD_WIDTH - SIDEBAR_WIDTH
+        content_width = detail_area_w - 2 * PADDING
         content_height = 200
-        center_y = (DASHBOARD_HEIGHT - content_height) // 2
-        
+        center_y = ((DASHBOARD_HEIGHT - 28) - content_height) // 2
+
         # Create container box with subtle styling
         self.placeholder_view = NSBox.alloc().initWithFrame_(
-            NSMakeRect(PADDING, center_y, content_width, content_height)
+            NSMakeRect(SIDEBAR_WIDTH + PADDING, center_y, content_width, content_height)
         )
         self.placeholder_view.setBoxType_(1)  # NSBoxCustom
         self.placeholder_view.setBorderType_(2)  # NSBezelBorder
+        # NSBox defaults its title to "Title" — suppress it (NSNoTitle) so idle
+        # doesn't render a stray "Title" caption above the message.
+        self.placeholder_view.setTitlePosition_(0)
         self.placeholder_view.setTransparent_(False)
         self.placeholder_view.setWantsLayer_(True)
         self.placeholder_view.layer().setCornerRadius_(12)
@@ -3236,6 +3273,10 @@ class ProcessDashboardController(NSObject):
             if self._update_counter % throttle_factor == 0:
                 if self._current_state == "active":
                     self.refresh_process_list()
+                    # A new job may have appeared while nothing was selected —
+                    # auto-select it so its detail panel populates (issue 3).
+                    # No-op when the user already has a selection.
+                    self._auto_select_first_active()
                     
         except Exception as e:
             # Log but don't crash - timer will continue
@@ -3317,6 +3358,11 @@ class ProcessDashboardController(NSObject):
         # Restart timer if in active state
         if self._current_state == "active":
             self._start_update_timer()
+        else:
+            # Idle: render the idle layout so the history sidebar is visible +
+            # selectable from the very first open (the initial state never goes
+            # through transition_to_idle).
+            self._apply_idle_display()
 
     def _surface_window(self):
         """Aggressively bring the dashboard to front (single-process auto-show).
@@ -3407,9 +3453,41 @@ class ProcessDashboardController(NSObject):
         
         logging.debug("[Dashboard] Cleanup complete")
     
+    def _apply_idle_display(self):
+        """Render the idle layout: history sidebar (left) + 'no active' placeholder
+        (right).
+
+        History stays reachable even with nothing running — the user can select a
+        past run and its metrics/chart populate the detail panel. Selecting a row
+        hides the placeholder; deselecting (or entering idle) restores it.
+        """
+        # Recent runs feed the sidebar (the active list is empty in idle).
+        try:
+            self._recent_processes = get_recent_processes(limit=5)
+        except Exception as e:
+            logging.warning(f"[Dashboard] Could not load recent processes for idle: {e}")
+            self._recent_processes = []
+        if hasattr(self, "process_table") and self.process_table:
+            try:
+                self.process_table.reloadData()
+            except Exception as e:
+                logging.warning(f"[Dashboard] Could not reload table for idle: {e}")
+        # Sidebar visible + relabelled so history is always selectable.
+        if hasattr(self, "sidebar_scroll") and self.sidebar_scroll:
+            self.sidebar_scroll.setHidden_(False)
+        if hasattr(self, "active_header") and self.active_header:
+            self.active_header.setStringValue_("HISTORY")
+            self.active_header.setHidden_(False)
+        # Placeholder (now in the detail-panel area) stays; detail hidden until a
+        # history row is selected.
+        if hasattr(self, "placeholder_view") and self.placeholder_view:
+            self.placeholder_view.setHidden_(False)
+        if hasattr(self, "detail_panel") and self.detail_panel:
+            self.detail_panel.setHidden_(True)
+
     def transition_to_idle(self):
         """Transition dashboard to idle state.
-        
+
         Called when no active processes remain.
         Logs the transition for debugging.
         """
@@ -3425,17 +3503,42 @@ class ProcessDashboardController(NSObject):
         
         # Stop timer in idle state (no updates needed)
         self._stop_update_timer()
-        
-        # Show placeholder, hide sidebar and detail panel (all with null checks)
-        if hasattr(self, 'placeholder_view') and self.placeholder_view:
-            self.placeholder_view.setHidden_(False)
-        if hasattr(self, 'sidebar_scroll') and self.sidebar_scroll:
-            self.sidebar_scroll.setHidden_(True)
-        if hasattr(self, 'active_header') and self.active_header:
-            self.active_header.setHidden_(True)
-        if hasattr(self, 'detail_panel') and self.detail_panel:
-            self.detail_panel.setHidden_(True)
+
+        # Render idle layout (history sidebar + placeholder). History MUST stay
+        # reachable in idle so past runs are selectable.
+        self._apply_idle_display()
     
+    def _auto_select_first_active(self):
+        """Auto-select the first active process when nothing is selected.
+
+        On a fresh detection (idle->active, or a new job appearing while nothing
+        is selected) this populates the detail panel immediately instead of
+        waiting for a manual click. If the user has already selected anything
+        (active OR a history row), we leave it alone -- never yank a manual
+        selection.
+        """
+        if self._selected_process is not None:
+            return
+        if not self._active_processes:
+            return
+        self._selected_process = self._active_processes[0]
+        # Mirror the selection in the table (best-effort). We do NOT rely on the
+        # selection delegate here -- programmatic selection timing can vary, so
+        # we also drive the detail panel directly below.
+        if hasattr(self, "process_table") and self.process_table:
+            try:
+                from AppKit import NSIndexSet
+                self.process_table.selectRowIndexes_byExtendingSelection_(
+                    NSIndexSet.indexSetWithIndex_(0), False,
+                )
+            except Exception as e:
+                logging.debug(f"[Dashboard] auto-select highlight failed: {e}")
+        logging.info(
+            "[Dashboard] Auto-selected active process: %s",
+            self._selected_process.get("type"),
+        )
+        self._update_detail_panel()
+
     def transition_to_active(self, processes: list):
         """Transition dashboard to active state.
         
@@ -3480,14 +3583,18 @@ class ProcessDashboardController(NSObject):
                 self.process_table.reloadData()
         
         if hasattr(self, 'active_header') and self.active_header:
+            self.active_header.setStringValue_("ACTIVE")
             self.active_header.setHidden_(False)
-        
-        # Detail panel hidden initially (shown when process selected)
+
+        # Detail panel hidden initially — auto-select fills it immediately so
+        # the user sees metrics/graph without a manual click (issue 3).
         if hasattr(self, 'detail_panel') and self.detail_panel:
             self.detail_panel.setHidden_(True)
-        
+
         # Start update timer for active monitoring
         self._start_update_timer()
+
+        self._auto_select_first_active()
     
     def update_process_list(self):
         """Refresh the process list and update dashboard state.
