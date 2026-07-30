@@ -4099,6 +4099,31 @@ class ApplioLauncher:
         """Handle SIGTERM with cascade termination."""
         if self._terminating:
             return
+        if APPLIO_SINGLE_PROCESS:
+            # In single-process the launcher IS the GUI process, so a normal
+            # quit never arrives as SIGTERM -- it goes through
+            # applicationShouldTerminate_ (Cmd+Q / window close / NSApp.terminate).
+            # A SIGTERM here is, in practice, the leaked-resource teardown fired
+            # by training's os._exit(2333333): RVC ends training by os._exit-ing
+            # the worker WITHOUT draining its persistent DataLoader workers
+            # (num_workers=4, persistent_workers=True), so they are orphaned but
+            # remain in THIS process group, and their teardown signals the whole
+            # group. In two-process that only ever took down the wrapper
+            # subprocess (the launcher survived and re-spawned it); in
+            # single-process it would kill the entire app. Suppress the cascade
+            # quit and stay running -- the orphaned workers self-terminate on
+            # their broken parent pipe within seconds (and already received this
+            # very signal if it was a group-wide killpg). Dedupe the log line so
+            # a burst of strays doesn't spam.
+            now = time.time()
+            if now - getattr(self, "_last_spurious_sigterm", 0.0) > 5.0:
+                self._last_spurious_sigterm = now
+                logging.info(
+                    "[Launcher] SIGTERM in single-process mode; suppressing app "
+                    "quit (training-cleanup artifact). The app stays running; "
+                    "use Cmd+Q to quit."
+                )
+            return
         self._terminating = True
         logging.info("[Launcher] Terminate received, initiating cascade shutdown")
         self._terminate_children()
