@@ -819,6 +819,55 @@ def get_recent_processes(limit: int = 10) -> list:
 # 5. Progress Window Controller (moved from macos_wrapper.py)
 # =================================================================
 
+
+def _parse_training_log_line(line):
+    """Parse an RVC training status line into a metrics dict, or None.
+
+    Shared by ProgressWindowController (live tail) and ProcessDashboardController
+    (per-run training.log). Lives at module scope here - NOT imported from
+    rvc.lib.tools.process_log_parser - because that module ships only as a data
+    file and is not importable in the frozen app. One regex, frozen-safe, no
+    third copy.
+
+    Recognises (rvc/train/train.py:884-890):
+      "<model> | epoch=N | step=N | time=H:M:S | training_speed=H:M:S
+       | lowest_value=X.XXX (epoch B and step C)"
+    plus the early-training variant without lowest_value (epoch == 1).
+
+    Returns {epoch, step, training_speed, best_loss, best_epoch, best_step}
+    (best_* are None before the first evaluation), or None.
+    """
+    # Full line carrying lowest_value (epoch > 1)
+    match = re.match(
+        r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)\s*\|\s*lowest_value=([\d.]+)\s*\(epoch\s+(\d+)\s+and\s+step\s+(\d+)\)',
+        line,
+    )
+    if match:
+        return {
+            'epoch': int(match.group(1)),
+            'step': int(match.group(2)),
+            'training_speed': match.group(3),
+            'best_loss': float(match.group(4)),
+            'best_epoch': int(match.group(5)),
+            'best_step': int(match.group(6)),
+        }
+    # Simpler line without lowest_value (epoch == 1, no evaluation yet)
+    match = re.match(
+        r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)',
+        line,
+    )
+    if match:
+        return {
+            'epoch': int(match.group(1)),
+            'step': int(match.group(2)),
+            'training_speed': match.group(3),
+            'best_loss': None,
+            'best_epoch': None,
+            'best_step': None,
+        }
+    return None
+
+
 class ProgressWindowController:
     """Native macOS progress monitoring window with log tailing."""
 
@@ -1485,47 +1534,12 @@ class ProgressWindowController:
         return None
 
     def _parse_training_status_line(self, line):
-        """Parse training status line with epoch/step/loss info.
+        """Parse a training status line.
 
-        Parses lines like:
-        "Frederic v6 KLM5-44k | epoch=115 | step=11385 | time=23:13:10 | training_speed=0:15:25 | lowest_value=2.876 (epoch 76 and step 7455)"
-
-        Returns dict with: epoch, step, training_speed, best_epoch, best_loss, best_step
-        or None if not a training status line.
+        Delegates to the module-level _parse_training_log_line helper, shared
+        with ProcessDashboardController (single regex, frozen-safe).
         """
-
-        # Match training status line pattern
-        # Look for: epoch=N, step=N, training_speed=HH:MM:SS or M:SS, lowest_value=X.XXX (epoch N and step N)
-        match = re.match(
-            r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)\s*\|\s*lowest_value=([\d.]+)\s*\(epoch\s+(\d+)\s+and\s+step\s+(\d+)\)',
-            line
-        )
-        if match:
-            return {
-                'epoch': int(match.group(1)),
-                'step': int(match.group(2)),
-                'training_speed': match.group(3),
-                'best_loss': float(match.group(4)),
-                'best_epoch': int(match.group(5)),
-                'best_step': int(match.group(6)),
-            }
-
-        # Also try simpler pattern without lowest_value (early training)
-        match = re.match(
-            r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)',
-            line
-        )
-        if match:
-            return {
-                'epoch': int(match.group(1)),
-                'step': int(match.group(2)),
-                'training_speed': match.group(3),
-                'best_loss': None,
-                'best_epoch': None,
-                'best_step': None,
-            }
-
-        return None
+        return _parse_training_log_line(line)
 
     def _update_training_panel(self, training_data):
         """Update the training info panel with current training status.
@@ -2172,10 +2186,45 @@ class ProcessDashboardController(NSObject):
         self.detail_progress_text.setStringValue_("0%")
         self.detail_progress_text.setAccessibilityLabel_("Progress percentage")
         self.detail_panel.contentView().addSubview_(self.detail_progress_text)
-        
-        # Log output (NSTextView in NSScrollView)
-        log_y = 60
-        log_height = DASHBOARD_HEIGHT - 28 - 220  # Leave room for header and ETA
+
+        # --- Training metrics (parsed live from the run's training.log) ---
+        # Best epoch + its loss (green headline - the number that matters for inference)
+        best_y = progress_text_y - 8 - 20  # 8px gap below progress text; label is 20px tall
+        self.detail_best_label = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(16, best_y, panel_width - 32, 20)
+        )
+        self.detail_best_label.setFont_(NSFont.boldSystemFontOfSize_(13))
+        self.detail_best_label.setTextColor_(NSColor.systemGreenColor())
+        self.detail_best_label.setBezeled_(False)
+        self.detail_best_label.setDrawsBackground_(False)
+        self.detail_best_label.setEditable_(False)
+        self.detail_best_label.setStringValue_("Best: --")
+        self.detail_best_label.setAccessibilityLabel_("Best epoch and its loss")
+        self.detail_best_label.setAccessibilityHelp_(
+            "Epoch with the lowest generator loss so far - use this checkpoint for inference"
+        )
+        self.detail_panel.contentView().addSubview_(self.detail_best_label)
+
+        # Current metrics: epoch/total, step, speed (per epoch)
+        current_y = best_y - 6 - 16  # 6px gap below the best label; label is 16px tall
+        self.detail_current_label = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(16, current_y, panel_width - 32, 16)
+        )
+        self.detail_current_label.setFont_(
+            NSFont.systemFontOfSize_weight_(11, NSFontWeightMedium)
+        )
+        self.detail_current_label.setTextColor_(NSColor.labelColor())
+        self.detail_current_label.setBezeled_(False)
+        self.detail_current_label.setDrawsBackground_(False)
+        self.detail_current_label.setEditable_(False)
+        self.detail_current_label.setStringValue_("--")
+        self.detail_current_label.setAccessibilityLabel_("Current epoch, step and training speed")
+        self.detail_panel.contentView().addSubview_(self.detail_current_label)
+
+        # Log output (NSTextView in NSScrollView) - sized to fit below the metrics
+        log_y = 60  # leaves room for the ETA line at the bottom
+        log_top = current_y - 8  # 8px gap below the current-metrics label
+        log_height = max(120, log_top - log_y)
         log_frame = NSMakeRect(16, log_y, panel_width - 32, log_height)
         self.detail_log_scroll = NSScrollView.alloc().initWithFrame_(log_frame)
         self.detail_log_scroll.setBorderType_(NSBezelBorder)
@@ -2278,26 +2327,93 @@ class ProcessDashboardController(NSObject):
                     status_text = status.title()
                 self.detail_status.setStringValue_(status_text)
             
-            # Update progress (with null check and value validation)
-            progress = proc.get("progress", 0)
+            # --- Real training metrics, parsed live from the run's training.log ---
+            # training.log holds epoch/step/loss/speed per epoch. The legacy
+            # proc "progress"/"eta" fields were never written mid-run, so we
+            # derive progress (epoch-fraction) and ETA here instead. For
+            # non-training processes (or a missing/unparseable log) this
+            # degrades gracefully to "--" - never crashes the dashboard.
+            metrics = self._parse_training_metrics(proc)
+            total_epoch = proc.get("total_epoch")
             try:
-                progress_val = float(progress) if progress is not None else 0
-                progress_val = max(0, min(100, progress_val))  # Clamp to 0-100
+                total_epoch = int(total_epoch) if total_epoch not in (None, "") else None
             except (ValueError, TypeError):
-                progress_val = 0
-            
+                total_epoch = None
+
+            # Progress bar -> epoch-fraction (current_epoch / total_epoch)
             if hasattr(self, 'detail_progress') and self.detail_progress:
-                self.detail_progress.setDoubleValue_(progress_val)
-            if hasattr(self, 'detail_progress_text') and self.detail_progress_text:
-                self.detail_progress_text.setStringValue_(f"{int(progress_val)}%")
-            
-            # Update ETA (with null check)
-            eta = proc.get("eta", "")
-            if hasattr(self, 'detail_eta') and self.detail_eta:
-                if eta:
-                    self.detail_eta.setStringValue_(f"Estimated time: {eta}")
+                cur_ep = metrics.get("epoch") if metrics else None
+                if cur_ep and total_epoch and total_epoch > 0:
+                    frac = min(1.0, cur_ep / total_epoch)  # clamp at 100% if epoch overshoots
+                    self.detail_progress.stopAnimation_(None)
+                    self.detail_progress.setIndeterminate_(False)
+                    self.detail_progress.setDoubleValue_(frac * 100.0)
+                    pct_txt = f"Epoch {cur_ep}/{total_epoch}  ({int(frac * 100)}%)"
+                elif status == "running":
+                    # No metrics yet (just started) or non-training: spin to
+                    # show activity. startAnimation_ is required for an
+                    # indeterminate bar to actually move.
+                    self.detail_progress.setDoubleValue_(0.0)
+                    self.detail_progress.setIndeterminate_(True)
+                    self.detail_progress.startAnimation_(None)
+                    pct_txt = "--"
                 else:
-                    self.detail_eta.setStringValue_("Estimated time: --")
+                    # Not running and no metrics -> empty bar
+                    self.detail_progress.stopAnimation_(None)
+                    self.detail_progress.setIndeterminate_(False)
+                    self.detail_progress.setDoubleValue_(0.0)
+                    pct_txt = "--"
+                if hasattr(self, 'detail_progress_text') and self.detail_progress_text:
+                    self.detail_progress_text.setStringValue_(pct_txt)
+
+            # Best epoch + loss headline (green) - the inference-relevant number
+            if hasattr(self, 'detail_best_label') and self.detail_best_label:
+                if metrics and metrics.get("best_epoch") is not None:
+                    self.detail_best_label.setStringValue_(
+                        f"Best: Epoch {metrics['best_epoch']}  |  Loss {metrics['best_loss']:.3f}"
+                    )
+                    self.detail_best_label.setHidden_(False)
+                elif metrics:
+                    # Training underway but no evaluation yet (first epoch)
+                    self.detail_best_label.setStringValue_(
+                        "Best epoch: waiting for first evaluation…"
+                    )
+                    self.detail_best_label.setHidden_(False)
+                else:
+                    # Non-training process, or no parseable log -> hide the metric
+                    self.detail_best_label.setHidden_(True)
+
+            # Current epoch/total, step, speed (per epoch)
+            if hasattr(self, 'detail_current_label') and self.detail_current_label:
+                if metrics:
+                    cur_ep = metrics.get("epoch")
+                    ep_part = (
+                        f"Epoch {cur_ep}/{total_epoch}"
+                        if (cur_ep and total_epoch)
+                        else (f"Epoch {cur_ep}" if cur_ep else None)
+                    )
+                    step = metrics.get("step")
+                    spd = metrics.get("training_speed")
+                    parts = [
+                        p
+                        for p in (
+                            ep_part,
+                            f"Step {step:,}" if step is not None else None,
+                            f"Speed {spd}/ep" if spd else None,
+                        )
+                        if p
+                    ]
+                    self.detail_current_label.setStringValue_(
+                        "  |  ".join(parts) if parts else "--"
+                    )
+                    self.detail_current_label.setHidden_(False)
+                else:
+                    self.detail_current_label.setHidden_(True)
+
+            # ETA -> derived: (total_epoch - current_epoch) * seconds_per_epoch
+            if hasattr(self, 'detail_eta') and self.detail_eta:
+                eta_str = self._derive_eta(metrics, total_epoch)
+                self.detail_eta.setStringValue_(f"Estimated time: {eta_str}")
             
             # Update log (last 20 lines) - handle file deletion
             self._update_log_display(proc)
@@ -2370,7 +2486,88 @@ class ProcessDashboardController(NSObject):
         except Exception as e:
             logging.warning(f"[Dashboard] Unexpected error reading log: {e}")
             self.detail_log_view.setString_("Unexpected error reading log file")
-    
+
+    def _parse_training_metrics(self, proc: dict):
+        """Parse the latest training status line from a process's training.log.
+
+        Returns the metrics dict {epoch, step, training_speed, best_epoch,
+        best_loss, best_step} for the most recent status line, or None when
+        there is no log / the process is not training / nothing has been logged
+        yet. Uses the module-level _parse_training_log_line helper (shared with
+        ProgressWindowController) - frozen-safe, no rvc import.
+        """
+        log_path = proc.get("log_file") or proc.get("log_path")
+        if not log_path:
+            return None
+        try:
+            if not os.path.exists(log_path) or not os.access(log_path, os.R_OK):
+                return None
+            # Read only the tail (cap at 1MB) and scan backwards for the last
+            # status line - cheap on the ~1s refresh timer.
+            max_size = 1024 * 1024
+            size = os.path.getsize(log_path)
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                if size > max_size:
+                    f.seek(size - max_size)
+                    content = f.read()
+                    nl = content.find("\n")
+                    if nl >= 0:
+                        content = content[nl + 1:]
+                else:
+                    content = f.read()
+            for line in reversed(content.splitlines()):
+                parsed = _parse_training_log_line(line)
+                if parsed:
+                    return parsed
+        except Exception as e:
+            logging.debug(f"[Dashboard] training metrics parse failed: {e}")
+        return None
+
+    def _derive_eta(self, metrics, total_epoch):
+        """Estimate remaining wall-clock time for a training run.
+
+        ETA = (total_epoch - current_epoch) * seconds_per_epoch, formatted as
+        "Xh Ym". Returns "--" when speed or epoch totals are unknown, and "0m"
+        once the current epoch reaches/exceeds the target.
+        """
+        if not metrics:
+            return "--"
+        cur_ep = metrics.get("epoch")
+        speed = metrics.get("training_speed")
+        if not cur_ep or not total_epoch or total_epoch <= 0 or not speed:
+            return "--"
+        secs_per_epoch = self._hms_to_seconds(speed)
+        if not secs_per_epoch or secs_per_epoch <= 0:
+            return "--"
+        remaining = total_epoch - cur_ep
+        if remaining <= 0:
+            return "0m"
+        total_minutes = int((remaining * secs_per_epoch) // 60)
+        hours = total_minutes // 60
+        mins = total_minutes % 60
+        if hours > 0:
+            return f"{hours}h {mins}m"
+        if mins > 0:
+            return f"{mins}m"
+        return f"{int(remaining * secs_per_epoch)}s"
+
+    @staticmethod
+    def _hms_to_seconds(value):
+        """Convert an "H:MM:SS" / "MM:SS" / "SS" training_speed string to seconds.
+
+        Returns None when the value can't be parsed (so ETA can fall back to "--").
+        """
+        try:
+            parts = [int(p) for p in str(value).split(":")]
+        except (ValueError, AttributeError):
+            return None
+        if not parts or any(p < 0 for p in parts):
+            return None
+        secs = 0
+        for p in parts:
+            secs = secs * 60 + p
+        return secs
+
     # =================================================================
     # NSTableViewDataSource Protocol
     # =================================================================
