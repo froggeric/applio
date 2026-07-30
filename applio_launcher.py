@@ -82,6 +82,8 @@ try:
         NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
         NSBezierPath, NSWorkspace, NSAttributedString,
         NSFontAttributeName, NSForegroundColorAttributeName,
+        NSTrackingArea, NSTrackingMouseEnteredAndExited, NSTrackingMouseMoved,
+        NSTrackingActiveInActiveApp,
     )
     from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
     from PyObjCTools import AppHelper
@@ -262,6 +264,12 @@ MAX_INITIAL_LINES = 50
 MAX_QUEUE_ITEMS_PER_TICK = 20
 QUEUE_MAX_SIZE = 1000
 LOG_SCROLL_INTERVAL = 5
+# Loss-vs-epoch chart: keep every evaluated epoch, but bound output for very
+# long runs. The training.log is flooded with per-step tqdm progress between
+# the sparse per-epoch summary lines, so we stream the whole file rather than
+# a 1MB tail (which only spanned the last few evaluated epochs).
+MAX_EPOCH_POINTS = 2000            # generous cap on plotted epoch points
+MAX_LOG_SCAN_BYTES = 64 * 1024 * 1024  # bound I/O; only the tail of a huge log is scanned
 
 # =================================================================
 # 2.5. IPC Notification Constants
@@ -1985,12 +1993,81 @@ class LossChartView(NSView):
 
     CHART_HEIGHT = 140  # reserved height in the detail panel layout
 
+    # Hover tooltip: show "Epoch N — Loss X" when the cursor is within this many
+    # points (horizontal screen px) of a plotted dot. Generous enough to be easy
+    # to hover; tight enough not to fire while idling in the plot margins.
+    HOVER_PX = 18.0
+
     def initWithFrame_(self, frame):
         self = objc.super(LossChartView, self).initWithFrame_(frame)
         if self is None:
             return None
         self._points = []   # [(epoch, best_loss)]
+        # Screen-space positions of each plotted point, recomputed in drawRect_.
+        # Kept so the hover hit-test can map a mouse x to the nearest epoch
+        # without redoing the plot geometry. Empty until the first draw / when
+        # the chart shows its placeholder.
+        self._screen_points = []  # [(sx, sy, epoch, loss), ...]
+        self._tracking_area = None
         return self
+
+    def updateTrackingAreas(self):
+        """Maintain a single mouse-moved tracking area over the whole view.
+
+        AppKit calls this when the view is installed in a window (and on
+        geometry changes), so we rebuild our tracking area here rather than in
+        initWithFrame_ (the view has no window/frame-in-window yet then).
+        """
+        if self._tracking_area is not None:
+            self.removeTrackingArea_(self._tracking_area)
+            self._tracking_area = None
+        if not NATIVE_APIS_AVAILABLE:
+            return
+        ta = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+            self.visibleRect() if self.superview() else self.bounds(),
+            NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved | NSTrackingActiveInActiveApp,
+            self,
+            None,
+        )
+        self.addTrackingArea_(ta)
+        self._tracking_area = ta
+
+    def _nearest_epoch_for_x(self, x):
+        """Return (epoch, loss) for the plotted point nearest screen x, or None.
+
+        Pure mapping over self._screen_points (no AppKit) so it can be unit
+        tested headlessly. Only matches when the nearest point is within
+        HOVER_PX of x (otherwise the cursor is in a margin, not over a point).
+        """
+        if not self._screen_points:
+            return None
+        best = None
+        best_dx = None
+        for sx, sy, epoch, loss in self._screen_points:
+            dx = abs(sx - x)
+            if best is None or dx < best_dx:
+                best = (epoch, loss)
+                best_dx = dx
+        if best is None or best_dx is None or best_dx > self.HOVER_PX:
+            return None
+        return best
+
+    def mouseMovedWithEvent_(self, event):
+        """Show an epoch+loss tooltip for the point under the cursor."""
+        if not self._screen_points:
+            return
+        loc = event.locationInWindow()
+        pt = self.convertPoint_fromView_(loc, None)
+        hit = self._nearest_epoch_for_x(pt.x)
+        if hit is None:
+            self.setToolTip_(None)
+            return
+        epoch, loss = hit
+        self.setToolTip_(u"Epoch {0} — Loss {1:.3f}".format(epoch, loss))
+
+    def mouseExitedWithEvent_(self, event):
+        """Clear the tooltip when the cursor leaves the chart."""
+        self.setToolTip_(None)
 
     def set_points(self, points):
         """Accept a list of (epoch, loss) tuples and trigger a redraw."""
@@ -2006,6 +2083,10 @@ class LossChartView(NSView):
     def drawRect_(self, rect):
         """Draw background, gridlines + loss axis labels, the loss polyline,
         dots at each evaluated epoch, and a current-value label."""
+        # Invalidate the hover hit-test cache for this pass; repopulated below
+        # only when real points are plotted (every early return leaves it empty
+        # so the tooltip never resolves to stale geometry).
+        self._screen_points = []
         bounds = self.bounds()
         width = bounds.size.width
         height = bounds.size.height
@@ -2096,21 +2177,25 @@ class LossChartView(NSView):
             )
             last_lbl.drawAtPoint_((plot_x + plot_w - last_lbl.size().width, 1.0))
 
+        # Compute each point's screen position once and reuse for the line,
+        # the dots, and the hover hit-test cache (_screen_points).
+        screen_points = [(x_for(e), y_for(l), e, l) for e, l in zip(epochs, losses)]
+        self._screen_points = screen_points
+
         # Polyline (loss curve).
         NSColor.systemBlueColor().setStroke()
         path = NSBezierPath.bezierPath()
-        path.moveToPoint_((x_for(epochs[0]), y_for(losses[0])))
-        for e, l in zip(epochs[1:], losses[1:]):
-            path.lineToPoint_((x_for(e), y_for(l)))
+        path.moveToPoint_((screen_points[0][0], screen_points[0][1]))
+        for sx, sy, e, l in screen_points[1:]:
+            path.lineToPoint_((sx, sy))
         path.setLineWidth_(1.5)
         path.stroke()
 
         # Dots at each evaluated epoch.
         NSColor.systemBlueColor().setFill()
-        for e, l in zip(epochs, losses):
-            cx, cy = x_for(e), y_for(l)
+        for sx, sy, e, l in screen_points:
             NSBezierPath.bezierPathWithOvalInRect_(
-                ((cx - 2.0, cy - 2.0), (4.0, 4.0))
+                ((sx - 2.0, sy - 2.0), (4.0, 4.0))
             ).fill()
 
         if all_equal:
@@ -2966,30 +3051,36 @@ class ProcessDashboardController(NSObject):
                     continue
             if out:
                 return out
-        # Active (or no snapshot): scan the live log.
+        # Active (or no snapshot): scan the live log for EVERY evaluated epoch.
+        #
+        # The training subprocess redirects stdout+stderr into training.log, so
+        # the file is flooded with per-step tqdm progress lines between the
+        # sparse per-epoch summary lines (_parse_training_log_line matches). A
+        # byte-tail read (the old 1MB cap) therefore only spanned the last few
+        # evaluated epochs -- which is why the chart showed ~5 points. Instead we
+        # STREAM the whole file line-by-line (low memory: non-matching lines are
+        # discarded immediately) and keep every epoch line, capped at the last
+        # MAX_EPOCH_POINTS to bound output for pathologically long runs. An I/O
+        # guard (MAX_LOG_SCAN_BYTES) bounds disk reads: only the tail of a truly
+        # huge log is scanned, which still holds far more than MAX_EPOCH_POINTS
+        # evaluated epochs at any realistic step rate.
         log_path = proc.get("log_file") or proc.get("log_path")
         if not log_path:
             return []
         try:
             if not os.path.exists(log_path) or not os.access(log_path, os.R_OK):
                 return []
-            max_size = 1024 * 1024  # cap at 1MB tail
             size = os.path.getsize(log_path)
+            points = deque(maxlen=MAX_EPOCH_POINTS)
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                if size > max_size:
-                    f.seek(size - max_size)
-                    content = f.read()
-                    nl = content.find("\n")
-                    if nl >= 0:
-                        content = content[nl + 1:]
-                else:
-                    content = f.read()
-            points = []
-            for line in content.splitlines():
-                parsed = _parse_training_log_line(line)
-                if parsed and parsed.get("best_loss") is not None:
-                    points.append((parsed["epoch"], parsed["best_loss"]))
-            return points
+                if size > MAX_LOG_SCAN_BYTES:
+                    f.seek(size - MAX_LOG_SCAN_BYTES)
+                    next(f, None)  # discard the partial first line
+                for line in f:
+                    parsed = _parse_training_log_line(line)
+                    if parsed and parsed.get("best_loss") is not None:
+                        points.append((parsed["epoch"], parsed["best_loss"]))
+            return list(points)
         except Exception as e:
             logging.debug(f"[Dashboard] epoch-points parse failed: {e}")
             return []
