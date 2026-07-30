@@ -164,6 +164,8 @@ plan + task breakdown: `~/.claude/plans/phase2-single-process-merge.md`. Branch 
 - **Run single-process (built app, no rebuild):** `launchctl setenv APPLIO_SINGLE_PROCESS 1 && open dist/Applio.app` (unset after: `launchctl unsetenv APPLIO_SINGLE_PROCESS`).
 - **Architecture:** the launcher calls `macos_wrapper.start_gui(launcher=self)` (import-safe since Step 0 — `import macos_wrapper` has zero side effects) then `webview.start(func=self._reassert_menu_and_delegate)`. pywebview clobbers `NSApp.delegate()` and wipes the main menu once at `first_show`; the func re-seats both on the main thread via `AppHelper.callAfter`. With NO `menu=` passed, pywebview does NOT re-wipe on focus (`windowDidBecomeKey_`'s `if i and i.menu` guard is False when `i.menu` is None) — verified against `venv_macos/.../webview/platforms/cocoa.py`.
 - **Gotchas:** (1) `NSApplication.delegate` is a WEAK (assign) ref — REUSE `self._app_delegate` (created in `_setup_menu`); NEVER inline `ApplioAppDelegate.alloc()…` in `_reassert_menu_and_delegate` (its only Python ref would GC → dangling delegate → crash on next reopen/quit). (2) `on_window_closing` runs on the MAIN thread — quit via `AppHelper.callAfter(lambda: NSApp.terminate_(None))`, NEVER synchronous (the ≤5 s `killpg`-wait would block the close event + re-enter AppKit → spinning cursor); `_user_confirmed_quit` (set before the deferred terminate) prevents the double-prompt. (3) The Gradio supervisor `_supervised_backend` (N=3, linear backoff) wraps `start_backend`, which RAISES in single-process (two-process swallows + `_request_launcher_quit`); `OSError` (e.g. EADDRINUSE) fails fast; `exc_info=True` keeps the traceback. (4) `setup_logging` is ADDITIVE in single-process (no `removeHandler`, no `sys.stdout`/`stderr` reassign) so launcher logs reach `applio_launcher.log`. (5) Every shared-code change is gated on `APPLIO_SINGLE_PROCESS` (launcher) / `_SINGLE_PROCESS` (wrapper) — flag OFF is byte-for-byte two-process. (6) A hard GUI crash (segfault) is unrecoverable in single-process (was isolated to the wrapper) — accepted tradeoff; training checkpoints + `active_processes.json` mitigate data loss.
+- **Single-process DEV can't run training/dataset scripts** — they resolve to `~/Applio/rvc/train/*` (data dir), not the repo → `No such file`. Training works only in the FROZEN build (scripts bundled, resolved via `_MEIPASS`). Validate single-process training on `dist/Applio.app`, not dev.
+- **Single-process dev hides Gradio/training stdout** (§6.11 dropped the stdout→log redirect) — a "generic error" in the UI is invisible in the log. Read the background-launch task's stdout file (`/private/tmp/.../tasks/<id>.output`) or run in a foreground terminal.
 
 **macOS Development:**
 - Use `requirements_macos.txt` (includes pywebview, pyinstaller, pyobjc)
@@ -176,6 +178,7 @@ plan + task breakdown: `~/.claude/plans/phase2-single-process-merge.md`. Branch 
   - `PYTORCH_ENABLE_MPS_FALLBACK=1`
   - `GRADIO_TEMP_DIR=~/Library/Caches/Applio/gradio`
   - `HF_HOME=~/Library/Application Support/Applio/huggingface`
+- macOS has no `timeout` command — use `gtimeout` (coreutils) or background-launch + poll; never bare `timeout N` in a run/test command.
 
 **External Data Storage:**
 - First-run prompts user to select data location via native macOS folder dialog
@@ -325,6 +328,8 @@ plan + task breakdown: `~/.claude/plans/phase2-single-process-merge.md`. Branch 
 - CRITICAL: PyObjC method names - `method:with:param:` becomes `method_with_param_` (colons→underscores, append trailing underscore), e.g., `systemFontOfSize:weight:` → `systemFontOfSize_weight_` NOT `systemFontOfSize_ofWeight_`
 - CRITICAL: NSBox doesn't have `setFillColor_()` in PyObjC - use bordered style or layer-based background instead
 - `addSubview:positioned:relativeTo:` → `addSubview_positioned_relativeTo_` (NOT `addSubview_positioned_relative_`)
+- CRITICAL: any class used as an NSWindow/NSTableView delegate, dataSource, or NSNotificationCenter observer MUST be an NSObject subclass (`class X(NSObject)` + `alloc().initWith…_()` + `objc.super(X, self).init()`) — a plain Python class crashes on `conformsToProtocol:` (ProcessDashboardController hit this). Same pattern as MenuActionHandler/ApplioAppDelegate.
+- PyObjC preserves ObjC selector case — `-[NSColor CGColor]` is `.CGColor()`, not `.cgColor()`. Verify a name imports (`python -c "from AppKit import X"`) BEFORE adding it to the `try/except`-wrapped top-level AppKit import (L72-89) — a bad name silently flips `NATIVE_APIS_AVAILABLE=False` app-wide.
 
 **Progress window responsiveness:**
 - Timer must be started AFTER background thread: call `_start_timer()` after `_start_file_thread()`
