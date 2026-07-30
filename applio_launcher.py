@@ -80,6 +80,8 @@ try:
         NSCommandKeyMask, NSShiftKeyMask, NSAlternateKeyMask, NSBox, NSColor,
         NSBoxPrimary, NSView, NSProgressIndicatorBarStyle,
         NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
+        NSBezierPath, NSWorkspace, NSAttributedString,
+        NSFontAttributeName, NSForegroundColorAttributeName,
     )
     from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
     from PyObjCTools import AppHelper
@@ -1948,6 +1950,149 @@ class ProgressWindowController:
 # 5.5. Process Dashboard Controller (Persistent Window)
 # =================================================================
 
+
+def _chart_text_attr(size, weight=None, color=None):
+    """Build an NSAttributedString attributes dict for the loss chart.
+
+    Module-scope (not a LossChartView method) because PyObjC validates every
+    method on an NSView subclass as an ObjC selector and rejects plain helper
+    signatures. Returns {NSFontAttributeName, NSForegroundColorAttributeName}.
+    """
+    font = (
+        NSFont.systemFontOfSize_weight_(size, weight)
+        if weight is not None
+        else NSFont.systemFontOfSize_(size)
+    )
+    return {
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: color or NSColor.secondaryLabelColor(),
+    }
+
+
+class LossChartView(NSView):
+    """Compact loss-vs-epoch line chart for the dashboard detail panel (Feature 3).
+
+    Set points via set_points([(epoch, loss), ...]); the view redraws. With
+    fewer than 2 evaluated points it draws a "Training..." placeholder instead
+    of a line (graceful: a run that just started has no curve yet). The y-axis
+    is the running best-loss (lowest_value) per epoch — the same field the
+    snapshot stores, so historical and active processes plot identically.
+
+    Note: text-attribute helpers live at module scope (_chart_text_attr), not as
+    methods here, because PyObjC validates every method on an NSView subclass as
+    an ObjC selector and rejects plain helper signatures.
+    """
+
+    CHART_HEIGHT = 140  # reserved height in the detail panel layout
+
+    def initWithFrame_(self, frame):
+        self = objc.super(LossChartView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._points = []   # [(epoch, best_loss)]
+        return self
+
+    def set_points(self, points):
+        """Accept a list of (epoch, loss) tuples and trigger a redraw."""
+        cleaned = []
+        for p in points or []:
+            try:
+                cleaned.append((int(p[0]), float(p[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        self._points = cleaned
+        self.setNeedsDisplay_(True)
+
+    def drawRect_(self, rect):
+        """Draw background, gridlines + loss axis labels, the loss polyline,
+        dots at each evaluated epoch, and a current-value label."""
+        bounds = self.bounds()
+        width = bounds.size.width
+        height = bounds.size.height
+
+        # Background + title
+        NSColor.controlBackgroundColor().setFill()
+        NSBezierPath.fillRect_(bounds)
+        title = NSAttributedString.alloc().initWithString_attributes_(
+            "Training loss (best so far)",
+            _chart_text_attr(10, NSFontWeightMedium, NSColor.labelColor()),
+        )
+        title.drawAtPoint_((8.0, height - 14.0))
+
+        pad_left, pad_right, pad_top, pad_bottom = 38.0, 10.0, 20.0, 14.0
+        plot_x = pad_left
+        plot_y = pad_bottom
+        plot_w = width - pad_left - pad_right
+        plot_h = height - pad_top - pad_bottom
+        if plot_w <= 8 or plot_h <= 8:
+            return
+
+        points = self._points
+        if len(points) < 2:
+            ph = NSAttributedString.alloc().initWithString_attributes_(
+                "Training… waiting for evaluation data",
+                _chart_text_attr(11, color=NSColor.secondaryLabelColor()),
+            )
+            ph.drawAtPoint_(((width - ph.size().width) / 2.0,
+                             (height - ph.size().height) / 2.0))
+            return
+
+        epochs = [p[0] for p in points]
+        losses = [p[1] for p in points]
+        min_e, max_e = min(epochs), max(epochs)
+        min_l, max_l = min(losses), max(losses)
+        if max_e - min_e < 1e-9:
+            max_e = min_e + 1
+        if max_l - min_l < 1e-9:
+            max_l = min_l + 1.0
+
+        def x_for(e):
+            return plot_x + (e - min_e) / (max_e - min_e) * plot_w
+
+        def y_for(l):
+            return plot_y + (l - min_l) / (max_l - min_l) * plot_h
+
+        # Gridlines (3 interior) + loss axis labels (top=max, bottom=min).
+        grid = NSColor.secondaryLabelColor().colorWithAlphaComponent_(0.18)
+        grid.setStroke()
+        label_attr = _chart_text_attr(9)
+        for i in range(4):
+            gy = plot_y + (i / 3.0) * plot_h
+            gp = NSBezierPath.bezierPath()
+            gp.moveToPoint_((plot_x, gy))
+            gp.lineToPoint_((plot_x + plot_w, gy))
+            gp.setLineWidth_(0.5)
+            gp.stroke()
+            val = max_l - (i / 3.0) * (max_l - min_l)
+            t = NSAttributedString.alloc().initWithString_attributes_(f"{val:.3f}", label_attr)
+            t.drawAtPoint_((2.0, gy - 5.0))
+
+        # Polyline (loss curve).
+        NSColor.systemBlueColor().setStroke()
+        path = NSBezierPath.bezierPath()
+        path.moveToPoint_((x_for(epochs[0]), y_for(losses[0])))
+        for e, l in zip(epochs[1:], losses[1:]):
+            path.lineToPoint_((x_for(e), y_for(l)))
+        path.setLineWidth_(1.5)
+        path.stroke()
+
+        # Dots at each evaluated epoch.
+        NSColor.systemBlueColor().setFill()
+        for e, l in zip(epochs, losses):
+            cx, cy = x_for(e), y_for(l)
+            NSBezierPath.bezierPathWithOvalInRect_(
+                ((cx - 2.0, cy - 2.0), (4.0, 4.0))
+            ).fill()
+
+        # Current value (latest epoch) top-right.
+        last_e, last_l = epochs[-1], losses[-1]
+        cur = NSAttributedString.alloc().initWithString_attributes_(
+            f"loss {last_l:.3f}  @  ep {last_e}",
+            _chart_text_attr(10, NSFontWeightMedium, NSColor.labelColor()),
+        )
+        cur.drawAtPoint_((width - cur.size().width - 8.0, height - 14.0))
+
+
 class ProcessDashboardController(NSObject):
     """Persistent dashboard window with idle/active/completed states.
     
@@ -2016,6 +2161,7 @@ class ProcessDashboardController(NSObject):
         self.detail_log_scroll = None
         self.detail_log_view = None
         self.detail_eta = None
+        self.detail_chart = None  # Feature 3: loss-vs-epoch line chart
         
         # Create window
         try:
@@ -2225,9 +2371,25 @@ class ProcessDashboardController(NSObject):
         self.detail_current_label.setAccessibilityLabel_("Current epoch, step and training speed")
         self.detail_panel.contentView().addSubview_(self.detail_current_label)
 
-        # Log output (NSTextView in NSScrollView) - sized to fit below the metrics
+        # --- Loss-vs-epoch chart (Feature 3) ---
+        # Sits between the current-metrics label and the log: a compact line
+        # chart of the running best-loss per evaluated epoch. Hidden by default
+        # (shown in _update_detail_panel when there's a selected process).
+        chart_top = current_y - 8  # 8px gap below the current-metrics label
+        chart_height = LossChartView.CHART_HEIGHT
+        chart_y = chart_top - chart_height
+        self.detail_chart = LossChartView.alloc().initWithFrame_(
+            NSMakeRect(16, chart_y, panel_width - 32, chart_height)
+        )
+        self.detail_chart.setAccessibilityLabel_("Training loss chart")
+        self.detail_chart.setAccessibilityHelp_(
+            "Line chart of the running best generator loss per epoch"
+        )
+        self.detail_panel.contentView().addSubview_(self.detail_chart)
+
+        # Log output (NSTextView in NSScrollView) - sized below the chart
         log_y = 60  # leaves room for the ETA line at the bottom
-        log_top = current_y - 8  # 8px gap below the current-metrics label
+        log_top = chart_y - 8  # 8px gap below the chart
         log_height = max(120, log_top - log_y)
         log_frame = NSMakeRect(16, log_y, panel_width - 32, log_height)
         self.detail_log_scroll = NSScrollView.alloc().initWithFrame_(log_frame)
@@ -2418,7 +2580,16 @@ class ProcessDashboardController(NSObject):
             if hasattr(self, 'detail_eta') and self.detail_eta:
                 eta_str = self._derive_eta(metrics, total_epoch)
                 self.detail_eta.setStringValue_(f"Estimated time: {eta_str}")
-            
+
+            # Loss-vs-epoch chart (Feature 3). Historical processes plot from
+            # the snapshot; active ones from the live log. set_points handles
+            # the <2-points placeholder, so this never throws.
+            if hasattr(self, 'detail_chart') and self.detail_chart:
+                try:
+                    self.detail_chart.set_points(self._collect_epoch_points(proc))
+                except Exception as e:
+                    logging.debug(f"[Dashboard] chart update failed: {e}")
+
             # Update log (last 20 lines) - handle file deletion
             self._update_log_display(proc)
             
@@ -2551,6 +2722,55 @@ class ProcessDashboardController(NSObject):
         except Exception as e:
             logging.debug(f"[Dashboard] training metrics parse failed: {e}")
         return None
+
+    def _collect_epoch_points(self, proc: dict):
+        """Return [(epoch, best_loss), ...] for the loss-vs-epoch chart.
+
+        Historical processes: prefer the snapshot's epoch_points (written by
+        patches/patch_process_tracking.py on completion — survives a retrain
+        overwriting training.log). Active processes (or an entry with no
+        snapshot): re-parse the live training.log for every evaluated epoch
+        line via the shared _parse_training_log_line helper. Returns [] when
+        there's no parseable data; the chart then shows its placeholder.
+        """
+        # Historical snapshot first.
+        snap_points = proc.get("epoch_points")
+        if snap_points:
+            out = []
+            for p in snap_points:
+                try:
+                    out.append((int(p[0]), float(p[1])))
+                except (TypeError, ValueError, IndexError):
+                    continue
+            if out:
+                return out
+        # Active (or no snapshot): scan the live log.
+        log_path = proc.get("log_file") or proc.get("log_path")
+        if not log_path:
+            return []
+        try:
+            if not os.path.exists(log_path) or not os.access(log_path, os.R_OK):
+                return []
+            max_size = 1024 * 1024  # cap at 1MB tail
+            size = os.path.getsize(log_path)
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                if size > max_size:
+                    f.seek(size - max_size)
+                    content = f.read()
+                    nl = content.find("\n")
+                    if nl >= 0:
+                        content = content[nl + 1:]
+                else:
+                    content = f.read()
+            points = []
+            for line in content.splitlines():
+                parsed = _parse_training_log_line(line)
+                if parsed and parsed.get("best_loss") is not None:
+                    points.append((parsed["epoch"], parsed["best_loss"]))
+            return points
+        except Exception as e:
+            logging.debug(f"[Dashboard] epoch-points parse failed: {e}")
+            return []
 
     def _derive_eta(self, metrics, total_epoch):
         """Estimate remaining wall-clock time for a training run.
