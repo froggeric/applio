@@ -2162,6 +2162,12 @@ class ProcessDashboardController(NSObject):
         self.detail_log_view = None
         self.detail_eta = None
         self.detail_chart = None  # Feature 3: loss-vs-epoch line chart
+        # Feature 4: action bar buttons + the resolved proc they act on
+        self.stop_btn = None
+        self.pause_btn = None
+        self.reveal_btn = None
+        self.open_btn = None
+        self._current_proc = None  # resolved proc shown in the detail panel
         
         # Create window
         try:
@@ -2387,8 +2393,9 @@ class ProcessDashboardController(NSObject):
         )
         self.detail_panel.contentView().addSubview_(self.detail_chart)
 
-        # Log output (NSTextView in NSScrollView) - sized below the chart
-        log_y = 60  # leaves room for the ETA line at the bottom
+        # Log output (NSTextView in NSScrollView) - sized below the chart.
+        # Bottom margin leaves room for the ETA line + action bar (Feature 4).
+        log_y = 68
         log_top = chart_y - 8  # 8px gap below the chart
         log_height = max(120, log_top - log_y)
         log_frame = NSMakeRect(16, log_y, panel_width - 32, log_height)
@@ -2406,10 +2413,10 @@ class ProcessDashboardController(NSObject):
         self.detail_log_scroll.setDocumentView_(self.detail_log_view)
         self.detail_panel.contentView().addSubview_(self.detail_log_scroll)
         
-        # Estimated time remaining
-        eta_y = 20
+        # Estimated time remaining (sits between the log and the action bar)
+        eta_y = 46
         self.detail_eta = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(16, eta_y, panel_width - 32, 20)
+            NSMakeRect(16, eta_y, panel_width - 32, 14)
         )
         self.detail_eta.setFont_(NSFont.systemFontOfSize_(12))
         self.detail_eta.setTextColor_(NSColor.secondaryLabelColor())
@@ -2419,7 +2426,37 @@ class ProcessDashboardController(NSObject):
         self.detail_eta.setStringValue_("Estimated time: --")
         self.detail_eta.setAccessibilityLabel_("Time remaining")
         self.detail_panel.contentView().addSubview_(self.detail_eta)
-        
+
+        # --- Action bar (Feature 4): Stop / Pause-Resume / Reveal Log / Open Log ---
+        # Reuses ProgressWindowController's POSIX primitives (verify_process_identity,
+        # psutil.terminate, os.kill SIGSTOP/SIGCONT) and NSWorkspace for reveal/open.
+        # Stop/Pause are gated on a live pid in _update_detail_panel; Reveal/Open
+        # work for historical processes too (they just open the log path).
+        action_y = 14
+        action_h = 28
+        action_gap = 8
+        action_left = 16
+        action_total_w = panel_width - 32
+        actions = [
+            ("stop_btn",   "Stop",        "stopProcess:",       "Stop the process (SIGTERM)"),
+            ("pause_btn",  "Pause",       "togglePauseProcess:", "Pause or resume the process"),
+            ("reveal_btn", "Reveal Log",  "revealLog:",         "Reveal the log file in Finder"),
+            ("open_btn",   "Open Log",    "openLog:",           "Open the log file"),
+        ]
+        n = len(actions)
+        btn_w = (action_total_w - action_gap * (n - 1)) // n
+        for i, (attr, title, action, help_text) in enumerate(actions):
+            bx = action_left + i * (btn_w + action_gap)
+            btn = NSButton.alloc().initWithFrame_(NSMakeRect(bx, action_y, btn_w, action_h))
+            btn.setTitle_(title)
+            btn.setBezelStyle_(1)  # NSRoundedBezelStyle
+            btn.setTarget_(self)
+            btn.setAction_(action)
+            btn.setAccessibilityLabel_(title)
+            btn.setAccessibilityHelp_(help_text)
+            setattr(self, attr, btn)
+            self.detail_panel.contentView().addSubview_(btn)
+
         # Initially hidden
         self.detail_panel.setHidden_(True)
     
@@ -2471,7 +2508,11 @@ class ProcessDashboardController(NSObject):
         # Use fresh info if available, otherwise fall back to original
         if fresh_info:
             proc = fresh_info
-        
+
+        # Remember the resolved proc so the action-bar handlers (Feature 4) act
+        # on the process actually being displayed, not a stale selection.
+        self._current_proc = proc
+
         try:
             self.detail_panel.setHidden_(False)
             
@@ -2590,6 +2631,12 @@ class ProcessDashboardController(NSObject):
                 except Exception as e:
                     logging.debug(f"[Dashboard] chart update failed: {e}")
 
+            # Action-bar enablement (Feature 4). Stop/Pause require a live,
+            # identity-verified pid; the Pause label reflects the live status
+            # (queried, not tracked, so it stays correct across process switches).
+            # Reveal/Open are enabled whenever a log path resolves (historical too).
+            self._update_action_bar(proc)
+
             # Update log (last 20 lines) - handle file deletion
             self._update_log_display(proc)
             
@@ -2661,6 +2708,128 @@ class ProcessDashboardController(NSObject):
         except Exception as e:
             logging.warning(f"[Dashboard] Unexpected error reading log: {e}")
             self.detail_log_view.setString_("Unexpected error reading log file")
+
+    # =================================================================
+    # Action bar (Feature 4)
+    # =================================================================
+
+    def _resolve_log_path(self, proc):
+        """Resolve the log file path for a proc (log_file or log_path), or None."""
+        if not proc:
+            return None
+        return proc.get("log_file") or proc.get("log_path")
+
+    def _current_pid(self, proc):
+        """Return the proc's pid if identity-verified as still alive, else None.
+
+        Reuses verify_process_identity (shared with ProgressWindowController) so a
+        recycled PID is never mistaken for our process.
+        """
+        pid = proc.get("pid") if proc else None
+        started_at = proc.get("started_at") if proc else None
+        if pid and verify_process_identity(pid, started_at):
+            return pid
+        return None
+
+    def _update_action_bar(self, proc):
+        """Enable/disable action buttons + set the Pause label for the shown proc.
+
+        Stop/Pause need a live pid; the Pause label reflects the live process
+        status (STATUS_STOPPED) queried from psutil — robust across process
+        switches, no stale flag. Reveal/Open are enabled whenever a log path
+        resolves (works for historical processes too).
+        """
+        pid = self._current_pid(proc)
+        pid_alive = bool(pid)
+        is_stopped = False
+        if pid_alive and PSUTIL_AVAILABLE:
+            try:
+                is_stopped = psutil.Process(pid).status() == psutil.STATUS_STOPPED
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                is_stopped = False
+
+        if hasattr(self, "stop_btn") and self.stop_btn:
+            self.stop_btn.setEnabled_(pid_alive)
+        if hasattr(self, "pause_btn") and self.pause_btn:
+            self.pause_btn.setEnabled_(pid_alive)
+            self.pause_btn.setTitle_("Resume" if is_stopped else "Pause")
+
+        has_log = bool(self._resolve_log_path(proc))
+        if hasattr(self, "reveal_btn") and self.reveal_btn:
+            self.reveal_btn.setEnabled_(has_log)
+        if hasattr(self, "open_btn") and self.open_btn:
+            self.open_btn.setEnabled_(has_log)
+
+    def stopProcess_(self, sender):
+        """Stop (SIGTERM/terminate) the selected active process. Gated on a live pid."""
+        proc = getattr(self, "_current_proc", None) or self._selected_process
+        pid = self._current_pid(proc)
+        if not pid:
+            logging.info("[Dashboard] Stop requested but no live process")
+            return
+        if not PSUTIL_AVAILABLE:
+            logging.warning("[Dashboard] Cannot stop - psutil not available")
+            return
+        try:
+            psutil.Process(pid).terminate()
+            logging.info(f"[Dashboard] Sent terminate to pid {pid} ({proc.get('type', '?')})")
+            if hasattr(self, "stop_btn") and self.stop_btn:
+                self.stop_btn.setEnabled_(False)
+            if hasattr(self, "pause_btn") and self.pause_btn:
+                self.pause_btn.setEnabled_(False)
+            if hasattr(self, "detail_status") and self.detail_status:
+                self.detail_status.setStringValue_("Stopping…")
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError) as e:
+            logging.warning(f"[Dashboard] Could not stop process: {e}")
+
+    def togglePauseProcess_(self, sender):
+        """Pause/Resume (SIGSTOP/SIGCONT) the selected active process.
+
+        Direction is derived from the live status (STATUS_STOPPED -> resume),
+        so the action is correct even if the label/view is momentarily stale.
+        """
+        proc = getattr(self, "_current_proc", None) or self._selected_process
+        pid = self._current_pid(proc)
+        if not pid or not PSUTIL_AVAILABLE:
+            return
+        try:
+            is_stopped = psutil.Process(pid).status() == psutil.STATUS_STOPPED
+            os.kill(pid, signal.SIGCONT if is_stopped else signal.SIGSTOP)
+            now_stopped = not is_stopped
+            if sender is not None and hasattr(sender, "setTitle_"):
+                sender.setTitle_("Resume" if now_stopped else "Pause")
+            logging.info(
+                f"[Dashboard] Process pid {pid} {'paused' if now_stopped else 'resumed'}"
+            )
+            if hasattr(self, "detail_status") and self.detail_status:
+                self.detail_status.setStringValue_(
+                    "Paused" if now_stopped else "Running"
+                )
+        except (ProcessLookupError, PermissionError, OSError) as e:
+            logging.warning(f"[Dashboard] Could not toggle pause: {e}")
+
+    def revealLog_(self, sender):
+        """Reveal the log file in Finder (NSWorkspace). Works for historical too."""
+        proc = getattr(self, "_current_proc", None) or self._selected_process
+        path = self._resolve_log_path(proc)
+        if not path or not os.path.exists(path):
+            logging.info("[Dashboard] Reveal requested but log path missing")
+            return
+        try:
+            NSWorkspace.sharedWorkspace().activateFileViewerSelecting_([path])
+        except Exception as e:
+            logging.warning(f"[Dashboard] Reveal log failed: {e}")
+
+    def openLog_(self, sender):
+        """Open the log file with its default app (NSWorkspace). Works for historical."""
+        proc = getattr(self, "_current_proc", None) or self._selected_process
+        path = self._resolve_log_path(proc)
+        if not path or not os.path.exists(path):
+            return
+        try:
+            NSWorkspace.sharedWorkspace().openURL_(NSURL.fileURLWithPath_(path))
+        except Exception as e:
+            logging.warning(f"[Dashboard] Open log failed: {e}")
 
     def _parse_training_metrics(self, proc: dict):
         """Parse the latest training status line from a process's training.log.
