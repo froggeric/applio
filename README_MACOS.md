@@ -595,6 +595,13 @@ quit cascade) are per-process:
   `WKWebView`, with its own native menu. Reachable from the launcher via a 2 s-polled
   `runtime_paths.json` flag + `NSDistributedNotificationCenter`.
 
+> **Experimental — single-process mode:** set the environment variable `APPLIO_SINGLE_PROCESS=1`
+> (e.g. `launchctl setenv APPLIO_SINGLE_PROCESS 1` before opening the app) to merge the two
+> processes into one. It gives smoother window/menu behavior — Hide actually hides the window, and the
+> menu bar no longer swaps by which window is frontmost — and is functionally complete (training
+> works in the built app). It is still **experimental and off by default**; leave it unset for the
+> standard two-process app.
+
 ### Native Menu
 
 The menu bar is defined once in `menu_spec.py` and rendered by both processes, so the bundled app
@@ -604,7 +611,7 @@ and the standalone dev wrapper stay in sync. Five menus:
 |------|-------|
 | **Applio** | About, Check for Updates…, Hide ⌘H, Quit ⌘Q |
 | **File** | Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …) |
-| **Process** | Live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`) + Open Dashboard ⌘⇧P (pause/resume/terminate controls stay in the dashboard) |
+| **Process** | Live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`) + Open Progress Dashboard ⌘⇧P (the pause/resume/stop controls live in the dashboard — see below) |
 | **Window** | Minimize ⌘M, Zoom, Show Main |
 | **Help** | Studio Production Guide, Online Docs, Report an Issue, Discord |
 
@@ -621,6 +628,24 @@ status. For the full dynamic menu, run the built app.
 (newer / up-to-date / error). A **silent launch-time check** also runs and alerts you **only** if a
 newer version exists. Version comparison uses `packaging.version` (the old string compare falsely
 flagged downgrades as updates). Network runs off the main thread.
+
+### Process Dashboard
+
+Open from **Process → Open Progress Dashboard** (⌘⇧P). It is a live window that monitors a training
+run while it runs — and remembers finished runs so you can review them later.
+
+- **Real-time metrics** — best epoch + its loss, current/total epoch, step, speed, and a derived ETA,
+  beside an epoch-fraction progress bar.
+- **Loss-vs-epoch curve** — plots evaluation loss per epoch and **highlights significant improvements**
+  (green markers at notable loss drops), so your model's best checkpoint is visible at a glance.
+- **Controls** — Stop, Pause / Resume, Reveal Log in Finder, and Open Log.
+- **Durable best epoch** — best-epoch metrics are snapshotted into history, so they survive an app
+  restart and re-training the same model.
+- **Auto-show** — the dashboard opens itself when a job starts.
+- **History** — when no job is running, browse the metrics of finished runs.
+
+The dashboard lives in the launcher process and parses the training log directly (no RVC import), so
+it works identically in dev mode and the frozen app.
 
 ### Frozen-CWD invariant
 In the frozen app the working directory is the bundle, not the data dir — so upstream's CWD-relative

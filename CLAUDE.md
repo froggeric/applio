@@ -153,13 +153,18 @@ versions instead: **numpy 2.2.6, scipy 1.15.3, numba 0.66.0, matplotlib 3.10.9, 
 `pandas._libs.tslibs.vectorized` failures.) If the fork ever moves to Python 3.11, these can
 re-align to upstream's exact pins; that needs `brew install python@3.11` + a fresh `venv_macos`.
 
-**Phase 2 — single-process merge (WIP, behind `APPLIO_SINGLE_PROCESS`):**
+**Phase 2 — single-process merge (experimental opt-in, behind `APPLIO_SINGLE_PROCESS`):**
 Merging the two-process launcher+wrapper into ONE native process (fixes: Hide doesn't hide the
 Gradio window; the menu swaps by which process is frontmost). Gated on `APPLIO_SINGLE_PROCESS=1`;
-flag OFF (default) = unchanged two-process. **Status:** functionally complete in DEV runs
-(Step 0 → Task 2b done, spec+quality reviewed + user GUI-gated); Tasks 3–4 remain (single-instance
-surfacing, Apple-Silicon *frozen*-app validation, dead-code removal, drop the flag). Self-contained
-plan + task breakdown: `~/.claude/plans/phase2-single-process-merge.md`. Branch `feat/phase2-single-process`.
+flag OFF (default) = unchanged two-process. **Status:** functionally complete and **frozen-validated**
+(training works in the built `dist/Applio.app` on Apple Silicon); Tasks through 3a done (single-instance
+surfacing via `bring_to_front`). The **Process Dashboard overhaul is complete** — real-time metrics
+(best epoch/loss, current/total epoch, step, speed, derived ETA + epoch-fraction bar), a loss-vs-epoch
+curve with always-on green highlights at significant improvements, an action bar (Stop / Pause-Resume /
+Reveal Log / Open Log), best-epoch durability across restart + retraining the same model, auto-show on
+job start, and idle-state history browsing. **Remaining:** Task 4 only — delete the dead two-process
+code + drop the flag. Self-contained plan + task breakdown:
+`~/.claude/plans/phase2-single-process-merge.md`. Branch `feat/phase2-single-process`.
 - **Run single-process (dev):** `APPLIO_SINGLE_PROCESS=1 venv_macos/bin/python applio_launcher.py`
 - **Run single-process (built app, no rebuild):** `launchctl setenv APPLIO_SINGLE_PROCESS 1 && open dist/Applio.app` (unset after: `launchctl unsetenv APPLIO_SINGLE_PROCESS`).
 - **Architecture:** the launcher calls `macos_wrapper.start_gui(launcher=self)` (import-safe since Step 0 — `import macos_wrapper` has zero side effects) then `webview.start(func=self._reassert_menu_and_delegate)`. pywebview clobbers `NSApp.delegate()` and wipes the main menu once at `first_show`; the func re-seats both on the main thread via `AppHelper.callAfter`. With NO `menu=` passed, pywebview does NOT re-wipe on focus (`windowDidBecomeKey_`'s `if i and i.menu` guard is False when `i.menu` is None) — verified against `venv_macos/.../webview/platforms/cocoa.py`.

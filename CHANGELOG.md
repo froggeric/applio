@@ -5,16 +5,24 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ## [Unreleased]
 
+---
+
+## [3.6.3.6] — 2026-07-30
+
 ### Added
-- **Phase 2 single-process merge (WIP, behind `APPLIO_SINGLE_PROCESS=1`):** merges the
+- **Process Dashboard** (Process → Open Progress Dashboard, ⌘⇧P): a live training-monitoring window.
+  Shows real-time metrics — best epoch + loss, current/total epoch, step, speed, and a derived ETA —
+  beside an epoch-fraction progress bar, plus a **loss-vs-epoch curve that highlights significant
+  improvements** (green markers + epoch numbers at notable loss drops). An **action bar** offers
+  Stop / Pause-Resume / Reveal Log in Finder / Open Log. **Best-epoch metrics are snapshotted into
+  history**, so they survive an app restart and re-training the same model. The dashboard
+  **auto-shows when a job starts**, and when idle lets you **browse finished runs** from history.
+- **Phase 2 single-process merge (experimental, behind `APPLIO_SINGLE_PROCESS=1`):** merges the
   two-process launcher+wrapper into one native process (fixes Hide-not-hiding + menu-swaps-by-focus).
-  Done + dev-validated on hardware: `macos_wrapper` import side-effect-free (`start_gui(launcher=)`);
-  single-process GUI path with `NSApplicationDelegate` + native menu re-asserted after `webview.start`
-  (the merge's feasibility crux — confirmed viable); direct in-process reopen (`window.show()`,
-  no file-IPC); in-process quit (`callAfter(terminate)`, no double-prompt, no spinning cursor);
-  Gradio supervisor (N=3 soft-restart → fatal, `OSError` fail-fast); unified additive logging.
-  Flag OFF = unchanged two-process. Remaining: single-instance surfacing, Apple-Silicon frozen-app
-  validation, dead two-process code removal + drop the flag. Plan: `~/.claude/plans/phase2-single-process-merge.md`.
+  Functionally complete and **frozen-validated** (training works in the built app). Tasks through 3a
+  done (single-instance surfacing via `bring_to_front`); opt-in, **OFF by default** (the default
+  remains two-process; flag-off is byte-for-byte the two-process path). Remaining: dead two-process
+  code removal + drop the flag (Task 4). Plan: `~/.claude/plans/phase2-single-process-merge.md`.
 - **Native menu overhaul:** one shared `menu_spec.py` rendered by a PyObjC renderer
   (launcher) and a pywebview static-subset renderer (standalone). New Process + Help menus;
   Reveal-in-Finder rescued; Hide ⌘H / Minimize ⌘M; the dead Menu B deleted.
@@ -34,6 +42,11 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   `--keychain-profile` remains the default for local runs.
 
 ### Fixed
+- **Process Dashboard window did not open at all** — `ProcessDashboardController` now subclasses
+  `NSObject` (a plain Python class crashed on `conformsToProtocol:`) and the missing `AppKit`
+  constants (`NSBoxPrimary`, …) are imported so the window constructs. Loss-vs-epoch axes are fixed
+  and the stray "Title" placeholder text removed.
+- Post-training `SIGTERM` no longer quits the whole app (single-process).
 - `_final_verify` now gates the `.dmg` only on `xcrun stapler validate` (it was hard-failing on
   `spctl`, which reports "does not seem to be an app" for a disk image). Caught by the CI release test.
 

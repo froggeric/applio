@@ -86,7 +86,7 @@ import PyInstaller.__main__
 # Configuration
 # =================================================================
 APP_NAME = "Applio"
-BUILD_NUMBER = 5  # Increment for each build
+BUILD_NUMBER = 6  # Increment for each build
 
 # Read version from the tracked assets/config_template.json first (the source of
 # truth at build time), falling back to a locally-generated assets/config.json.
