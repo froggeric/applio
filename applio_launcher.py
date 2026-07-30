@@ -2103,6 +2103,24 @@ class LossChartView(NSView):
                 return (sx, sy)
         return None
 
+    def _view_x_for_event(self, event):
+        """Cursor x in THIS view's coords, or None if it can't be resolved.
+
+        event.locationInWindow() is an NSPoint in window base coords. Passing
+        that raw NSPoint straight to convertPoint:fromView: intermittently
+        raised "depythonifying struct, got no sequence" in the frozen runtime,
+        so _hover_x sometimes never updated (the frozen click-test caught it as
+        a mouseMoved handler error). Passing an explicit (x, y) tuple is the form
+        PyObjC depythonifies reliably -- this is the fix for that TypeError.
+        """
+        try:
+            loc = event.locationInWindow()
+            pt = self.convertPoint_fromView_((loc.x, loc.y), None)
+            return float(pt.x)
+        except Exception as exc:
+            logging.debug("[Dashboard] loss chart cursor x unresolved: %r", exc)
+            return None
+
     def mouseMovedWithEvent_(self, event):
         """Move the hover crosshair: track cursor x + nearest epoch, then redraw.
 
@@ -2129,11 +2147,18 @@ class LossChartView(NSView):
                 )
                 self._move_count = 0
                 self._move_last_log = now
-            loc = event.locationInWindow()
-            pt = self.convertPoint_fromView_(loc, None)
-            self._hover_x = float(pt.x)
-            self._hover_epoch = self._nearest_epoch_for_x(pt.x)  # (epoch,loss)|None
+            x = self._view_x_for_event(event)
+            if x is None:
+                return
+            self._hover_x = x
+            self._hover_epoch = self._nearest_epoch_for_x(x)  # (epoch,loss)|None
+            # Force a synchronous redraw+flush. setNeedsDisplay alone marked the
+            # view dirty and drawRect ran (confirmed by logs) but the incremental
+            # overlay didn't appear on screen for this NSBox-embedded view;
+            # display() drives drawRect + flushes immediately so the crosshair
+            # is composited on this event, not "later".
             self.setNeedsDisplay_(True)
+            self.display()
         except Exception as exc:
             logging.warning("[Dashboard] loss chart mouseMoved handler error: %r", exc)
 
@@ -2146,9 +2171,10 @@ class LossChartView(NSView):
         broken in the frozen app. The pin persists until the next click.
         """
         try:
-            loc = event.locationInWindow()
-            pt = self.convertPoint_fromView_(loc, None)
-            nearest = self._nearest_epoch_for_x(pt.x)
+            x = self._view_x_for_event(event)
+            if x is None:
+                return
+            nearest = self._nearest_epoch_for_x(x)
             if nearest is not None:
                 self._selected_point = nearest
                 he, hl = nearest
@@ -2157,6 +2183,7 @@ class LossChartView(NSView):
                     int(he), float(hl),
                 )
                 self.setNeedsDisplay_(True)
+                self.display()  # synchronous redraw+flush (see mouseMoved)
         except Exception as exc:
             logging.warning("[Dashboard] loss chart mouseDown handler error: %r", exc)
 
@@ -2314,37 +2341,45 @@ class LossChartView(NSView):
 
         # Hover crosshair (drawn, instant) + click-to-inspect pin.
         #
-        # Hover: a thin vertical line that follows the cursor + an "Ep N — loss"
-        # label at its top for the nearest epoch. mouseMoved sets _hover_x /
+        # Hover: a vertical line that follows the cursor + an "Ep N — loss" label
+        # at its top for the nearest epoch. mouseMoved sets _hover_x /
         # _hover_epoch; mouseExited clears them. Skip silently when not hovering.
         #
-        # Click pin: a persistent marker (orange guide line + ring on the point +
+        # Click pin: a persistent marker (orange guide line + filled dot + ring +
         # bold label) for the epoch the user clicked, drawn every frame until the
         # next click. Independent of mouseMoved so it survives flaky hover.
         #
-        # Diagnostic (TEMP): the next frozen click-test logs whether drawRect_
-        # actually re-renders while hovering/pinned. If mouseMoved logs but this
-        # never logs, the failure is render/dispatch, not event delivery.
+        # Colors are FULL-alpha + 2pt lines on purpose: the prior faint guide
+        # (secondaryLabelColor @ 0.55, 1pt) was easy to miss, and we need the
+        # overlay unmistakable while we prove the flush path.
+        #
+        # Diagnostic (TEMP): logs whether drawRect_ re-renders while hovering/
+        # pinned, and the draw itself is wrapped so an AppKit-swallowed drawRect
+        # exception (logged to Console, NOT Python logging -- which on its own
+        # looks exactly like "drawRect ran but nothing drew") surfaces here.
         hover_active = self._hover_x is not None
         pin_active = self._selected_point is not None
-        if hover_active or pin_active:
-            try:
-                self._draw_hover_count += 1
-                now = self._diag_time.monotonic()
-                if now - self._draw_hover_last_log >= 1.0:
-                    logging.info(
-                        "[Dashboard] loss chart drawRect hover render "
-                        "(count=%d, hover_x=%s, pin=%s)",
-                        self._draw_hover_count,
-                        "%.1f" % self._hover_x if hover_active else None,
-                        bool(pin_active),
-                    )
-                    self._draw_hover_count = 0
-                    self._draw_hover_last_log = now
-            except Exception:
-                pass
+        if not (hover_active or pin_active):
+            return
 
-        def _draw_guide(x, epoch, loss, color, width, font_weight):
+        try:
+            self._draw_hover_count += 1
+            now = self._diag_time.monotonic()
+            if now - self._draw_hover_last_log >= 1.0:
+                logging.info(
+                    "[Dashboard] loss chart drawRect hover render "
+                    "(count=%d, hover_x=%s, pin=%s, bounds=%dx%d)",
+                    self._draw_hover_count,
+                    "%.1f" % self._hover_x if hover_active else None,
+                    bool(pin_active),
+                    int(width), int(height),
+                )
+                self._draw_hover_count = 0
+                self._draw_hover_last_log = now
+        except Exception:
+            pass
+
+        def _draw_guide(x, epoch, loss, color, width_guide, font_weight):
             """Vertical guide line at x + a centered epoch/loss label at its top."""
             gx = x
             if gx < plot_x:
@@ -2355,7 +2390,7 @@ class LossChartView(NSView):
             line = NSBezierPath.bezierPath()
             line.moveToPoint_((gx, plot_y))
             line.lineToPoint_((gx, plot_y + plot_h))
-            line.setLineWidth_(width)
+            line.setLineWidth_(width_guide)
             line.stroke()
             lbl = NSAttributedString.alloc().initWithString_attributes_(
                 u"Ep {0} — {1:.3f}".format(epoch, loss),
@@ -2369,34 +2404,41 @@ class LossChartView(NSView):
                 lx = plot_x + plot_w - lw
             lbl.drawAtPoint_((lx, plot_y + plot_h - lh - 3.0))
 
-        # Click pin first (so hover draws on top of it when both are active).
-        if pin_active:
-            se, sl = self._selected_point
-            pos = self._screen_pos_for_epoch(se, screen_points)
-            if pos is not None:
-                sx, sy = pos
-                NSColor.systemOrangeColor().setStroke()
-                ring = NSBezierPath.bezierPathWithOvalInRect_(
-                    ((sx - 4.5, sy - 4.5), (9.0, 9.0))
-                )
-                ring.setLineWidth_(2.0)
-                ring.stroke()
-                _draw_guide(
-                    sx, se, sl,
-                    NSColor.systemOrangeColor(),
-                    1.2,
-                    NSFontWeightSemibold,
-                )
+        try:
+            # Click pin first (so hover draws on top of it when both are active).
+            if pin_active:
+                se, sl = self._selected_point
+                pos = self._screen_pos_for_epoch(se, screen_points)
+                if pos is not None:
+                    sx, sy = pos
+                    orange = NSColor.systemOrangeColor()
+                    orange.setFill()
+                    NSBezierPath.bezierPathWithOvalInRect_(
+                        ((sx - 3.0, sy - 3.0), (6.0, 6.0))
+                    ).fill()
+                    orange.setStroke()
+                    ring = NSBezierPath.bezierPathWithOvalInRect_(
+                        ((sx - 5.5, sy - 5.5), (11.0, 11.0))
+                    )
+                    ring.setLineWidth_(2.0)
+                    ring.stroke()
+                    _draw_guide(sx, se, sl, orange, 2.0, NSFontWeightSemibold)
 
-        # Hover crosshair on top.
-        if hover_active and self._hover_epoch is not None:
-            _draw_guide(
-                self._hover_x,
-                self._hover_epoch[0], self._hover_epoch[1],
-                NSColor.labelColor().colorWithAlphaComponent_(0.7),
-                1.0,
-                NSFontWeightMedium,
-            )
+            # Hover crosshair on top.
+            if hover_active and self._hover_epoch is not None:
+                _draw_guide(
+                    self._hover_x,
+                    self._hover_epoch[0], self._hover_epoch[1],
+                    NSColor.labelColor(),  # full alpha, strong
+                    2.0,
+                    NSFontWeightMedium,
+                )
+        except Exception as exc:
+            # drawRect: exceptions are swallowed by AppKit (logged to Console,
+            # NOT our logging) and abort the rest of the pass -- which is exactly
+            # how "diagnostic log fired, chart visible, crosshair/pin invisible"
+            # presents. Surface it here so we can see the real failure.
+            logging.error("[Dashboard] loss chart hover/pin draw error: %r", exc)
 
 
 class ProcessDashboardController(NSObject):
