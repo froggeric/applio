@@ -83,7 +83,7 @@ try:
         NSBezierPath, NSWorkspace, NSAttributedString,
         NSFontAttributeName, NSForegroundColorAttributeName,
         NSTrackingArea, NSTrackingMouseEnteredAndExited, NSTrackingMouseMoved,
-        NSTrackingActiveInActiveApp, NSTrackingInVisibleRect,
+        NSTrackingActiveAlways, NSTrackingActiveInActiveApp, NSTrackingInVisibleRect,
     )
     from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
     from PyObjCTools import AppHelper
@@ -2009,7 +2009,20 @@ class LossChartView(NSView):
         # (epoch, loss) for the label, or None when no points. Cleared on exit.
         self._hover_x = None
         self._hover_epoch = None
-        self._mouse_moved_logged = False  # one-shot "did mouseMoved ever fire" log
+        # Click-to-inspect fallback (Feature 3 robustness): a click pins the
+        # nearest epoch here; drawRect_ always renders it (marker + label) until
+        # the next click. Deliberately independent of mouseMoved so the user gets
+        # epoch/loss even if hover tracking stays flaky in the frozen app.
+        self._selected_point = None  # (epoch, loss) or None
+        # Temporary diagnostics to definitively split event-delivery vs render in
+        # the user's next frozen click-test. Deduped to ~1/s each; remove once the
+        # hover is confirmed working. See LossChartView docstring / commit msg.
+        import time as _time
+        self._diag_time = _time
+        self._move_count = 0
+        self._move_last_log = 0.0
+        self._draw_hover_count = 0
+        self._draw_hover_last_log = 0.0
         return self
 
     def viewDidMoveToWindow(self):
@@ -2036,10 +2049,18 @@ class LossChartView(NSView):
             self._tracking_area = None
         if not NATIVE_APIS_AVAILABLE:
             return
+        # NSTrackingActiveAlways (not InActiveApp) is the frozen-app-critical
+        # choice: the frozen launcher launches with Accessory activation policy
+        # (see top of file), and InActiveApp only delivers mouseMoved while the
+        # app is the frontmost ACTIVE app -- which an Accessory-policy app is
+        # often NOT recognized as, so hover silently stops. ActiveAlways fires
+        # whenever the cursor is over the view regardless of app-active / key-
+        # window state, which is exactly what a chart crosshair wants. Apple's
+        # own cursor-tracking examples use ActiveAlways for the same reason.
         options = (
             NSTrackingMouseEnteredAndExited
             | NSTrackingMouseMoved
-            | NSTrackingActiveInActiveApp
+            | NSTrackingActiveAlways
             | NSTrackingInVisibleRect
         )
         self._tracking_area = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
@@ -2069,22 +2090,75 @@ class LossChartView(NSView):
                 best_dx = dx
         return best
 
+    @staticmethod
+    def _screen_pos_for_epoch(epoch, screen_points):
+        """Return (sx, sy) for the given epoch in screen_points, or None.
+
+        Used by the click-pin renderer. None when the epoch isn't on the current
+        curve (e.g. the selected epoch scrolled off after a new set_points) --
+        callers simply skip drawing the pin that frame.
+        """
+        for sx, sy, e, _l in screen_points:
+            if e == epoch:
+                return (sx, sy)
+        return None
+
     def mouseMovedWithEvent_(self, event):
         """Move the hover crosshair: track cursor x + nearest epoch, then redraw.
 
         Drawn ourselves (vertical line + epoch label) rather than setToolTip_
         (AppKit caches toolTip per tracking region + a hover delay, so it never
-        refreshed in the frozen app). mouseMoved delivery needs the window to
-        accept mouse-moved events -- forced on in viewDidMoveToWindow.
+        refreshed in the frozen app). Delivery needs the window to accept
+        mouse-moved events (forced on in viewDidMoveToWindow) PLUS the tracking
+        area to be ActiveAlways -- see updateTrackingAreas.
+
+        Defensive: an exception inside an ObjC selector callback is swallowed by
+        AppKit, which on its own reads as "mouseMoved fired but crosshair never
+        drew". Catch + log so a real failure surfaces instead of vanishing. The
+        deduped log (not the old one-shot) lets the next click-test prove events
+        keep arriving, not just that the first one did.
         """
-        if not self._mouse_moved_logged:
-            self._mouse_moved_logged = True
-            logging.info("[Dashboard] loss chart mouseMoved fired")
-        loc = event.locationInWindow()
-        pt = self.convertPoint_fromView_(loc, None)
-        self._hover_x = float(pt.x)
-        self._hover_epoch = self._nearest_epoch_for_x(pt.x)  # (epoch, loss) or None
-        self.setNeedsDisplay_(True)
+        try:
+            self._move_count += 1
+            now = self._diag_time.monotonic()
+            if now - self._move_last_log >= 1.0:
+                logging.info(
+                    "[Dashboard] loss chart mouseMoved fired "
+                    "(count=%d, ~1/s dedup)",
+                    self._move_count,
+                )
+                self._move_count = 0
+                self._move_last_log = now
+            loc = event.locationInWindow()
+            pt = self.convertPoint_fromView_(loc, None)
+            self._hover_x = float(pt.x)
+            self._hover_epoch = self._nearest_epoch_for_x(pt.x)  # (epoch,loss)|None
+            self.setNeedsDisplay_(True)
+        except Exception as exc:
+            logging.warning("[Dashboard] loss chart mouseMoved handler error: %r", exc)
+
+    def mouseDownWithEvent_(self, event):
+        """Click-to-inspect: pin the nearest epoch to a persistent marker.
+
+        Guaranteed fallback that does NOT depend on mouseMoved delivery at all.
+        mouseDown goes to the hit-tested view directly (no first-responder /
+        tracking-area requirement), so this works even if hover tracking stays
+        broken in the frozen app. The pin persists until the next click.
+        """
+        try:
+            loc = event.locationInWindow()
+            pt = self.convertPoint_fromView_(loc, None)
+            nearest = self._nearest_epoch_for_x(pt.x)
+            if nearest is not None:
+                self._selected_point = nearest
+                he, hl = nearest
+                logging.info(
+                    "[Dashboard] loss chart click inspect: ep=%d loss=%.3f",
+                    int(he), float(hl),
+                )
+                self.setNeedsDisplay_(True)
+        except Exception as exc:
+            logging.warning("[Dashboard] loss chart mouseDown handler error: %r", exc)
 
     def mouseExitedWithEvent_(self, event):
         """Clear the hover crosshair when the cursor leaves the chart."""
@@ -2238,36 +2312,91 @@ class LossChartView(NSView):
         )
         cur.drawAtPoint_((width - cur.size().width - 8.0, height - 14.0))
 
-        # Hover crosshair (drawn, instant): a vertical line that follows the
-        # cursor across the whole chart + an "Ep N — loss" label at its top for
-        # the nearest plotted epoch. mouseMoved sets _hover_x/_hover_epoch;
-        # mouseExited clears them. Skip silently when not hovering. The line is
-        # clamped to the plot span; the label is clamped so it never overflows.
-        if self._hover_x is not None:
-            hx = self._hover_x
-            if hx < plot_x:
-                hx = plot_x
-            elif hx > plot_x + plot_w:
-                hx = plot_x + plot_w
-            NSColor.secondaryLabelColor().colorWithAlphaComponent_(0.55).setStroke()
-            vline = NSBezierPath.bezierPath()
-            vline.moveToPoint_((hx, plot_y))
-            vline.lineToPoint_((hx, plot_y + plot_h))
-            vline.setLineWidth_(1.0)
-            vline.stroke()
-            if self._hover_epoch is not None:
-                he, hl = self._hover_epoch
-                vlbl = NSAttributedString.alloc().initWithString_attributes_(
-                    u"Ep {0} — {1:.3f}".format(he, hl),
-                    _chart_text_attr(9, NSFontWeightMedium, NSColor.labelColor()),
+        # Hover crosshair (drawn, instant) + click-to-inspect pin.
+        #
+        # Hover: a thin vertical line that follows the cursor + an "Ep N — loss"
+        # label at its top for the nearest epoch. mouseMoved sets _hover_x /
+        # _hover_epoch; mouseExited clears them. Skip silently when not hovering.
+        #
+        # Click pin: a persistent marker (orange guide line + ring on the point +
+        # bold label) for the epoch the user clicked, drawn every frame until the
+        # next click. Independent of mouseMoved so it survives flaky hover.
+        #
+        # Diagnostic (TEMP): the next frozen click-test logs whether drawRect_
+        # actually re-renders while hovering/pinned. If mouseMoved logs but this
+        # never logs, the failure is render/dispatch, not event delivery.
+        hover_active = self._hover_x is not None
+        pin_active = self._selected_point is not None
+        if hover_active or pin_active:
+            try:
+                self._draw_hover_count += 1
+                now = self._diag_time.monotonic()
+                if now - self._draw_hover_last_log >= 1.0:
+                    logging.info(
+                        "[Dashboard] loss chart drawRect hover render "
+                        "(count=%d, hover_x=%s, pin=%s)",
+                        self._draw_hover_count,
+                        "%.1f" % self._hover_x if hover_active else None,
+                        bool(pin_active),
+                    )
+                    self._draw_hover_count = 0
+                    self._draw_hover_last_log = now
+            except Exception:
+                pass
+
+        def _draw_guide(x, epoch, loss, color, width, font_weight):
+            """Vertical guide line at x + a centered epoch/loss label at its top."""
+            gx = x
+            if gx < plot_x:
+                gx = plot_x
+            elif gx > plot_x + plot_w:
+                gx = plot_x + plot_w
+            color.setStroke()
+            line = NSBezierPath.bezierPath()
+            line.moveToPoint_((gx, plot_y))
+            line.lineToPoint_((gx, plot_y + plot_h))
+            line.setLineWidth_(width)
+            line.stroke()
+            lbl = NSAttributedString.alloc().initWithString_attributes_(
+                u"Ep {0} — {1:.3f}".format(epoch, loss),
+                _chart_text_attr(9, font_weight, color),
+            )
+            lw, lh = float(lbl.size().width), float(lbl.size().height)
+            lx = gx - lw / 2.0
+            if lx < plot_x:
+                lx = plot_x
+            elif lx + lw > plot_x + plot_w:
+                lx = plot_x + plot_w - lw
+            lbl.drawAtPoint_((lx, plot_y + plot_h - lh - 3.0))
+
+        # Click pin first (so hover draws on top of it when both are active).
+        if pin_active:
+            se, sl = self._selected_point
+            pos = self._screen_pos_for_epoch(se, screen_points)
+            if pos is not None:
+                sx, sy = pos
+                NSColor.systemOrangeColor().setStroke()
+                ring = NSBezierPath.bezierPathWithOvalInRect_(
+                    ((sx - 4.5, sy - 4.5), (9.0, 9.0))
                 )
-                vw, vh = float(vlbl.size().width), float(vlbl.size().height)
-                vx = hx - vw / 2.0
-                if vx < plot_x:
-                    vx = plot_x
-                elif vx + vw > plot_x + plot_w:
-                    vx = plot_x + plot_w - vw
-                vlbl.drawAtPoint_((vx, plot_y + plot_h - vh - 3.0))
+                ring.setLineWidth_(2.0)
+                ring.stroke()
+                _draw_guide(
+                    sx, se, sl,
+                    NSColor.systemOrangeColor(),
+                    1.2,
+                    NSFontWeightSemibold,
+                )
+
+        # Hover crosshair on top.
+        if hover_active and self._hover_epoch is not None:
+            _draw_guide(
+                self._hover_x,
+                self._hover_epoch[0], self._hover_epoch[1],
+                NSColor.labelColor().colorWithAlphaComponent_(0.7),
+                1.0,
+                NSFontWeightMedium,
+            )
 
 
 class ProcessDashboardController(NSObject):
