@@ -2041,18 +2041,31 @@ class LossChartView(NSView):
         losses = [p[1] for p in points]
         min_e, max_e = min(epochs), max(epochs)
         min_l, max_l = min(losses), max(losses)
-        if max_e - min_e < 1e-9:
-            max_e = min_e + 1
-        if max_l - min_l < 1e-9:
-            max_l = min_l + 1.0
+        epoch_span = (max_e - min_e) or 1
+        # The chart plots the RUNNING best loss (lowest_value), which is
+        # monotonic non-increasing. When the best loss was set early and never
+        # beaten (common for short runs -- e.g. the test run held 8.822 for
+        # every evaluated epoch), every point shares the same value and the
+        # curve is genuinely flat. The old max==min fallback glued that flat
+        # line to the plot floor (y == plot_y), reading as a broken chart;
+        # render the no-variation case as a centered line + note instead.
+        all_equal = (max_l - min_l) < 1e-9
 
         def x_for(e):
-            return plot_x + (e - min_e) / (max_e - min_e) * plot_w
+            return plot_x + (e - min_e) / epoch_span * plot_w
 
-        def y_for(l):
-            return plot_y + (l - min_l) / (max_l - min_l) * plot_h
+        if all_equal:
+            y_line = plot_y + plot_h / 2.0
 
-        # Gridlines (3 interior) + loss axis labels (top=max, bottom=min).
+            def y_for(l):
+                return y_line
+        else:
+
+            def y_for(l):
+                return plot_y + (l - min_l) / (max_l - min_l) * plot_h
+
+        # Gridlines (3 interior); numeric loss-axis labels only when there is a
+        # real range (the all-equal note carries the single value instead).
         grid = NSColor.secondaryLabelColor().colorWithAlphaComponent_(0.18)
         grid.setStroke()
         label_attr = _chart_text_attr(9)
@@ -2063,9 +2076,10 @@ class LossChartView(NSView):
             gp.lineToPoint_((plot_x + plot_w, gy))
             gp.setLineWidth_(0.5)
             gp.stroke()
-            val = max_l - (i / 3.0) * (max_l - min_l)
-            t = NSAttributedString.alloc().initWithString_attributes_(f"{val:.3f}", label_attr)
-            t.drawAtPoint_((2.0, gy - 5.0))
+            if not all_equal:
+                val = max_l - (i / 3.0) * (max_l - min_l)
+                t = NSAttributedString.alloc().initWithString_attributes_(f"{val:.3f}", label_attr)
+                t.drawAtPoint_((2.0, gy - 5.0))
 
         # Polyline (loss curve).
         NSColor.systemBlueColor().setStroke()
@@ -2083,6 +2097,14 @@ class LossChartView(NSView):
             NSBezierPath.bezierPathWithOvalInRect_(
                 ((cx - 2.0, cy - 2.0), (4.0, 4.0))
             ).fill()
+
+        if all_equal:
+            # Annotate so the flat line reads as intentional, not broken.
+            note = NSAttributedString.alloc().initWithString_attributes_(
+                "Best loss unchanged at {:.3f}".format(min_l),
+                _chart_text_attr(10, NSFontWeightMedium, NSColor.secondaryLabelColor()),
+            )
+            note.drawAtPoint_(((width - note.size().width) / 2.0, y_line + 6.0))
 
         # Current value (latest epoch) top-right.
         last_e, last_l = epochs[-1], losses[-1]
