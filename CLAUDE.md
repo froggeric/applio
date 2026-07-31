@@ -256,8 +256,11 @@ history browsing.
 - No microphone entitlement needed - pywebview wrapper doesn't capture audio; Gradio handles it via browser
 - **Patcher escape sequences:** In triple-quoted strings, `\\n` produces literal newline. Use `chr(10)` for newlines in patched code.
 - Patches in `patches/` are applied to source files before PyInstaller, then source files are restored to pristine state
+- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (3 patchers touch it: dataset_paths, train_44100, refinegan_legacy_train). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
 - PyInstaller cleans `dist/` at start - never delete while builds running
+- Before `rm -rf dist build`: no `Applio` process may run from `dist/` (it holds file handles, so `rm` fails with "Directory not empty"). Quit it (`osascript -e 'tell application "Applio" to quit'`) + `sleep 3` first
 - Build size: ~1.6GB lite (post-3.6.3 dependency stack; ~2GB models download on first launch)
+- **Smoke = cert-free** `venv_macos/bin/python build_macos.py` (no flags; ad-hoc, runs locally) validates functionality; reserve `--sign --notarize --dmg` for the actual release
 - Signing requires handling broken symlinks (use `path.exists()` before `rglob`)
 - PyInstaller cache corruption: clear `~/Library/Application Support/pyinstaller/`
 - **Signing & notarization (working):** `venv_macos/bin/python build_macos.py --sign --notarize --dmg`
@@ -422,6 +425,8 @@ is NOT in `active_processes.json`. Tracked separately:
 - Create release via API: `gh api repos/{owner}/{repo}/releases -X POST -f tag_name=v{version}`
 - Upload assets via curl when `gh release upload` fails: `curl -X POST -H "Authorization: token $(gh auth token)" -H "Content-Type: application/zip" --data-binary @file.zip "https://uploads.github.com/repos/{owner}/{repo}/releases/{release_id}/assets?name=file.zip"`
 - Delete release: `gh api repos/{owner}/{repo}/releases/{id} -X DELETE`
+- Delete a release ASSET: `gh api -X DELETE repos/{owner}/{repo}/releases/assets/{asset_id}` (path is `releases/assets/{asset_id}`, NOT `releases/{release_id}/assets/{id}`, which 404s)
+- **Manual release vs CI:** pushing a `v*` tag auto-runs `release-macos.yml` (build+sign+attach). If you cut a release MANUALLY (local signed DMG + curl upload), `gh run cancel <id>` the triggered run right after tagging; otherwise it clashes on the same asset name + bills macOS minutes
 
 **Version management:**
 - Check upstream version: `git show upstream/main:assets/config_template.json | grep version`
