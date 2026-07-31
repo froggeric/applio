@@ -696,7 +696,8 @@ def pre_build_patch():
         ("patches/patch_refinegan_legacy_train.py", "rvc/train/train.py", "train.py - RefineGAN-Legacy architecture detection (UPDATED)", "dir"),
         ("patches/patch_refinegan_legacy.py", "rvc/lib/algorithm/synthesizers.py", "synthesizers.py - RefineGAN-Legacy vocoder support", "dir"),
         ("patches/patch_refinegan_legacy_infer.py", "rvc/infer/infer.py", "infer.py - RefineGAN-Legacy architecture detection", "dir"),
-        ("patches/patch_inference_progress.py", "rvc/infer/infer.py", "infer.py - batch inference progress tracking", "dir")
+        ("patches/patch_inference_progress.py", "rvc/infer/infer.py", "infer.py - batch inference progress tracking", "dir"),
+        ("patches/patch_stop_infer.py", "tabs/settings/sections/restart.py", "restart.py - cooperative inference cancel", "dir")
     ]
 
     # Validate patch order matches dependencies
