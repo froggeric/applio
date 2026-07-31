@@ -249,6 +249,8 @@ delete the dead two-process code + drop the flag. Self-contained plan + task bre
 - **`os._exit(N)` skips stdout flushing** - a preceding diagnostic `print` is lost (e.g.
   `rvc/train/train.py` sample-rate error). Recover via a line-buffered tee (`open(...,buffering=1)`)
   or `PYTHONUNBUFFERED=1`.
+- **Post-training SIGTERM**: `rvc/train/train.py` ends with `os._exit(...)` which orphans its persistent DataLoader workers; their teardown signals the launcher's process group (session leader via `setsid`) -> spurious SIGTERM. In single-process, `_handle_terminate` ignores SIGTERM (Cmd+Q still quits via `applicationShouldTerminate_`).
+- **Frozen module importability**: modules NOT in PyInstaller's traced graph (e.g. `rvc.lib.tools.process_log_parser` - nothing imports it) ship as DATA in `Contents/Resources`, NOT importable modules in `Contents/Frameworks`. A `from rvc... import ...` works in dev, fails (ImportError) frozen. Inline what you need into fork-owned code, or add to HIDDEN_IMPORTS. Check: `find dist/Applio.app/Contents/Frameworks -path "*<module>*"` (absent = not importable).
 - **Reproduce frozen-subprocess behavior without the GUI:** `dist/Applio.app/Contents/MacOS/Applio
   /tmp/script.py args` - entry `applio_launcher.py` dispatches to the script (CWD=bundle).
 - `ps -E -p <pid>` (macOS) dumps a frozen process's env - check inherited `APPLIO_*`/`PATH`.
@@ -337,6 +339,7 @@ delete the dead two-process code + drop the flag. Self-contained plan + task bre
 - CRITICAL: NSBox doesn't have `setFillColor_()` in PyObjC - use bordered style or layer-based background instead
 - `addSubview:positioned:relativeTo:` → `addSubview_positioned_relativeTo_` (NOT `addSubview_positioned_relative_`)
 - CRITICAL: any class used as an NSWindow/NSTableView delegate, dataSource, or NSNotificationCenter observer MUST be an NSObject subclass (`class X(NSObject)` + `alloc().initWith…_()` + `objc.super(X, self).init()`) - a plain Python class crashes on `conformsToProtocol:` (ProcessDashboardController hit this). Same pattern as MenuActionHandler/ApplioAppDelegate.
+- PyObjC NSTrackingArea in a frozen app: `NSTrackingActiveInActiveApp` may NOT deliver `mouseMovedWithEvent_` (the frozen app's "active" state is unreliable). Use `NSTrackingActiveAlways` + `window.setAcceptsMouseMovedEvents_(True)` for reliable hover/tracking on a custom NSView.
 - PyObjC preserves ObjC selector case - `-[NSColor CGColor]` is `.CGColor()`, not `.cgColor()`. Verify a name imports (`python -c "from AppKit import X"`) BEFORE adding it to the `try/except`-wrapped top-level AppKit import (L72-89) - a bad name silently flips `NATIVE_APIS_AVAILABLE=False` app-wide.
 
 **Progress window responsiveness:**
