@@ -45,6 +45,7 @@ from pathlib import Path
 _SCRIPT_PATH = os.path.abspath(__file__)
 _BACKUP_PATH = f"/tmp/{os.path.basename(_SCRIPT_PATH)}.backup"
 
+
 def _backup_script():
     """Backup this script to /tmp."""
     try:
@@ -53,6 +54,7 @@ def _backup_script():
             f.write(f"\n# Backup created at: {time.ctime()}\n")
     except Exception as e:
         print(f"WARNING: Failed to backup script: {e}")
+
 
 def _restore_script():
     """Restore this script from /tmp backup if it was deleted."""
@@ -67,12 +69,13 @@ def _restore_script():
                 content = f.read()
             # Remove backup timestamp line
             if "# Backup created at:" in content:
-                content = content[:content.rfind("\n# Backup created at:")]
+                content = content[: content.rfind("\n# Backup created at:")]
             with open(_SCRIPT_PATH, "w") as f:
                 f.write(content)
             print(f"Restored: {_SCRIPT_PATH}")
         except Exception as e:
             print(f"ERROR: Failed to restore script: {e}")
+
 
 # Register restore handler for exit
 atexit.register(_restore_script)
@@ -88,12 +91,14 @@ import PyInstaller.__main__
 APP_NAME = "Applio"
 BUILD_NUMBER = 7  # Increment for each build
 
+
 # Read version from the tracked assets/config_template.json first (the source of
 # truth at build time), falling back to a locally-generated assets/config.json.
 # config.json is gitignored and created at runtime by app.py, so reading it first
 # could embed a stale version from a developer's local file.
 def get_applio_version():
     import json
+
     for config_file in ("assets/config_template.json", "assets/config.json"):
         try:
             with open(config_file, "r") as f:
@@ -102,6 +107,7 @@ def get_applio_version():
         except Exception:
             continue
     return "3.6.0"
+
 
 APPLIO_VERSION = get_applio_version()
 ENTRY_POINT = "applio_launcher.py"
@@ -123,7 +129,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Build Applio macOS app",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
     # Lite mode is now the default - all user data stored externally
     parser.add_argument(
@@ -136,27 +142,23 @@ def parse_args():
         "--build-number",
         type=int,
         default=BUILD_NUMBER,
-        help=f"Build number (default: {BUILD_NUMBER})"
+        help=f"Build number (default: {BUILD_NUMBER})",
     )
     parser.add_argument(
-        "--dmg",
-        action="store_true",
-        help="Create DMG installer after build"
+        "--dmg", action="store_true", help="Create DMG installer after build"
     )
     parser.add_argument(
-        "--sign",
-        action="store_true",
-        help="Sign app with Developer ID certificate"
+        "--sign", action="store_true", help="Sign app with Developer ID certificate"
     )
     parser.add_argument(
         "--notarize",
         action="store_true",
-        help="Notarize app with Apple (requires --sign)"
+        help="Notarize app with Apple (requires --sign)",
     )
     parser.add_argument(
         "--models-installer",
         action="store_true",
-        help="Build standalone models installer app (bundles all models)"
+        help="Build standalone models installer app (bundles all models)",
     )
     parser.add_argument(
         "--keychain-profile",
@@ -177,16 +179,22 @@ def parse_args():
         help="team id (default: 46BZ85ALNS)",
     )
     parser.add_argument(
-        "--api-key", type=str, default=None,
+        "--api-key",
+        type=str,
+        default=None,
         help="path to App Store Connect API key (.p8) for notarytool (inline auth; CI-friendly). "
-             "If set, used instead of --keychain-profile.",
+        "If set, used instead of --keychain-profile.",
     )
     parser.add_argument(
-        "--api-key-id", type=str, default=None,
+        "--api-key-id",
+        type=str,
+        default=None,
         help="App Store Connect API Key ID (required with --api-key)",
     )
     parser.add_argument(
-        "--api-issuer", type=str, default=None,
+        "--api-issuer",
+        type=str,
+        default=None,
         help="App Store Connect Issuer ID (required with --api-key)",
     )
     return parser.parse_args()
@@ -212,7 +220,14 @@ if args.api_key:
     if not (args.api_key_id and args.api_issuer):
         print("ERROR: --api-key requires --api-key-id and --api-issuer")
         sys.exit(1)
-    _NOTARY_AUTH = ["--key", args.api_key, "--key-id", args.api_key_id, "--issuer", args.api_issuer]
+    _NOTARY_AUTH = [
+        "--key",
+        args.api_key,
+        "--key-id",
+        args.api_key_id,
+        "--issuer",
+        args.api_issuer,
+    ]
 else:
     _NOTARY_AUTH = ["--keychain-profile", KEYCHAIN_PROFILE]
 
@@ -225,7 +240,9 @@ else:
 CFBUNDLE_SHORT_VERSION = APPLIO_VERSION  # "3.6.3" (display version, ≤3 segments)
 _v = (APPLIO_VERSION.split(".") + ["0", "0", "0"])[:3]
 _major, _minor, _patch = (int(x) for x in _v)
-CFBUNDLE_VERSION = str(_major * 1_000_000 + _minor * 10_000 + _patch * 100 + args.build_number)
+CFBUNDLE_VERSION = str(
+    _major * 1_000_000 + _minor * 10_000 + _patch * 100 + args.build_number
+)
 # 3.6.3 build 5 → "3060305" | 3.6.4 build 1 → "3060401" | 4.0.0 build 1 → "4000001"
 
 # Validate arguments
@@ -274,9 +291,9 @@ def build_models_installer_app():
     # Count model files
     model_files = []
     for root, dirs, files in os.walk(models_dir):
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         for f in files:
-            if not f.startswith('.'):
+            if not f.startswith("."):
                 model_files.append(os.path.join(root, f))
 
     if not model_files:
@@ -319,16 +336,19 @@ def build_models_installer_app():
         print("Patching installer Info.plist...")
         try:
             import plistlib
-            with open(info_plist_path, 'rb') as f:
+
+            with open(info_plist_path, "rb") as f:
                 plist = plistlib.load(f)
 
-            plist['CFBundleShortVersionString'] = CFBUNDLE_SHORT_VERSION
-            plist['CFBundleVersion'] = CFBUNDLE_VERSION
-            plist['CFBundleDisplayName'] = "Applio Models Installer"
-            plist['CFBundleName'] = "Applio Models Installer"
-            plist['NSHumanReadableCopyright'] = f"Copyright © 2026 IAHispano. All rights reserved."
+            plist["CFBundleShortVersionString"] = CFBUNDLE_SHORT_VERSION
+            plist["CFBundleVersion"] = CFBUNDLE_VERSION
+            plist["CFBundleDisplayName"] = "Applio Models Installer"
+            plist["CFBundleName"] = "Applio Models Installer"
+            plist["NSHumanReadableCopyright"] = (
+                f"Copyright © 2026 IAHispano. All rights reserved."
+            )
 
-            with open(info_plist_path, 'wb') as f:
+            with open(info_plist_path, "wb") as f:
                 plistlib.dump(plist, f)
             print(f"  Info.plist patched (version: {VERSION})")
         except Exception as e:
@@ -338,9 +358,19 @@ def build_models_installer_app():
     if SIGN_APP:
         print("\nSigning installer app with Developer ID certificate...")
         result = subprocess.run(
-            ["codesign", "--force", "--deep", "--sign", DEVELOPER_IDENTITY,
-             "--options", "runtime", "--timestamp", installer_app_path],
-            capture_output=True, text=True
+            [
+                "codesign",
+                "--force",
+                "--deep",
+                "--sign",
+                DEVELOPER_IDENTITY,
+                "--options",
+                "runtime",
+                "--timestamp",
+                installer_app_path,
+            ],
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             print("  Installer app signed successfully.")
@@ -351,7 +381,8 @@ def build_models_installer_app():
         print("\nSigning installer app (ad-hoc)...")
         result = subprocess.run(
             ["codesign", "--force", "--deep", "--sign", "-", installer_app_path],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             print("  Installer app signed (ad-hoc).")
@@ -359,11 +390,15 @@ def build_models_installer_app():
             print(f"  WARNING: Ad-hoc signing failed: {result.stderr}")
 
     # Get app size
-    app_size = sum(
-        os.path.getsize(os.path.join(root, f))
-        for root, dirs, files in os.walk(installer_app_path)
-        for f in files
-    ) / 1024 / 1024
+    app_size = (
+        sum(
+            os.path.getsize(os.path.join(root, f))
+            for root, dirs, files in os.walk(installer_app_path)
+            for f in files
+        )
+        / 1024
+        / 1024
+    )
     print(f"\nInstaller app size: {app_size:.1f} MB")
 
     return installer_app_path
@@ -388,8 +423,6 @@ if MODELS_INSTALLER:
     sys.exit(0)
 
 
-
-
 # =================================================================
 # Merge upstream pretrains.json with macOS additions
 # =================================================================
@@ -411,7 +444,7 @@ def merge_pretrains():
 
     print("Loading macOS additions...")
     if os.path.exists(additions_path):
-        with open(additions_path, 'r', encoding='utf-8') as f:
+        with open(additions_path, "r", encoding="utf-8") as f:
             additions_data = json.load(f)
         print(f"  Found {len(additions_data)} macOS-specific models")
     else:
@@ -422,7 +455,7 @@ def merge_pretrains():
     merged_data = {**upstream_data, **additions_data}
 
     # Write merged file
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(merged_data, f, indent=2, ensure_ascii=False)
 
     print(f"Merged pretrains.json written with {len(merged_data)} models")
@@ -444,13 +477,11 @@ def download_pretraineds():
 
     print("Downloading pretrained models for full build...")
     result = subprocess.run(
-        [sys.executable, download_script],
-        capture_output=True,
-        text=True
+        [sys.executable, download_script], capture_output=True, text=True
     )
 
     # Print output
-    for line in result.stdout.strip().split('\n'):
+    for line in result.stdout.strip().split("\n"):
         if line:
             print(f"  {line}")
 
@@ -550,7 +581,7 @@ datas = [
     ("app.py", "."),
     ("macos_wrapper.py", "."),  # Spawned by applio_launcher.py
     ("STUDIO_PRODUCTION_GUIDE.html", "."),  # Help → Studio Production Guide
-    ("STUDIO_PRODUCTION_GUIDE.md", "."),     # Fallback if .html render unavailable
+    ("STUDIO_PRODUCTION_GUIDE.md", "."),  # Fallback if .html render unavailable
 ]
 
 # In lite mode, we need to handle rvc/ differently to exclude models
@@ -575,24 +606,28 @@ for lib in HIDDEN_IMPORTS:
     hidden_import_args.append(f"--hidden-import={lib}")
 
 # PyInstaller arguments
-pyinstaller_args = [
-    ENTRY_POINT,
-    "--name=Applio",
-    "--windowed",  # No console
-    "--noconfirm",
-    "--clean",
-    f"--icon={ICON_FILE}",
-    "--collect-all=torch",
-    "--collect-all=torchaudio",
-    "--collect-all=gradio",
-    "--collect-all=gradio_client",
-    "--collect-all=safehttpx",
-    "--collect-all=groovy",
-    "--collect-all=sounddevice",
-    "--target-arch=arm64",
-    "--osx-bundle-identifier=com.iahispano.applio",
-    "--additional-hooks-dir=hooks",  # Custom hooks to override broken contrib hooks
-] + add_data_args + hidden_import_args
+pyinstaller_args = (
+    [
+        ENTRY_POINT,
+        "--name=Applio",
+        "--windowed",  # No console
+        "--noconfirm",
+        "--clean",
+        f"--icon={ICON_FILE}",
+        "--collect-all=torch",
+        "--collect-all=torchaudio",
+        "--collect-all=gradio",
+        "--collect-all=gradio_client",
+        "--collect-all=safehttpx",
+        "--collect-all=groovy",
+        "--collect-all=sounddevice",
+        "--target-arch=arm64",
+        "--osx-bundle-identifier=com.iahispano.applio",
+        "--additional-hooks-dir=hooks",  # Custom hooks to override broken contrib hooks
+    ]
+    + add_data_args
+    + hidden_import_args
+)
 
 
 # =================================================================
@@ -620,6 +655,7 @@ def render_guide_html(repo_root=None):
         return
     try:
         import markdown as _md  # noqa
+
         with open(md, "r", encoding="utf-8") as f:
             body = _md.markdown(f.read(), extensions=["fenced_code", "tables"])
         doc = (
@@ -637,6 +673,7 @@ def render_guide_html(repo_root=None):
     except Exception as e:
         print(f"[build] markdown render failed ({e}); copying .md as fallback")
         import shutil
+
         shutil.copyfile(md, html)
 
 
@@ -665,7 +702,9 @@ def pre_build_patch():
     # Patch dependencies: patch_name -> list of patches that must run BEFORE it
     PATCH_DEPENDENCIES = {
         "patches/patch_subprocess_validation.py": ["patches/patch_process_tracking.py"],
-        "patches/patch_refinegan_legacy_train.py": ["patches/patch_refinegan_legacy_discriminator.py"],
+        "patches/patch_refinegan_legacy_train.py": [
+            "patches/patch_refinegan_legacy_discriminator.py"
+        ],
     }
 
     # Patches to apply: (patcher_path, source_file, description, patcher_type)
@@ -673,31 +712,146 @@ def pre_build_patch():
     # IMPORTANT: Order matters! Process tracking MUST come before subprocess validation.
     patches_to_apply = [
         # Directory-based patchers (pass dirname)
-        ("patches/patch_data_paths.py", "core.py", "core.py - file-based path resolution", "dir"),
-        ("patches/patch_preflight_validation.py", "core.py", "core.py - pre-flight dataset validation", "dir"),
-        ("patches/patch_dataset_paths.py", "core.py", "core.py + tabs/train/train.py - dataset path absolute resolution", "dir"),
-        ("patches/patch_download_paths.py", "tabs/download/download.py", "tabs/download/download.py - custom-pretrained download data-path resolution", "dir"),
-        ("patches/patch_process_tracking.py", "core.py", "core.py - process tracking for subprocesses", "dir"),  # MUST be before subprocess_validation
-        ("patches/patch_subprocess_validation.py", "core.py", "core.py - subprocess validation", "dir"),
-        ("patches/patch_custom_pretrained_paths.py", "core.py", "core.py - custom pretrained path resolution", "dir"),
-        ("patches/patch_train_paths.py", "rvc/train/train.py", "rvc/train/train.py - file-based path resolution", "dir"),
-        ("patches/patch_mute_paths.py", "rvc/train/extract/preparing_files.py", "preparing_files.py - mute file paths for frozen app", "dir"),
-        ("patches/patch_pretrained_selector.py", "rvc/lib/tools/pretrained_selector.py", "pretrained_selector.py - BASE_PATH resolution", "dir"),
-        ("patches/patch_f0_model_paths.py", "rvc/lib/predictors/f0.py", "f0.py - absolute model paths for frozen app", "dir"),
+        (
+            "patches/patch_data_paths.py",
+            "core.py",
+            "core.py - file-based path resolution",
+            "dir",
+        ),
+        (
+            "patches/patch_preflight_validation.py",
+            "core.py",
+            "core.py - pre-flight dataset validation",
+            "dir",
+        ),
+        (
+            "patches/patch_dataset_paths.py",
+            "core.py",
+            "core.py + tabs/train/train.py - dataset path absolute resolution",
+            "dir",
+        ),
+        (
+            "patches/patch_download_paths.py",
+            "tabs/download/download.py",
+            "tabs/download/download.py - custom-pretrained download data-path resolution",
+            "dir",
+        ),
+        (
+            "patches/patch_process_tracking.py",
+            "core.py",
+            "core.py - process tracking for subprocesses",
+            "dir",
+        ),  # MUST be before subprocess_validation
+        (
+            "patches/patch_subprocess_validation.py",
+            "core.py",
+            "core.py - subprocess validation",
+            "dir",
+        ),
+        (
+            "patches/patch_custom_pretrained_paths.py",
+            "core.py",
+            "core.py - custom pretrained path resolution",
+            "dir",
+        ),
+        (
+            "patches/patch_train_paths.py",
+            "rvc/train/train.py",
+            "rvc/train/train.py - file-based path resolution",
+            "dir",
+        ),
+        (
+            "patches/patch_mute_paths.py",
+            "rvc/train/extract/preparing_files.py",
+            "preparing_files.py - mute file paths for frozen app",
+            "dir",
+        ),
+        (
+            "patches/patch_pretrained_selector.py",
+            "rvc/lib/tools/pretrained_selector.py",
+            "pretrained_selector.py - BASE_PATH resolution",
+            "dir",
+        ),
+        (
+            "patches/patch_f0_model_paths.py",
+            "rvc/lib/predictors/f0.py",
+            "f0.py - absolute model paths for frozen app",
+            "dir",
+        ),
         # File-based patchers (pass full file path)
-        ("patches/patch_loading_html.py", "assets/loading.html", "assets/loading.html - dynamic version in footer", "dir"),  # "dir" so patcher gets "assets" dir (patch_all expects dir/root, not the file path)
-        ("patches/patch_version_checker.py", "assets/version_checker.py", "assets/version_checker.py - read current version from bundle, not stale data-dir config", "dir"),
-        ("patches/patch_train_44100.py", "tabs/train/train.py", "tabs/train/train.py - 44100 Hz support", "file"),
-        ("patches/patch_multiprocessing.py", "rvc/train/extract/extract.py", "extract.py - multiprocessing safety", "file"),
-        ("patches/patch_extract_error_logging.py", "rvc/train/extract/extract.py", "extract.py - file-based error logging", "dir"),
-        ("patches/patch_preprocess_error_logging.py", "rvc/train/preprocess/preprocess.py", "preprocess.py - file-based error logging", "dir"),
+        (
+            "patches/patch_loading_html.py",
+            "assets/loading.html",
+            "assets/loading.html - dynamic version in footer",
+            "dir",
+        ),  # "dir" so patcher gets "assets" dir (patch_all expects dir/root, not the file path)
+        (
+            "patches/patch_version_checker.py",
+            "assets/version_checker.py",
+            "assets/version_checker.py - read current version from bundle, not stale data-dir config",
+            "dir",
+        ),
+        (
+            "patches/patch_train_44100.py",
+            "tabs/train/train.py",
+            "tabs/train/train.py - 44100 Hz support",
+            "file",
+        ),
+        (
+            "patches/patch_multiprocessing.py",
+            "rvc/train/extract/extract.py",
+            "extract.py - multiprocessing safety",
+            "file",
+        ),
+        (
+            "patches/patch_extract_error_logging.py",
+            "rvc/train/extract/extract.py",
+            "extract.py - file-based error logging",
+            "dir",
+        ),
+        (
+            "patches/patch_preprocess_error_logging.py",
+            "rvc/train/preprocess/preprocess.py",
+            "preprocess.py - file-based error logging",
+            "dir",
+        ),
         # Discriminator patch - must come FIRST before train patch
-        ("patches/patch_refinegan_legacy_discriminator.py", "rvc/lib/algorithm/discriminators.py", "discriminators.py - DiscriminatorRLegacy support", "dir"),
-        ("patches/patch_refinegan_legacy_train.py", "rvc/train/train.py", "train.py - RefineGAN-Legacy architecture detection (UPDATED)", "dir"),
-        ("patches/patch_refinegan_legacy.py", "rvc/lib/algorithm/synthesizers.py", "synthesizers.py - RefineGAN-Legacy vocoder support", "dir"),
-        ("patches/patch_refinegan_legacy_infer.py", "rvc/infer/infer.py", "infer.py - RefineGAN-Legacy architecture detection", "dir"),
-        ("patches/patch_inference_progress.py", "rvc/infer/infer.py", "infer.py - batch inference progress tracking", "dir"),
-        ("patches/patch_stop_infer.py", "tabs/settings/sections/restart.py", "restart.py - cooperative inference cancel", "dir")
+        (
+            "patches/patch_refinegan_legacy_discriminator.py",
+            "rvc/lib/algorithm/discriminators.py",
+            "discriminators.py - DiscriminatorRLegacy support",
+            "dir",
+        ),
+        (
+            "patches/patch_refinegan_legacy_train.py",
+            "rvc/train/train.py",
+            "train.py - RefineGAN-Legacy architecture detection (UPDATED)",
+            "dir",
+        ),
+        (
+            "patches/patch_refinegan_legacy.py",
+            "rvc/lib/algorithm/synthesizers.py",
+            "synthesizers.py - RefineGAN-Legacy vocoder support",
+            "dir",
+        ),
+        (
+            "patches/patch_refinegan_legacy_infer.py",
+            "rvc/infer/infer.py",
+            "infer.py - RefineGAN-Legacy architecture detection",
+            "dir",
+        ),
+        (
+            "patches/patch_inference_progress.py",
+            "rvc/infer/infer.py",
+            "infer.py - batch inference progress tracking",
+            "dir",
+        ),
+        (
+            "patches/patch_stop_infer.py",
+            "tabs/settings/sections/restart.py",
+            "restart.py - cooperative inference cancel",
+            "dir",
+        ),
     ]
 
     # Validate patch order matches dependencies
@@ -711,8 +865,12 @@ def pre_build_patch():
                     if required_idx > patch_idx:
                         print(f"  ERROR: Patch order violation!")
                         print(f"    {required} must come before {patch_name}")
-                        print(f"    Current order: {required} at {required_idx}, {patch_name} at {patch_idx}")
-                        raise ValueError("Patch order violates dependencies. Fix the patches_to_apply order.")
+                        print(
+                            f"    Current order: {required} at {required_idx}, {patch_name} at {patch_idx}"
+                        )
+                        raise ValueError(
+                            "Patch order violates dependencies. Fix the patches_to_apply order."
+                        )
 
     patched_files = {}  # Maps source_file -> original content
 
@@ -740,12 +898,10 @@ def pre_build_patch():
         # Run the patcher
         print(f"  Patching: {description}")
         result = subprocess.run(
-            [sys.executable, patcher_path, patcher_arg],
-            capture_output=True,
-            text=True
+            [sys.executable, patcher_path, patcher_arg], capture_output=True, text=True
         )
 
-        for line in result.stdout.strip().split('\n'):
+        for line in result.stdout.strip().split("\n"):
             if line:
                 print(f"    {line}")
 
@@ -792,14 +948,19 @@ print("\nStarting PyInstaller build...")
 PyInstaller.__main__.run(pyinstaller_args)
 
 # Write build_info.json for runtime version reading
-build_info_path = os.path.join("dist", f"{APP_NAME}.app", "Contents", "Resources", "build_info.json")
+build_info_path = os.path.join(
+    "dist", f"{APP_NAME}.app", "Contents", "Resources", "build_info.json"
+)
 os.makedirs(os.path.dirname(build_info_path), exist_ok=True)
 with open(build_info_path, "w", encoding="utf-8") as f:
-    json.dump({
-        "version": APPLIO_VERSION,
-        "build_number": BUILD_NUMBER,
-        "full_version": VERSION
-    }, f)
+    json.dump(
+        {
+            "version": APPLIO_VERSION,
+            "build_number": BUILD_NUMBER,
+            "full_version": VERSION,
+        },
+        f,
+    )
 print(f"  Wrote build_info.json: version={VERSION}")
 
 # RESTORE SOURCE FILES AFTER BUILD
@@ -845,7 +1006,9 @@ def clean_bundled_models():
                     shutil.rmtree(item)
                     print(f"  Removed: {item.relative_to(frameworks_path)}/")
 
-            print(f"  Cleaned: {dir_path.relative_to(frameworks_path)} ({dir_size / 1024 / 1024:.1f} MB)")
+            print(
+                f"  Cleaned: {dir_path.relative_to(frameworks_path)} ({dir_size / 1024 / 1024:.1f} MB)"
+            )
 
     print(f"\n  Total freed: {total_freed / 1024 / 1024:.1f} MB")
 
@@ -882,7 +1045,9 @@ def post_build_cleanup():
                     except Exception as e:
                         print(f"    WARNING: Failed to remove {pycache_dir}: {e}")
             if pycache_count > 0:
-                print(f"    Removed {pycache_count} __pycache__ directories from {os.path.basename(base_path)}")
+                print(
+                    f"    Removed {pycache_count} __pycache__ directories from {os.path.basename(base_path)}"
+                )
 
     return True
 
@@ -900,39 +1065,54 @@ if os.path.exists(info_plist_path):
     print("\nPatching Info.plist for Metadata...")
     try:
         import plistlib
-        with open(info_plist_path, 'rb') as f:
+
+        with open(info_plist_path, "rb") as f:
             plist = plistlib.load(f)
 
         # Permissions & Usage Descriptions
         # Note: NSMicrophoneUsageDescription removed - wrapper doesn't need direct mic access.
         # Gradio runs in browser via pywebview, browser handles its own mic permissions.
-        plist['NSCameraUsageDescription'] = "Applio needs camera access for visual processing."
-        plist['NSDesktopFolderUsageDescription'] = "Applio needs desktop access to save and load models."
-        plist['NSDocumentsFolderUsageDescription'] = "Applio needs documents access to save audio exports."
-        plist['NSDownloadsFolderUsageDescription'] = "Applio needs downloads access to retrieve models."
-        plist['NSAppleEventsUsageDescription'] = "Applio needs apple events access for automation."
+        plist["NSCameraUsageDescription"] = (
+            "Applio needs camera access for visual processing."
+        )
+        plist["NSDesktopFolderUsageDescription"] = (
+            "Applio needs desktop access to save and load models."
+        )
+        plist["NSDocumentsFolderUsageDescription"] = (
+            "Applio needs documents access to save audio exports."
+        )
+        plist["NSDownloadsFolderUsageDescription"] = (
+            "Applio needs downloads access to retrieve models."
+        )
+        plist["NSAppleEventsUsageDescription"] = (
+            "Applio needs apple events access for automation."
+        )
 
         # Branding with version. NOTE: CFBundleVersion / CFBundleShortVersionString
         # must be Apple-valid (≤3 numeric segments) for notarization — use the
         # derived constants, NOT the 4-segment display VERSION.
-        plist['CFBundleShortVersionString'] = CFBUNDLE_SHORT_VERSION
-        plist['CFBundleVersion'] = CFBUNDLE_VERSION
-        plist['NSHumanReadableCopyright'] = f"Copyright © 2026 IAHispano. All rights reserved. Build {VERSION}"
+        plist["CFBundleShortVersionString"] = CFBUNDLE_SHORT_VERSION
+        plist["CFBundleVersion"] = CFBUNDLE_VERSION
+        plist["NSHumanReadableCopyright"] = (
+            f"Copyright © 2026 IAHispano. All rights reserved. Build {VERSION}"
+        )
 
         # High-DPI support
-        plist['NSHighResolutionCapable'] = True
+        plist["NSHighResolutionCapable"] = True
 
         # Minimum macOS version (arm64 build; PyTorch MPS + the frameworks we
         # bundle require at least Monterey). Lets Gatekeeper refuse a launch on
         # an unsupported OS with a clear message instead of a cryptic crash.
-        plist['LSMinimumSystemVersion'] = "12.0.0"
+        plist["LSMinimumSystemVersion"] = "12.0.0"
 
         # Prevent multiple app instances (defense in depth for subprocess handling)
-        plist['LSMultipleInstancesProhibited'] = True
+        plist["LSMultipleInstancesProhibited"] = True
 
-        with open(info_plist_path, 'wb') as f:
+        with open(info_plist_path, "wb") as f:
             plistlib.dump(plist, f)
-        print(f"Info.plist patched successfully (version: {VERSION}, build: {CFBUNDLE_VERSION}).")
+        print(
+            f"Info.plist patched successfully (version: {VERSION}, build: {CFBUNDLE_VERSION})."
+        )
 
     except Exception as e:
         print(f"Failed to patch Info.plist: {e}")
@@ -946,11 +1126,45 @@ else:
 # Extensions that are never Mach-O — skip the `file` call entirely (speeds up
 # discovery of the ~thousands of files in a 1.6GB PyInstaller bundle).
 _MACHO_DATA_EXTS = {
-    ".py", ".pyc", ".pyo", ".pyd", ".json", ".txt", ".plist", ".html", ".htm",
-    ".css", ".js", ".map", ".png", ".jpg", ".jpeg", ".ico", ".gif", ".svg",
-    ".ttf", ".otf", ".woff", ".woff2", ".md", ".toml", ".cfg", ".ini",
-    ".yaml", ".yml", ".csv", ".npy", ".npz", ".pt", ".pth", ".ckpt", ".bin",
-    ".onnx", ".zip", ".a", ".la",
+    ".py",
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".json",
+    ".txt",
+    ".plist",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".map",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".ico",
+    ".gif",
+    ".svg",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".md",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".npy",
+    ".npz",
+    ".pt",
+    ".pth",
+    ".ckpt",
+    ".bin",
+    ".onnx",
+    ".zip",
+    ".a",
+    ".la",
 }
 
 
@@ -1002,8 +1216,11 @@ def _repair_python_framework_symlinks(app_path):
         versions_dir = Path(app_path) / base / "Python.framework" / "Versions"
         if not versions_dir.exists():
             continue
-        reals = [v.name for v in versions_dir.iterdir()
-                 if v.is_dir() and v.name.replace(".", "").isdigit()]
+        reals = [
+            v.name
+            for v in versions_dir.iterdir()
+            if v.is_dir() and v.name.replace(".", "").isdigit()
+        ]
         if not reals:
             continue
         current = versions_dir / "Current"
@@ -1022,13 +1239,24 @@ def sign_app():
         print("\nSigning application (ad-hoc for local use)...")
         if os.path.exists(ENTITLEMENTS_PATH):
             result = subprocess.run(
-                ["codesign", "--force", "--deep", "--sign", "-", "--entitlements", ENTITLEMENTS_PATH, app_path],
-                capture_output=True, text=True
+                [
+                    "codesign",
+                    "--force",
+                    "--deep",
+                    "--sign",
+                    "-",
+                    "--entitlements",
+                    ENTITLEMENTS_PATH,
+                    app_path,
+                ],
+                capture_output=True,
+                text=True,
             )
         else:
             result = subprocess.run(
                 ["codesign", "--force", "--deep", "--sign", "-", app_path],
-                capture_output=True, text=True
+                capture_output=True,
+                text=True,
             )
 
         if result.returncode == 0:
@@ -1043,7 +1271,8 @@ def sign_app():
     # Check if certificate is available
     result = subprocess.run(
         ["security", "find-identity", "-v", "-p", "codesigning"],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     if TEAM_ID not in result.stdout:
         print(f"ERROR: Developer ID certificate not found for team {TEAM_ID}")
@@ -1063,10 +1292,12 @@ def sign_app():
     # Step 1: strip existing (PyInstaller ad-hoc) signatures — idempotent re-runs.
     print("  Removing existing signatures...")
     for b in binaries:
-        subprocess.run(["codesign", "--remove-signature", b],
-                       capture_output=True, text=True)
-    subprocess.run(["codesign", "--remove-signature", app_path],
-                   capture_output=True, text=True)
+        subprocess.run(
+            ["codesign", "--remove-signature", b], capture_output=True, text=True
+        )
+    subprocess.run(
+        ["codesign", "--remove-signature", app_path], capture_output=True, text=True
+    )
 
     # Step 2: sign every leaf Mach-O inside-out (deepest-first) with hardened
     # runtime + timestamp. NO entitlements on leaf binaries — entitlements apply
@@ -1076,9 +1307,18 @@ def sign_app():
     signed = 0
     for b in binaries:
         r = subprocess.run(
-            ["codesign", "--force", "--sign", DEVELOPER_IDENTITY,
-             "--options", "runtime", "--timestamp", b],
-            capture_output=True, text=True,
+            [
+                "codesign",
+                "--force",
+                "--sign",
+                DEVELOPER_IDENTITY,
+                "--options",
+                "runtime",
+                "--timestamp",
+                b,
+            ],
+            capture_output=True,
+            text=True,
         )
         if r.returncode == 0:
             signed += 1
@@ -1090,10 +1330,20 @@ def sign_app():
     # --deep is deprecated for signing; all nested code is already sealed above.
     print("  Signing app bundle...")
     result = subprocess.run(
-        ["codesign", "--force", "--sign", DEVELOPER_IDENTITY,
-         "--entitlements", ENTITLEMENTS_PATH,
-         "--options", "runtime", "--timestamp", app_path],
-        capture_output=True, text=True,
+        [
+            "codesign",
+            "--force",
+            "--sign",
+            DEVELOPER_IDENTITY,
+            "--entitlements",
+            ENTITLEMENTS_PATH,
+            "--options",
+            "runtime",
+            "--timestamp",
+            app_path,
+        ],
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         print(f"ERROR: Bundle signing failed: {result.stderr}")
@@ -1104,9 +1354,17 @@ def sign_app():
     # notarize step). --deep IS valid for verification (only signing deprecated it).
     print("  Verifying signature (strict)...")
     verify = subprocess.run(
-        ["codesign", "--verify", "--all-architectures", "--deep", "--strict",
-         "--verbose=2", app_path],
-        capture_output=True, text=True,
+        [
+            "codesign",
+            "--verify",
+            "--all-architectures",
+            "--deep",
+            "--strict",
+            "--verbose=2",
+            app_path,
+        ],
+        capture_output=True,
+        text=True,
     )
     if verify.returncode != 0:
         print(f"ERROR: codesign verification failed:\n{verify.stderr}")
@@ -1117,7 +1375,8 @@ def sign_app():
     # becomes "Notarized Developer ID" only after stapling).
     spctl = subprocess.run(
         ["spctl", "-vvv", "--assess", "--type", "execute", app_path],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     print(f"  spctl: {((spctl.stdout or '') + ' ' + (spctl.stderr or '')).strip()}")
     return True
@@ -1158,7 +1417,9 @@ def create_dmg():
     # breaking the framework's signature seal → notarization rejects the DMG with
     # "The signature of the binary is invalid" on the Python framework paths.
     print("  Preparing DMG contents...")
-    shutil.copytree(app_path, os.path.join(dmg_folder, f"{APP_NAME}.app"), symlinks=True)
+    shutil.copytree(
+        app_path, os.path.join(dmg_folder, f"{APP_NAME}.app"), symlinks=True
+    )
 
     # Create symbolic link to Applications folder
     applications_link = os.path.join(dmg_folder, "Applications")
@@ -1167,9 +1428,20 @@ def create_dmg():
     # Create DMG using hdiutil
     print("  Creating DMG image...")
     result = subprocess.run(
-        ["hdiutil", "create", "-volname", APP_NAME, "-srcfolder", dmg_folder,
-         "-ov", "-format", "UDZO", temp_dmg],
-        capture_output=True, text=True
+        [
+            "hdiutil",
+            "create",
+            "-volname",
+            APP_NAME,
+            "-srcfolder",
+            dmg_folder,
+            "-ov",
+            "-format",
+            "UDZO",
+            temp_dmg,
+        ],
+        capture_output=True,
+        text=True,
     )
 
     # Clean up temp folder
@@ -1202,10 +1474,13 @@ def _notarytool_submit(artifact, timeout=7200):
     Returns True only on `status: Accepted`. Auth comes from the module-level
     `_NOTARY_AUTH` (inline API key for CI, or keychain profile for local)."""
     import re
+
     print(f"  notarytool submit {artifact} ...")
     r = subprocess.run(
         ["xcrun", "notarytool", "submit", artifact] + _NOTARY_AUTH + ["--wait"],
-        capture_output=True, text=True, timeout=timeout,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
     out = (r.stdout or "") + (r.stderr or "")
     print(out)
@@ -1217,8 +1492,11 @@ def _notarytool_submit(artifact, timeout=7200):
     if m:
         sub_id = m.group(1)
         log_path = f"/tmp/notary-{os.path.basename(artifact)}-{sub_id}.json"
-        subprocess.run(["xcrun", "notarytool", "log", sub_id] + _NOTARY_AUTH + [log_path],
-                       capture_output=True, text=True)
+        subprocess.run(
+            ["xcrun", "notarytool", "log", sub_id] + _NOTARY_AUTH + [log_path],
+            capture_output=True,
+            text=True,
+        )
         try:
             with open(log_path) as f:
                 print("=== NOTARIZATION LOG ===\n" + f.read())
@@ -1229,13 +1507,15 @@ def _notarytool_submit(artifact, timeout=7200):
 
 def _staple(artifact):
     """Staple the notarization ticket and validate it. Returns False on failure."""
-    sr = subprocess.run(["xcrun", "stapler", "staple", artifact],
-                        capture_output=True, text=True)
+    sr = subprocess.run(
+        ["xcrun", "stapler", "staple", artifact], capture_output=True, text=True
+    )
     if sr.returncode != 0:
         print(f"ERROR: staple failed for {artifact}: {sr.stderr}")
         return False
-    vr = subprocess.run(["xcrun", "stapler", "validate", artifact],
-                        capture_output=True, text=True)
+    vr = subprocess.run(
+        ["xcrun", "stapler", "validate", artifact], capture_output=True, text=True
+    )
     if vr.returncode != 0:
         print(f"ERROR: stapler validate failed for {artifact}: {vr.stderr}")
         return False
@@ -1248,7 +1528,8 @@ def _sign_dmg(path):
     hardened runtime / entitlements — just --sign --timestamp."""
     r = subprocess.run(
         ["codesign", "--force", "--sign", DEVELOPER_IDENTITY, "--timestamp", path],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         print(f"ERROR: DMG signing failed: {r.stderr}")
@@ -1265,29 +1546,41 @@ def _final_verify(app, dmg):
     ok = True
 
     # --- .app: spctl (Notarized Developer ID) + codesign deep + stapler validate ---
-    sp = subprocess.run(["spctl", "-vvv", "--assess", "--type", "execute", app],
-                        capture_output=True, text=True)
+    sp = subprocess.run(
+        ["spctl", "-vvv", "--assess", "--type", "execute", app],
+        capture_output=True,
+        text=True,
+    )
     out = ((sp.stdout or "") + " " + (sp.stderr or "")).strip()
     print(f"  spctl {os.path.basename(app)}: {out}")
     if sp.returncode != 0 or "Notarized Developer ID" not in out:
         print(f"ERROR: {app} is not Notarized Developer ID.")
         ok = False
-    cs = subprocess.run(["codesign", "-vvv", "--deep", "--strict", app],
-                        capture_output=True, text=True)
-    print(f"  codesign {os.path.basename(app)}: {(cs.stderr or cs.stdout or '').strip()}")
+    cs = subprocess.run(
+        ["codesign", "-vvv", "--deep", "--strict", app], capture_output=True, text=True
+    )
+    print(
+        f"  codesign {os.path.basename(app)}: {(cs.stderr or cs.stdout or '').strip()}"
+    )
     if cs.returncode != 0:
         ok = False
-    st = subprocess.run(["xcrun", "stapler", "validate", app],
-                        capture_output=True, text=True)
-    print(f"  stapler validate {os.path.basename(app)}: {(st.stdout or st.stderr or '').strip()}")
+    st = subprocess.run(
+        ["xcrun", "stapler", "validate", app], capture_output=True, text=True
+    )
+    print(
+        f"  stapler validate {os.path.basename(app)}: {(st.stdout or st.stderr or '').strip()}"
+    )
     if st.returncode != 0:
         ok = False
 
     # --- .dmg: stapler validate ONLY (spctl on a disk image is not meaningful) ---
     if dmg and os.path.exists(dmg):
-        sd = subprocess.run(["xcrun", "stapler", "validate", dmg],
-                            capture_output=True, text=True)
-        print(f"  stapler validate {os.path.basename(dmg)}: {(sd.stdout or sd.stderr or '').strip()}")
+        sd = subprocess.run(
+            ["xcrun", "stapler", "validate", dmg], capture_output=True, text=True
+        )
+        print(
+            f"  stapler validate {os.path.basename(dmg)}: {(sd.stdout or sd.stderr or '').strip()}"
+        )
         if sd.returncode != 0:
             print(f"ERROR: {dmg} stapler validate failed.")
             ok = False
@@ -1295,7 +1588,9 @@ def _final_verify(app, dmg):
     if not ok:
         print("ERROR: final verification failed.")
         sys.exit(1)
-    print("  All artifacts verified (.app: Notarized Developer ID; .dmg: staple validated).")
+    print(
+        "  All artifacts verified (.app: Notarized Developer ID; .dmg: staple validated)."
+    )
 
 
 # ---- Release pipeline --------------------------------------------------------
@@ -1353,9 +1648,13 @@ if os.path.exists(app_path):
     print("=" * 60)
     print(f"  Version:    {VERSION}")
     print(f"  Mode:       LITE (user data stored externally)")
-    print(f"  Signed:     {'Yes (Developer ID)' if SIGN_APP and sign_success else 'Ad-hoc' if sign_success else 'No'}")
+    print(
+        f"  Signed:     {'Yes (Developer ID)' if SIGN_APP and sign_success else 'Ad-hoc' if sign_success else 'No'}"
+    )
     print(f"  Location:   {app_path}")
-    print(f"  Size:       {app_size / 1024 / 1024:.1f} MB ({app_size / 1024 / 1024 / 1024:.2f} GB)")
+    print(
+        f"  Size:       {app_size / 1024 / 1024:.1f} MB ({app_size / 1024 / 1024 / 1024:.2f} GB)"
+    )
 
     if dmg_path:
         dmg_size = os.path.getsize(dmg_path) / 1024 / 1024

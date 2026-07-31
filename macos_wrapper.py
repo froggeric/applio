@@ -27,8 +27,6 @@ import signal
 import datetime
 import json
 import logging
-import urllib.request
-import urllib.error
 import subprocess
 import webbrowser
 
@@ -47,6 +45,7 @@ import webbrowser
 #   - Normal Dock icon (default)
 #   - Standard macOS app behavior
 
+
 def _configure_activation_policy():
     """No-op in single-process mode.
 
@@ -55,6 +54,7 @@ def _configure_activation_policy():
     with the other bootstrap steps.
     """
     return
+
 
 # Called from start_gui() BEFORE `import webview` (activation-policy ordering
 # is load-bearing; see start_gui).
@@ -69,6 +69,7 @@ def _configure_activation_policy():
 # functions below are retained as no-op stubs because start_gui() calls them in
 # order with the other bootstrap steps (see each function's docstring).
 
+
 def _patch_pywebview_activation_policy():
     """No-op in single-process mode.
 
@@ -79,6 +80,7 @@ def _patch_pywebview_activation_policy():
     """
     return
 
+
 def _unpatch_pywebview_activation_policy():
     """No-op in single-process mode.
 
@@ -88,6 +90,7 @@ def _unpatch_pywebview_activation_policy():
     """
     return
 
+
 # Applied from start_gui() BEFORE `import webview` (see start_gui).
 
 # macOS native APIs for preferences and dialogs
@@ -96,6 +99,7 @@ try:
     from Foundation import NSUserDefaults, NSURL
     from AppKit import NSOpenPanel, NSWorkspace, NSModalResponseOK
     from PyObjCTools import AppHelper
+
     NATIVE_APIS_AVAILABLE = True
 except ImportError:
     NATIVE_APIS_AVAILABLE = False
@@ -127,6 +131,7 @@ webview = None
 # Version is read from build_info.json at runtime (written by build_macos.py at build time)
 # This ensures version consistency without manual synchronization.
 
+
 def _get_version_info():
     """Read the full build version from build_info.json (written by build_macos.py).
 
@@ -137,6 +142,7 @@ def _get_version_info():
     (e.g. '3.6.3.5'); fall back to 'version', then the upstream config version.
     """
     import json
+
     for _rel in ("build_info.json", os.path.join("assets", "build_info.json")):
         _candidate = os.path.join(BASE_PATH, _rel)
         try:
@@ -156,6 +162,7 @@ def _get_version_info():
             continue
     return "3.6.3"
 
+
 VERSION = _get_version_info()
 GITHUB_REPO = "froggeric/applio-macOS-native-app"
 RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
@@ -168,6 +175,7 @@ API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 PROCESS_STATE_FILE = None  # Set after DATA_PATH is known
 
+
 def _get_process_state_path():
     """Get path to active_processes.json (lazy initialization)."""
     global PROCESS_STATE_FILE
@@ -176,10 +184,12 @@ def _get_process_state_path():
         PROCESS_STATE_FILE = os.path.join(data_path, ".applio", "active_processes.json")
     return PROCESS_STATE_FILE
 
+
 def _ensure_process_state_dir():
     """Ensure the .applio directory exists."""
     state_path = _get_process_state_path()
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
+
 
 def read_active_processes() -> dict:
     """Read the active processes state file."""
@@ -192,6 +202,7 @@ def read_active_processes() -> dict:
     except (json.JSONDecodeError, IOError):
         return {"version": 1, "processes": {}}
 
+
 def write_active_processes(state: dict):
     """Write the active processes state file."""
     _ensure_process_state_dir()
@@ -202,6 +213,7 @@ def write_active_processes(state: dict):
         json.dump(state, f, indent=2)
     os.rename(temp_path, state_path)
 
+
 def write_process(process_type: str, pid: int, **metadata):
     """Register a process in active_processes.json."""
     state = read_active_processes()
@@ -209,10 +221,11 @@ def write_process(process_type: str, pid: int, **metadata):
         "pid": pid,
         "started_at": datetime.datetime.now().isoformat(),
         "status": "running",
-        **metadata
+        **metadata,
     }
     write_active_processes(state)
     logging.info(f"[ProcessTracker] Registered {process_type} with PID {pid}")
+
 
 def clear_process(process_type: str):
     """Remove a process from active_processes.json."""
@@ -223,6 +236,7 @@ def clear_process(process_type: str):
         write_active_processes(state)
         logging.info(f"[ProcessTracker] Cleared {process_type} (was PID {old_pid})")
 
+
 def update_process_status(process_type: str, status: str):
     """Update status of a tracked process."""
     state = read_active_processes()
@@ -230,6 +244,7 @@ def update_process_status(process_type: str, status: str):
         state["processes"][process_type]["status"] = status
         write_active_processes(state)
         logging.info(f"[ProcessTracker] {process_type} status: {status}")
+
 
 def has_active_processes() -> bool:
     """Check if any processes are currently active."""
@@ -239,6 +254,7 @@ def has_active_processes() -> bool:
             # Verify process still exists
             try:
                 import psutil
+
                 if psutil.pid_exists(info["pid"]):
                     return True
             except ImportError:
@@ -250,6 +266,7 @@ def has_active_processes() -> bool:
                     pass
     return False
 
+
 def get_active_process_list() -> list:
     """Get list of active processes with their info."""
     state = read_active_processes()
@@ -258,11 +275,13 @@ def get_active_process_list() -> list:
         if info and info.get("pid"):
             try:
                 import psutil
+
                 if psutil.pid_exists(info["pid"]):
                     active.append({"type": ptype, **info})
             except (ImportError, ProcessLookupError):
                 pass
     return active
+
 
 class ProcessController:
     """Control tracked processes via POSIX signals."""
@@ -332,13 +351,15 @@ class ProcessController:
 
 # Global references to prevent garbage collection
 _main_window_ref = None
-_launcher_ref = None    # Launcher handle exposed by start_gui() for on_window_closing (Phase 2)
+_launcher_ref = (
+    None  # Launcher handle exposed by start_gui() for on_window_closing (Phase 2)
+)
 
 
 # Return codes for close confirmation dialog
-CLOSE_QUIT = 1       # Terminate all and exit
+CLOSE_QUIT = 1  # Terminate all and exit
 CLOSE_KEEP_RUNNING = 2  # Hide window, keep processes running
-CLOSE_CANCEL = 3     # Cancel close, keep window open
+CLOSE_CANCEL = 3  # Cancel close, keep window open
 
 
 def show_close_confirmation() -> int:
@@ -352,17 +373,24 @@ def show_close_confirmation() -> int:
     if not NATIVE_APIS_AVAILABLE:
         return CLOSE_QUIT  # No native APIs, proceed with exit
 
-    from AppKit import NSAlert, NSAlertStyleWarning, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn
+    from AppKit import (
+        NSAlert,
+        NSAlertStyleWarning,
+        NSAlertFirstButtonReturn,
+        NSAlertSecondButtonReturn,
+    )
 
     active = get_active_process_list()
     if not active:
         return CLOSE_QUIT  # No active processes, allow close
 
     # Build readable process list
-    process_info = "\n".join([
-        f"• {p.get('type', 'Unknown').capitalize()}: {p.get('model_name', 'Unknown model')}"
-        for p in active[:3]
-    ])
+    process_info = "\n".join(
+        [
+            f"• {p.get('type', 'Unknown').capitalize()}: {p.get('model_name', 'Unknown model')}"
+            for p in active[:3]
+        ]
+    )
     if len(active) > 3:
         process_info += f"\n  ... and {len(active) - 3} more"
 
@@ -373,9 +401,13 @@ def show_close_confirmation() -> int:
         "What would you like to do?"
     )
     alert.setAlertStyle_(NSAlertStyleWarning)
-    alert.addButtonWithTitle_("Terminate & Quit")  # First button (NSAlertFirstButtonReturn)
-    alert.addButtonWithTitle_("Keep Running")       # Second button (NSAlertSecondButtonReturn)
-    alert.addButtonWithTitle_("Cancel")             # Third button
+    alert.addButtonWithTitle_(
+        "Terminate & Quit"
+    )  # First button (NSAlertFirstButtonReturn)
+    alert.addButtonWithTitle_(
+        "Keep Running"
+    )  # Second button (NSAlertSecondButtonReturn)
+    alert.addButtonWithTitle_("Cancel")  # Third button
 
     response = alert.runModal()
 
@@ -415,7 +447,9 @@ def on_window_closing():
             # Hide the main window instead of closing
             if _main_window_ref:
                 _main_window_ref.hide()
-            logging.info("[Window] Main window hidden, processes continue in background")
+            logging.info(
+                "[Window] Main window hidden, processes continue in background"
+            )
             return False  # Cancel close, window is just hidden
 
         # CLOSE_QUIT - fall through to terminate and exit
@@ -444,6 +478,7 @@ def on_window_closing():
         def _deferred_terminate():
             try:
                 from AppKit import NSApp
+
                 NSApp.terminate_(None)
             except Exception as e:
                 logging.warning(f"[Window] deferred NSApp.terminate_ failed: {e}")
@@ -456,8 +491,10 @@ def on_window_closing():
 # 1.5. Preferences Manager for External Data Location
 # =================================================================
 
+
 class PreferencesManager:
     """Manages user preferences using macOS NSUserDefaults."""
+
     KEY_DATA_PATH = "userDataPath"
     KEY_FIRST_RUN_DONE = "firstRunCompleted"
 
@@ -513,7 +550,9 @@ def select_data_folder(default_path: str = None) -> str | None:
     panel.setCanCreateDirectories_(True)
     panel.setTitle_("Select Applio Data Location")
     panel.setPrompt_("Select")
-    panel.setMessage_("Choose where Applio will store models, datasets, and training data.")
+    panel.setMessage_(
+        "Choose where Applio will store models, datasets, and training data."
+    )
 
     if default_path:
         expanded = os.path.expanduser(default_path)
@@ -537,12 +576,10 @@ def create_data_structure(base_path: str):
         # Training outputs and voice models
         "logs",
         "logs/zips",
-
         # User assets
         "assets/datasets",
         "assets/audios",
         "assets/presets",
-
         # Downloaded models
         "rvc/models/pretraineds/hifi-gan",
         "rvc/models/pretraineds/refinegan",
@@ -594,6 +631,7 @@ class FinderHelper:
 # All processes (main GUI, subprocesses, multiprocessing workers)
 # read from this file to get the correct paths.
 
+
 def _write_runtime_config():
     """
     Write runtime paths to configuration file.
@@ -611,7 +649,7 @@ def _write_runtime_config():
         "logs_path": os.path.join(data_path, "logs"),
         "datasets_path": os.path.join(data_path, "assets", "datasets"),
         "audios_path": os.path.join(data_path, "assets", "audios"),
-        "timestamp": time.time() if 'time' in dir() else 0
+        "timestamp": time.time() if "time" in dir() else 0,
     }
 
     # Write to multiple locations for redundancy
@@ -649,6 +687,7 @@ def _write_runtime_config():
 import logging
 import time
 
+
 def setup_logging():
     log_dir = os.path.expanduser("~/Library/Logs/Applio")
     os.makedirs(log_dir, exist_ok=True)
@@ -667,7 +706,9 @@ def setup_logging():
     # captures the wrapper's output.
     _fh = logging.FileHandler(log_file, mode="a")
     _fh.setLevel(logging.INFO)
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    _fh.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
     _root.addHandler(_fh)
 
     logging.info("--- Applio macOS Native Session Start ---")
@@ -709,7 +750,6 @@ def setup_logging():
 # start_gui() (after activation-policy configure+patch) because pywebview's
 # cocoa.py forces setActivationPolicy_(0) + sharedApplication at import time.
 import threading
-import socket
 import http.server
 import socketserver
 
@@ -726,6 +766,7 @@ import socketserver
 # =================================================================
 # 1.5. Copy bundled static resources to user's data location
 # =================================================================
+
 
 def setup_bundled_resources():
     """Copy bundled static resources to user's data location.
@@ -777,7 +818,11 @@ def setup_bundled_resources():
         # template, so copy it out as config.json for the running app)
         ("assets/config_template.json", "assets/config.json", "App config"),
         # TTS voices list
-        ("rvc/lib/tools/tts_voices.json", "rvc/lib/tools/tts_voices.json", "TTS voices list"),
+        (
+            "rvc/lib/tools/tts_voices.json",
+            "rvc/lib/tools/tts_voices.json",
+            "TTS voices list",
+        ),
         # Config files for different sample rates
         ("rvc/configs/48000.json", "rvc/configs/48000.json", "48kHz config"),
         ("rvc/configs/44100.json", "rvc/configs/44100.json", "44.1kHz config"),
@@ -785,11 +830,23 @@ def setup_bundled_resources():
         ("rvc/configs/32000.json", "rvc/configs/32000.json", "32kHz config"),
         ("rvc/configs/24000.json", "rvc/configs/24000.json", "24kHz config"),
         # Pretrains download list
-        ("assets/pretrains.json", "rvc/models/pretraineds/custom/pretrains.json", "Pretrains list"),
+        (
+            "assets/pretrains.json",
+            "rvc/models/pretraineds/custom/pretrains.json",
+            "Pretrains list",
+        ),
         # JavaScript files for tabs
-        ("tabs/report/recorder.js", "tabs/report/recorder.js", "Report tab recorder JS"),
+        (
+            "tabs/report/recorder.js",
+            "tabs/report/recorder.js",
+            "Report tab recorder JS",
+        ),
         ("tabs/report/main.js", "tabs/report/main.js", "Report tab main JS"),
-        ("tabs/report/record_button.js", "tabs/report/record_button.js", "Report tab button JS"),
+        (
+            "tabs/report/record_button.js",
+            "tabs/report/record_button.js",
+            "Report tab button JS",
+        ),
         ("tabs/realtime/main.js", "tabs/realtime/main.js", "Realtime tab main JS"),
     ]
 
@@ -815,27 +872,28 @@ def setup_bundled_resources():
 # 2.5. Progress Monitor IPC Signal
 # =================================================================
 
+
 def _signal_show_progress_monitor():
     """
     Signal the launcher to show the Progress Monitor dashboard.
-    
+
     Writes 'show_progress_monitor': True to runtime_paths.json.
     The launcher's IPC checker detects this and shows the dashboard.
-    
+
     Returns:
         bool: True if signal was sent successfully, False otherwise.
     """
     import json
     import fcntl
-    
+
     config_locations = [
         os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
         os.path.expanduser("~/.applio/runtime_paths.json"),
     ]
-    
+
     for config_path in config_locations:
         config_dir = os.path.dirname(config_path)
-        
+
         # Ensure directory exists
         if not os.path.exists(config_dir):
             try:
@@ -843,7 +901,7 @@ def _signal_show_progress_monitor():
             except OSError as e:
                 logging.warning(f"[IPC] Could not create directory {config_dir}: {e}")
                 continue
-        
+
         # Read existing config or start fresh
         config = {}
         if os.path.exists(config_path):
@@ -853,11 +911,11 @@ def _signal_show_progress_monitor():
             except (json.JSONDecodeError, IOError) as e:
                 logging.warning(f"[IPC] Could not read config at {config_path}: {e}")
                 config = {}
-        
+
         try:
             # Set the signal flag
             config["show_progress_monitor"] = True
-            
+
             # Write atomically with file locking
             temp_path = config_path + ".tmp"
             with open(temp_path, "w") as f:
@@ -865,22 +923,23 @@ def _signal_show_progress_monitor():
                 json.dump(config, f, indent=2)
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Unlock
             os.rename(temp_path, config_path)
-            
+
             logging.info(f"[IPC] Signaled show_progress_monitor via {config_path}")
             return True
         except Exception as e:
             logging.warning(f"[IPC] Failed to write config at {config_path}: {e}")
-    
+
     return False
 
 
 def _show_progress_monitor_info():
     """Show info dialog when Progress Monitor is not available.
-    
+
     Called in standalone mode where there's no launcher to show the dashboard.
     """
     try:
         from AppKit import NSAlert, NSAlertStyleInformational
+
         alert = NSAlert.alloc().init()
         alert.setMessageText_("Progress Monitor")
         alert.setInformativeText_(
@@ -957,13 +1016,16 @@ def render_pywebview():
 def _build_wrapper_dispatch(open_in_finder, change_data_location):
     import applio_update_check
     from menu_spec import REVEAL_PATHS
+
     d = {}
     d["app.check_updates"] = applio_update_check.check_for_updates_interactive
     d["file.set_data_location"] = change_data_location
     for key, sub in REVEAL_PATHS.items():
-        d[key] = (lambda s=sub: open_in_finder(s))
+        d[key] = lambda s=sub: open_in_finder(s)
     d["process.open_dashboard"] = _show_progress_monitor_info
-    d["process.open_logs"] = lambda: subprocess.Popen(["open", os.path.expanduser("~/Library/Logs/Applio")])
+    d["process.open_logs"] = lambda: subprocess.Popen(
+        ["open", os.path.expanduser("~/Library/Logs/Applio")]
+    )
     # pywebview Window exposes show()/restore()/minimize(). Wire the two window
     # actions we CAN implement; OMIT window.zoom and window.bring_all_to_front
     # (no pywebview API) rather than ship no-ops.
@@ -971,7 +1033,9 @@ def _build_wrapper_dispatch(open_in_finder, change_data_location):
     d["window.show_main"] = _focus_main_window
     d["help.guide"] = lambda: _open_bundled_guide()
     d["help.docs"] = lambda: webbrowser.open("https://docs.applio.org")
-    d["help.report_issue"] = lambda: webbrowser.open("https://github.com/froggeric/applio-macOS-native-app/issues")
+    d["help.report_issue"] = lambda: webbrowser.open(
+        "https://github.com/froggeric/applio-macOS-native-app/issues"
+    )
     d["help.discord"] = lambda: webbrowser.open("https://discord.gg/IAHispano")
     return d
 
@@ -1006,9 +1070,11 @@ def _open_bundled_guide():
             return
     logging.warning("[Wrapper] Studio Production Guide is not bundled")
 
+
 # =================================================================
 # 3. App Core Class
 # =================================================================
+
 
 def _supervised_backend(app):
     """Single-process Gradio supervisor: soft-restart up to 3x, then fatal.
@@ -1023,14 +1089,16 @@ def _supervised_backend(app):
     last_err = None
     while not app._stopping and attempts < 3:
         try:
-            app.start_backend()      # RAISES in single-process; blocks for Gradio's lifetime
-            return                    # clean shutdown
+            app.start_backend()  # RAISES in single-process; blocks for Gradio's lifetime
+            return  # clean shutdown
         except Exception as e:
             last_err = e
             attempts += 1
             # exc_info=True preserves the full traceback in the log (stdout/stderr is no longer
             # redirected to the log in single-process, so the bare traceback would be lost).
-            logging.error(f"[Gradio] crashed (attempt {attempts}/3): {e}", exc_info=True)
+            logging.error(
+                f"[Gradio] crashed (attempt {attempts}/3): {e}", exc_info=True
+            )
             # Non-transient errors (e.g. EADDRINUSE — port 6969 already bound by another instance;
             # single-process has no orphan-wrapper reaper) won't resolve on retry — fail fast instead
             # of wasting the 3 s/6 s backoff.
@@ -1043,7 +1111,9 @@ def _supervised_backend(app):
     # underlying error so the alert/log is actionable (e.g. "Address already in use").
     if not app._stopping:
         detail = f": {last_err}" if last_err else ""
-        app._report_fatal_error(f"The backend failed to start after {attempts} attempt(s){detail}.")
+        app._report_fatal_error(
+            f"The backend failed to start after {attempts} attempt(s){detail}."
+        )
 
 
 class ApplioApp:
@@ -1072,6 +1142,7 @@ class ApplioApp:
     def start_loading_server(self):
         """Serves the high-fidelity loading screen and status API."""
         parent = self
+
         class LoadingHandler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 if self.path == "/api/status":
@@ -1080,12 +1151,13 @@ class ApplioApp:
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     import json
+
                     data = {
                         "heading": parent.heading,
                         "sub_heading": parent.sub_heading,
                         "progress": round(parent.progress, 1),
                         "stage": parent.stage,
-                        "detail": parent.technical_detail
+                        "detail": parent.technical_detail,
                     }
                     self.wfile.write(json.dumps(data).encode("utf-8"))
                     return
@@ -1095,15 +1167,21 @@ class ApplioApp:
                 self.end_headers()
                 try:
                     path = os.path.join(BASE_PATH, "assets", "loading.html")
-                    with open(path, 'r') as f:
+                    with open(path, "r") as f:
                         self.wfile.write(f.read().encode("utf-8"))
                 except Exception as e:
-                    self.wfile.write(f"<h1>Loading Applio...</h1><p>{e}</p>".encode("utf-8"))
-            def log_message(self, format, *args): pass
+                    self.wfile.write(
+                        f"<h1>Loading Applio...</h1><p>{e}</p>".encode("utf-8")
+                    )
+
+            def log_message(self, format, *args):
+                pass
 
         try:
             socketserver.TCPServer.allow_reuse_address = True
-            with socketserver.TCPServer((self.server_host, self.loading_port), LoadingHandler) as httpd:
+            with socketserver.TCPServer(
+                (self.server_host, self.loading_port), LoadingHandler
+            ) as httpd:
                 logging.info(f"Loading UI server active on port {self.loading_port}")
                 httpd.serve_forever()
         except Exception as e:
@@ -1112,8 +1190,9 @@ class ApplioApp:
     def tail_logs(self):
         """Expert Log Observer with Real-Time Technical Feed."""
         import re
+
         logging.info("Starting Granular Log Observer...")
-        
+
         # Regex patterns for real activity
         # High-level states
         p_dl_percent = re.compile(r"Downloading.* (\d+)%")
@@ -1121,7 +1200,7 @@ class ApplioApp:
         p_extract = re.compile(r"Extracting (.*)\.\.\.")
         p_req = re.compile(r"Requirement already satisfied: (.*)")
         p_pip_install = re.compile(r"Installing collected packages: (.*)")
-        
+
         # Applio specific
         p_prereq = re.compile(r"run_prerequisites_script")
         p_init_app = re.compile(r"Initializing Gradio boot sequence")
@@ -1129,42 +1208,44 @@ class ApplioApp:
         p_device = re.compile(r"Use (.*) acceleration")
         p_server = re.compile(r"Running on local URL:.*")
         p_responsive = re.compile(r"Gradio backend is responsive")
-        
+
         start_time = time.time()
 
         while True:
             if not os.path.exists(self.log_file):
                 time.sleep(0.1)
                 continue
-                
+
             try:
-                with open(self.log_file, 'r') as f:
+                with open(self.log_file, "r") as f:
                     f.seek(0, os.SEEK_END)
                     while True:
                         line = f.readline()
-                        
+
                         # ANTI-STALL CREEP: Gentle pulse, no blocking
                         if not self.is_ready and self.progress < 95:
-                             creep = (100 - self.progress) / 2000
-                             self.progress += creep
+                            creep = (100 - self.progress) / 2000
+                            self.progress += creep
 
                         if not line:
                             time.sleep(0.05)
                             continue
-                        
+
                         line = line.strip()
-                        if not line: continue
+                        if not line:
+                            continue
 
                         # --- LOGIC MAPPING ---
-                        
+
                         # 1. Downloads
                         if p_dl_percent.search(line):
                             self.stage = "2/4"
                             self.heading = "Synchronizing Assets"
                             match = p_dl_percent.search(line)
                             val = int(match.group(1))
-                            if val > self.progress: self.progress = val
-                            
+                            if val > self.progress:
+                                self.progress = val
+
                         elif p_dl_file.search(line):
                             self.stage = "2/4"
                             self.heading = "Synchronizing Assets"
@@ -1181,25 +1262,27 @@ class ApplioApp:
                             self.technical_detail = f"IO Operation: {fname}"
 
                         elif p_pip_install.search(line):
-                             self.stage = "2/4"
-                             self.heading = "Building Environment"
-                             pkgs = p_pip_install.search(line).group(1)
-                             if len(pkgs) > 30: pkgs = pkgs[:27] + "..."
-                             self.sub_heading = f"Installing {pkgs}"
-                             self.technical_detail = line
+                            self.stage = "2/4"
+                            self.heading = "Building Environment"
+                            pkgs = p_pip_install.search(line).group(1)
+                            if len(pkgs) > 30:
+                                pkgs = pkgs[:27] + "..."
+                            self.sub_heading = f"Installing {pkgs}"
+                            self.technical_detail = line
 
                         # 3. Initialization
                         elif p_prereq.search(line):
                             self.stage = "1/4"
                             self.heading = "System Validation"
                             self.sub_heading = "Checking Prerequisites..."
-                            if self.progress < 10: self.progress = 10
+                            if self.progress < 10:
+                                self.progress = 10
 
                         elif p_device.search(line):
-                             self.heading = "Hardware Optimization"
-                             device = p_device.search(line).group(1)
-                             self.sub_heading = f"Accelerating with {device}"
-                             self.technical_detail = f"Device allocation: {device}"
+                            self.heading = "Hardware Optimization"
+                            device = p_device.search(line).group(1)
+                            self.sub_heading = f"Accelerating with {device}"
+                            self.technical_detail = f"Device allocation: {device}"
 
                         # 4. Boot
                         elif p_init_app.search(line):
@@ -1207,33 +1290,43 @@ class ApplioApp:
                             self.heading = "Booting Inference Engine"
                             self.sub_heading = "Loading Neural Networks..."
                             self.technical_detail = "Initializing pytorch contexts..."
-                            if self.progress < 80: self.progress = 80
-                            
+                            if self.progress < 80:
+                                self.progress = 80
+
                         elif p_load_model.search(line):
-                             self.heading = "Loading Models"
-                             model = p_load_model.search(line).group(1)
-                             self.sub_heading = f"Hydrating {model}..."
-                             self.technical_detail = f"Memory mapping {model}"
+                            self.heading = "Loading Models"
+                            model = p_load_model.search(line).group(1)
+                            self.sub_heading = f"Hydrating {model}..."
+                            self.technical_detail = f"Memory mapping {model}"
 
                         # 5. Success
-                        elif p_server.search(line) or p_responsive.search(line) or "Gradio backend is responsive" in line:
+                        elif (
+                            p_server.search(line)
+                            or p_responsive.search(line)
+                            or "Gradio backend is responsive" in line
+                        ):
                             self.stage = "4/4"
                             self.heading = "Initialization Complete"
                             self.sub_heading = "Launching User Interface..."
                             self.progress = 100
                             self.is_ready = True
                             return
-                            
+
                         # GENERIC FALLBACK: Show raw log activity
                         else:
-                             clean = line
-                             if len(clean) > 8 and "it/s]" not in clean: 
-                                 if ":root:" in clean:
-                                     clean = clean.split(":root:", 1)[1].strip()
-                                 if len(clean) > 60: clean = clean[:57] + "..."
-                                 self.technical_detail = clean
-                                 if self.stage == "1/4" and self.sub_heading == "Initializing environment...":
-                                     self.sub_heading = "Configuring Runtime..."
+                            clean = line
+                            if len(clean) > 8 and "it/s]" not in clean:
+                                if ":root:" in clean:
+                                    clean = clean.split(":root:", 1)[1].strip()
+                                if len(clean) > 60:
+                                    clean = clean[:57] + "..."
+                                self.technical_detail = clean
+                                if (
+                                    self.stage == "1/4"
+                                    and self.sub_heading
+                                    == "Initializing environment..."
+                                ):
+                                    self.sub_heading = "Configuring Runtime..."
             except Exception as e:
                 logging.error(f"Log observer error: {e}")
                 time.sleep(1)
@@ -1241,9 +1334,10 @@ class ApplioApp:
     def wait_for_backend(self, timeout=600):
         """Polls the Gradio backend for readiness."""
         import urllib.request
+
         url = f"http://{self.server_host}:{self.server_port}"
         start_time = time.time()
-        
+
         while time.time() - start_time < timeout:
             try:
                 with urllib.request.urlopen(url, timeout=1) as response:
@@ -1260,6 +1354,7 @@ class ApplioApp:
         try:
             logging.info(f"CWD before app import: {os.getcwd()}")
             from app import launch_gradio
+
             logging.info("Initializing Gradio boot sequence...")
             launch_gradio(self.server_host, self.server_port)
         except Exception as e:
@@ -1269,8 +1364,10 @@ class ApplioApp:
             logging.error(f"Backend launch failed: {e}")
             msg = f"Applio failed to start its backend.\n\n{e}"
             if isinstance(e, OSError):
-                msg = (f"Applio could not bind port {self.server_port}. Another "
-                       f"instance may already be running.\n\n{e}")
+                msg = (
+                    f"Applio could not bind port {self.server_port}. Another "
+                    f"instance may already be running.\n\n{e}"
+                )
             # Re-raise so _supervised_backend can soft-restart (up to 3x, linear
             # backoff) before escalating to a fatal alert via _report_fatal_error.
             raise
@@ -1281,9 +1378,11 @@ class ApplioApp:
         Single-process only: terminate THIS process in-place -- the launcher
         owns the lifecycle, so there is no separate wrapper to signal.
         """
+
         def _show_and_quit():
             try:
                 from AppKit import NSAlert
+
                 alert = NSAlert.alloc().init()
                 alert.setMessageText_("Applio failed to start")
                 alert.setInformativeText_(message)
@@ -1291,12 +1390,14 @@ class ApplioApp:
                 alert.runModal()
             except Exception as ae:
                 logging.warning(f"[Wrapper] Could not show fatal alert: {ae}")
+
             # Defer NSApp.terminate_ to the next run-loop iteration (same
             # closure/sender pattern as on_window_closing); runModal() above has
             # already returned.
             def _deferred_terminate():
                 try:
                     from AppKit import NSApp
+
                     NSApp.terminate_(None)
                 except Exception as te:
                     logging.warning(f"[Wrapper] deferred NSApp.terminate_ failed: {te}")
@@ -1308,6 +1409,7 @@ class ApplioApp:
         except Exception:
             try:
                 from AppKit import NSApp
+
                 AppHelper.callAfter(lambda: NSApp.terminate_(None))
             except Exception as fe:
                 logging.warning(f"[Wrapper] fatal-alert schedule failed: {fe}")
@@ -1323,7 +1425,9 @@ class ApplioApp:
         else:
             logging.error("Backend timeout period exceeded.")
             if self.window:
-                self.window.load_html("<h1>Startup Error</h1><p>The server failed to respond in time.</p>")
+                self.window.load_html(
+                    "<h1>Startup Error</h1><p>The server failed to respond in time.</p>"
+                )
 
     def run_until_window_created(self):
         """Start helper/backend threads and create the pywebview window.
@@ -1353,7 +1457,7 @@ class ApplioApp:
             min_size=(1024, 720),
             resizable=True,
             text_select=True,
-            vibrancy=True
+            vibrancy=True,
         )
 
         self.window.events.closing += on_window_closing
@@ -1363,7 +1467,7 @@ class ApplioApp:
         logging.info("Starting Webview GUI...")
 
         # Always create the pywebview menu (Progress Monitor entry, etc.).
-        webview.settings['SHOW_DEFAULT_MENUS'] = False   # suppress auto View/Edit menus
+        webview.settings["SHOW_DEFAULT_MENUS"] = False  # suppress auto View/Edit menus
 
     def run(self):
         # Convenience: window bootstrap + blocking webview loop. Requires start_gui() to have run
@@ -1371,6 +1475,7 @@ class ApplioApp:
         # launcher both call start_gui() + webview.start(...) directly. Candidate for removal in Task 1+.
         self.run_until_window_created()
         webview.start(menu=render_pywebview(), debug=False)
+
 
 def start_gui(launcher=None):
     """Bootstrap the GUI in the calling process. Does NOT block.
@@ -1399,14 +1504,20 @@ def start_gui(launcher=None):
     #    env/makedirs block). APP_SUPPORT_DIR was only used here -> local.
     os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
     os.environ["PYTORCH_ENABLE_METAL_ACCELERATOR"] = "1"
-    os.environ["GRADIO_ALLOWED_PATHS"] = "/,/,/private/var/folders,/var/folders,/tmp,/private/tmp"
+    os.environ["GRADIO_ALLOWED_PATHS"] = (
+        "/,/,/private/var/folders,/var/folders,/tmp,/private/tmp"
+    )
     os.environ["GRADIO_TEMP_DIR"] = os.path.expanduser("~/Library/Caches/Applio/gradio")
     os.makedirs(os.environ["GRADIO_TEMP_DIR"], exist_ok=True)
     _app_support_dir = os.path.expanduser("~/Library/Application Support/Applio")
     os.makedirs(_app_support_dir, exist_ok=True)
     os.environ["HF_HOME"] = os.path.join(_app_support_dir, "huggingface")
-    os.environ["HF_DATASETS_CACHE"] = os.path.join(_app_support_dir, "huggingface", "datasets")
-    os.environ["TRANSFORMERS_CACHE"] = os.path.join(_app_support_dir, "huggingface", "models")
+    os.environ["HF_DATASETS_CACHE"] = os.path.join(
+        _app_support_dir, "huggingface", "datasets"
+    )
+    os.environ["TRANSFORMERS_CACHE"] = os.path.join(
+        _app_support_dir, "huggingface", "models"
+    )
     os.environ["MPLCONFIGDIR"] = os.path.join(_app_support_dir, "matplotlib")
     os.environ["TORCH_HOME"] = os.path.join(_app_support_dir, "torch")
 
@@ -1428,7 +1539,9 @@ def start_gui(launcher=None):
     # run via the dispatch below BEFORE the GUI data-path resolution.
     if getattr(sys, "frozen", False):
         _early_prefs = PreferencesManager()
-        _early_data_path = _early_prefs.get_data_path() or os.path.expanduser("~/Applio")
+        _early_data_path = _early_prefs.get_data_path() or os.path.expanduser(
+            "~/Applio"
+        )
         # Debug logging only when APPLIO_DEBUG env var is set
         if os.environ.get("APPLIO_DEBUG"):
             with open("/tmp/applio_debug.txt", "a") as f:
@@ -1439,8 +1552,12 @@ def start_gui(launcher=None):
         os.environ["APPLIO_DATA_PATH"] = _early_data_path
         os.environ["APPLIO_LOGS_PATH"] = os.path.join(_early_data_path, "logs")
         # Also set these for subprocess scripts that may need them
-        os.environ["APPLIO_DATASETS_PATH"] = os.path.join(_early_data_path, "assets", "datasets")
-        os.environ["APPLIO_AUDIOS_PATH"] = os.path.join(_early_data_path, "assets", "audios")
+        os.environ["APPLIO_DATASETS_PATH"] = os.path.join(
+            _early_data_path, "assets", "datasets"
+        )
+        os.environ["APPLIO_AUDIOS_PATH"] = os.path.join(
+            _early_data_path, "assets", "audios"
+        )
 
         # Write config in frozen mode (ensures it's available for all subprocesses).
         _write_runtime_config()
@@ -1452,7 +1569,7 @@ def start_gui(launcher=None):
         potential_script = sys.argv[1]
 
         # Check if it's a Python script path
-        if potential_script.endswith('.py'):
+        if potential_script.endswith(".py"):
             script_path = None
 
             # First try: relative to current working directory
@@ -1471,7 +1588,10 @@ def start_gui(launcher=None):
 
                 # === PATH VALIDATION FOR PREPROCESSING ===
                 # Detect preprocessing script by exact path match
-                if script_path.endswith('rvc/train/preprocess/preprocess.py') and len(script_args) >= 2:
+                if (
+                    script_path.endswith("rvc/train/preprocess/preprocess.py")
+                    and len(script_args) >= 2
+                ):
                     dataset_path = script_args[1]
                     original_path = dataset_path
 
@@ -1479,27 +1599,47 @@ def start_gui(launcher=None):
                     if not os.path.exists(dataset_path):
                         # Second check: try resolving relative path from DATA_PATH (user's data location)
                         if not os.path.isabs(dataset_path):
-                            data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
-                            resolved_from_data = os.path.normpath(os.path.join(data_path, dataset_path))
+                            data_path = os.environ.get(
+                                "APPLIO_DATA_PATH", os.path.expanduser("~/Applio")
+                            )
+                            resolved_from_data = os.path.normpath(
+                                os.path.join(data_path, dataset_path)
+                            )
                             if os.path.exists(resolved_from_data):
                                 dataset_path = resolved_from_data
                                 script_args[1] = resolved_from_data
-                                logging.info(f"Dataset path resolved from DATA_PATH: {original_path} -> {resolved_from_data}")
+                                logging.info(
+                                    f"Dataset path resolved from DATA_PATH: {original_path} -> {resolved_from_data}"
+                                )
                             else:
                                 # Third check: try resolving relative path from BASE_PATH (app bundle)
-                                resolved_from_base = os.path.normpath(os.path.join(BASE_PATH, dataset_path))
+                                resolved_from_base = os.path.normpath(
+                                    os.path.join(BASE_PATH, dataset_path)
+                                )
                                 if os.path.exists(resolved_from_base):
                                     dataset_path = resolved_from_base
                                     script_args[1] = resolved_from_base
-                                    logging.info(f"Dataset path resolved from BASE_PATH: {original_path} -> {resolved_from_base}")
+                                    logging.info(
+                                        f"Dataset path resolved from BASE_PATH: {original_path} -> {resolved_from_base}"
+                                    )
                                 else:
-                                    logging.error(f"Dataset path not found: {original_path}")
-                                    logging.error(f"  Tried DATA_PATH: {resolved_from_data}")
-                                    logging.error(f"  Tried BASE_PATH: {resolved_from_base}")
-                                    print(f"Error: Dataset path does not exist: {original_path}")
+                                    logging.error(
+                                        f"Dataset path not found: {original_path}"
+                                    )
+                                    logging.error(
+                                        f"  Tried DATA_PATH: {resolved_from_data}"
+                                    )
+                                    logging.error(
+                                        f"  Tried BASE_PATH: {resolved_from_base}"
+                                    )
+                                    print(
+                                        f"Error: Dataset path does not exist: {original_path}"
+                                    )
                                     print(f"  Tried: {resolved_from_data}")
                                     print(f"  Tried: {resolved_from_base}")
-                                    print(f"  Please use an absolute path to your dataset folder.")
+                                    print(
+                                        f"  Please use an absolute path to your dataset folder."
+                                    )
                                     sys.exit(1)
                         else:
                             logging.error(f"Dataset path not found: {dataset_path}")
@@ -1526,7 +1666,9 @@ def start_gui(launcher=None):
 
                 # Change CWD to data path for correct path resolution in subprocess
                 # This ensures os.getcwd() returns DATA_PATH, not BASE_PATH
-                _data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+                _data_path = os.environ.get(
+                    "APPLIO_DATA_PATH", os.path.expanduser("~/Applio")
+                )
                 _original_cwd = os.getcwd()
                 os.chdir(_data_path)
                 logging.info(f"Changed CWD for subprocess: {_data_path}")
@@ -1536,14 +1678,16 @@ def start_gui(launcher=None):
                 _write_runtime_config()
 
                 try:
-                    runpy.run_path(script_path_abs, run_name='__main__')
+                    runpy.run_path(script_path_abs, run_name="__main__")
                     logging.info(f"Script completed successfully: {script_path_abs}")
                     sys.exit(0)
                 except SystemExit as e:
                     # SystemExit is raised by sys.exit() in the script
                     # Non-zero exit codes indicate failure
                     if e.code != 0 and e.code is not None:
-                        logging.error(f"Script exited with code {e.code}: {script_path_abs}")
+                        logging.error(
+                            f"Script exited with code {e.code}: {script_path_abs}"
+                        )
                     else:
                         logging.info(f"Script exited normally: {script_path_abs}")
                     sys.exit(e.code if e.code is not None else 0)
@@ -1574,7 +1718,7 @@ def start_gui(launcher=None):
         try:
             os.makedirs(DATA_PATH, exist_ok=True)
             test_file = os.path.join(DATA_PATH, ".write_test")
-            with open(test_file, 'w') as f:
+            with open(test_file, "w") as f:
                 f.write("test")
             os.remove(test_file)
         except (IOError, OSError) as e:

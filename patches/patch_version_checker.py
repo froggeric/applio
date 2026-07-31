@@ -21,7 +21,6 @@ Applied at build time by build_macos.py (registered as a "dir" patcher; base_pat
 import os
 import sys
 
-
 HELPER_CODE = '''
 
 

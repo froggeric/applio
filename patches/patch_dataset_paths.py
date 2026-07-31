@@ -44,22 +44,28 @@ def patch_train_py(base_path: str) -> bool:
     #         datasets.append(dirpath)
     #
     # Patched: Always use absolute path
-    old_pattern1 = r'(if is_frozen:\s*\n\s*# In frozen app, return absolute path\s*\n\s*datasets\.append\(os\.path\.abspath\(dirpath\)\)\s*\n\s*else:\s*\n\s*# In source run, return relative path \(existing behavior\)\s*\n\s*)datasets\.append\(dirpath\)'
+    old_pattern1 = r"(if is_frozen:\s*\n\s*# In frozen app, return absolute path\s*\n\s*datasets\.append\(os\.path\.abspath\(dirpath\)\)\s*\n\s*else:\s*\n\s*# In source run, return relative path \(existing behavior\)\s*\n\s*)datasets\.append\(dirpath\)"
 
     if re.search(old_pattern1, content):
-        content = re.sub(old_pattern1, r'\1datasets.append(os.path.abspath(dirpath))  # Always use absolute path', content)
-        print(f"[patch_dataset_paths] Fixed get_datasets_list() to always return absolute paths")
+        content = re.sub(
+            old_pattern1,
+            r"\1datasets.append(os.path.abspath(dirpath))  # Always use absolute path",
+            content,
+        )
+        print(
+            f"[patch_dataset_paths] Fixed get_datasets_list() to always return absolute paths"
+        )
         patched = True
     else:
         # Try simpler pattern as fallback
-        simple_pattern = r'datasets\.append\(dirpath\)\s*\n\s*#\s*In source run'
+        simple_pattern = r"datasets\.append\(dirpath\)\s*\n\s*#\s*In source run"
         if re.search(simple_pattern, content):
             # Find the else block and replace the relative path append
             content = re.sub(
-                r'(else:\s*\n\s*# In source run, return relative path.*?\n\s*)datasets\.append\(dirpath\)',
-                r'\1datasets.append(os.path.abspath(dirpath))  # Always use absolute path',
+                r"(else:\s*\n\s*# In source run, return relative path.*?\n\s*)datasets\.append\(dirpath\)",
+                r"\1datasets.append(os.path.abspath(dirpath))  # Always use absolute path",
                 content,
-                flags=re.DOTALL
+                flags=re.DOTALL,
             )
             print(f"[patch_dataset_paths] Fixed get_datasets_list() (fallback pattern)")
             patched = True
@@ -71,15 +77,17 @@ def patch_train_py(base_path: str) -> bool:
     #     return None, relative_dataset_path
     #
     # Patched: Return absolute path directly
-    old_pattern2 = r'dataset_path = os\.path\.dirname\(destination_path\)\s*\n\s*relative_dataset_path = os\.path\.relpath\(dataset_path,\s*now_dir\)\s*\n\s*return None,\s*relative_dataset_path'
+    old_pattern2 = r"dataset_path = os\.path\.dirname\(destination_path\)\s*\n\s*relative_dataset_path = os\.path\.relpath\(dataset_path,\s*now_dir\)\s*\n\s*return None,\s*relative_dataset_path"
 
-    new_code2 = '''dataset_path = os.path.dirname(destination_path)
+    new_code2 = """dataset_path = os.path.dirname(destination_path)
             # Return absolute path to fix subprocess resolution
-            return None, dataset_path'''
+            return None, dataset_path"""
 
     if re.search(old_pattern2, content):
         content = re.sub(old_pattern2, new_code2, content)
-        print(f"[patch_dataset_paths] Fixed save_drop_dataset_audio() to return absolute path")
+        print(
+            f"[patch_dataset_paths] Fixed save_drop_dataset_audio() to return absolute path"
+        )
         patched = True
 
     # Fix 3: get_pretrained_list() - resolve the custom-pretrained dir ABSOLUTELY.
@@ -89,42 +97,46 @@ def patch_train_py(base_path: str) -> bool:
     old_pattern3 = r'def get_pretrained_list\(suffix\):\n    return \[\n        os\.path\.join\(dirpath, filename\)\n        for dirpath, _, filenames in os\.walk\(pretraineds_custom_path_relative\)\n        for filename in filenames\n        if filename\.endswith\("\.pth"\) and suffix in filename\n    \]'
 
     new_code3 = (
-        'def get_pretrained_list(suffix):\n'
-        '    import logging as _logging\n'
+        "def get_pretrained_list(suffix):\n"
+        "    import logging as _logging\n"
         '    if getattr(sys, "frozen", False):\n'
         '        _dp = os.environ.get("APPLIO_DATA_PATH")\n'
-        '        if not _dp:\n'
+        "        if not _dp:\n"
         '            for _p in (os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"), os.path.expanduser("~/.applio/runtime_paths.json")):\n'
-        '                if os.path.exists(_p):\n'
-        '                    try:\n'
-        '                        import json as _json\n'
-        '                        with open(_p) as _f:\n'
+        "                if os.path.exists(_p):\n"
+        "                    try:\n"
+        "                        import json as _json\n"
+        "                        with open(_p) as _f:\n"
         '                            _dp = _json.load(_f).get("data_path")\n'
-        '                    except Exception:\n'
-        '                        pass\n'
-        '                    if _dp:\n'
-        '                        break\n'
-        '        if not _dp:\n'
+        "                    except Exception:\n"
+        "                        pass\n"
+        "                    if _dp:\n"
+        "                        break\n"
+        "        if not _dp:\n"
         '            _dp = os.path.expanduser("~/Applio")\n'
         '        _scan_dir = os.path.join(_dp, "rvc", "models", "pretraineds", "custom")\n'
-        '    else:\n'
-        '        _scan_dir = pretraineds_custom_path\n'
-        '    _found = [\n'
-        '        os.path.join(dirpath, filename)\n'
-        '        for dirpath, _, filenames in os.walk(_scan_dir)\n'
-        '        for filename in filenames\n'
+        "    else:\n"
+        "        _scan_dir = pretraineds_custom_path\n"
+        "    _found = [\n"
+        "        os.path.join(dirpath, filename)\n"
+        "        for dirpath, _, filenames in os.walk(_scan_dir)\n"
+        "        for filename in filenames\n"
         '        if filename.endswith(".pth") and suffix in filename\n'
-        '    ]\n'
+        "    ]\n"
         '    _logging.warning("[custom_pretrained] suffix=%r frozen=%r cwd=%r now_dir=%r scan=%r found=%d", suffix, getattr(sys, "frozen", False), os.getcwd(), now_dir, _scan_dir, len(_found))\n'
-        '    return _found'
+        "    return _found"
     )
 
     if re.search(old_pattern3, content):
         content = re.sub(old_pattern3, new_code3, content)
-        print(f"[patch_dataset_paths] Fixed get_pretrained_list() to scan DATA_PATH-absolute custom dir + diagnostic log")
+        print(
+            f"[patch_dataset_paths] Fixed get_pretrained_list() to scan DATA_PATH-absolute custom dir + diagnostic log"
+        )
         patched = True
     else:
-        print(f"[patch_dataset_paths] get_pretrained_list pattern not found (already patched?)")
+        print(
+            f"[patch_dataset_paths] get_pretrained_list pattern not found (already patched?)"
+        )
 
     if patched:
         # Add idempotency marker at top of file
@@ -172,20 +184,20 @@ def patch_core_py(base_path: str) -> bool:
     # Find the position right before "command = ["
     match = re.search(
         r'(preprocess_script_path = os\.path\.join\("rvc", "train", "preprocess", "preprocess\.py"\)\s*\n)(    command = \[)',
-        content
+        content,
     )
 
     if match:
         insert_pos = match.start(2)  # Position of "command = ["
 
-        path_resolution = '''    # CRITICAL: Resolve to absolute path BEFORE building command
+        path_resolution = """    # CRITICAL: Resolve to absolute path BEFORE building command
     # Fixes bug where relative paths failed in subprocess with different CWD
     if dataset_path and not os.path.isabs(dataset_path):
         abs_path = os.path.abspath(dataset_path)
         if os.path.exists(abs_path):
             dataset_path = abs_path
 
-'''
+"""
 
         new_content = content[:insert_pos] + path_resolution + content[insert_pos:]
 
@@ -195,7 +207,9 @@ def patch_core_py(base_path: str) -> bool:
         with open(core_py_path, "w", encoding="utf-8") as f:
             f.write(new_content)
 
-        print(f"[patch_dataset_paths] Fixed core.py to resolve path before command construction")
+        print(
+            f"[patch_dataset_paths] Fixed core.py to resolve path before command construction"
+        )
         return True
 
     print(f"[patch_dataset_paths] Could not find expected pattern in core.py")

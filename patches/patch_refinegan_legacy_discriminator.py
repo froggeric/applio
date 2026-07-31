@@ -13,7 +13,6 @@ The legacy discriminator differs from current:
 
 import os
 
-
 _IDEMPOTENCY_MARKER = "# DiscriminatorRLegacy support added"
 
 
@@ -29,7 +28,9 @@ def patch_discriminators(base_path: str) -> bool:
     discriminators_path = os.path.join(base_path, "discriminators.py")
 
     if not os.path.exists(discriminators_path):
-        print(f"  [RefineGAN-Legacy discriminator] Error: {discriminators_path} not found")
+        print(
+            f"  [RefineGAN-Legacy discriminator] Error: {discriminators_path} not found"
+        )
         return False
 
     with open(discriminators_path, "r", encoding="utf-8") as f:
@@ -157,35 +158,35 @@ class DiscriminatorRLegacy(torch.nn.Module):
             content = content[:insert_pos] + legacy_class + content[insert_pos:]
 
     # 2. Modify MultiPeriodDiscriminator.__init__ signature to add disc_r_class parameter
-    old_init = '''    def __init__(
+    old_init = """    def __init__(
         self,
         use_spectral_norm: bool = False,
         checkpointing: bool = False,
         version: str = "v2",
-    ):'''
+    ):"""
 
-    new_init = '''    def __init__(
+    new_init = """    def __init__(
         self,
         use_spectral_norm: bool = False,
         checkpointing: bool = False,
         version: str = "v2",
         disc_r_class: type = None,
-    ):'''
+    ):"""
 
     if old_init in content:
         content = content.replace(old_init, new_init)
 
     # 3. Modify the discriminator list creation to use disc_r_class
-    old_disc_list = '''        self.discriminators = torch.nn.ModuleList(
+    old_disc_list = """        self.discriminators = torch.nn.ModuleList(
             [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
             + [DiscriminatorP(p, use_spectral_norm=use_spectral_norm) for p in periods]
             + [
                 DiscriminatorR(r, use_spectral_norm=use_spectral_norm)
                 for r in resolutions
             ]
-        )'''
+        )"""
 
-    new_disc_list = '''        _disc_r_class = disc_r_class if disc_r_class is not None else DiscriminatorR
+    new_disc_list = """        _disc_r_class = disc_r_class if disc_r_class is not None else DiscriminatorR
         self.discriminators = torch.nn.ModuleList(
             [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
             + [DiscriminatorP(p, use_spectral_norm=use_spectral_norm) for p in periods]
@@ -193,7 +194,7 @@ class DiscriminatorRLegacy(torch.nn.Module):
                 _disc_r_class(r, use_spectral_norm=use_spectral_norm)
                 for r in resolutions
             ]
-        )'''
+        )"""
 
     if old_disc_list in content:
         content = content.replace(old_disc_list, new_disc_list)

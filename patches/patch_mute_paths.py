@@ -13,7 +13,6 @@ Applied at build time by build_macos.py.
 """
 
 import os
-import re
 
 
 def patch_preparing_files(base_path: str) -> bool:
@@ -26,7 +25,9 @@ def patch_preparing_files(base_path: str) -> bool:
     preparing_files_path = os.path.join(base_path, "preparing_files.py")
 
     if not os.path.exists(preparing_files_path):
-        print(f"[patch_mute_paths] preparing_files.py not found at {preparing_files_path}")
+        print(
+            f"[patch_mute_paths] preparing_files.py not found at {preparing_files_path}"
+        )
         return False
 
     with open(preparing_files_path, "r", encoding="utf-8") as f:
@@ -83,6 +84,7 @@ current_directory = _get_mute_base_path()'''
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_preparing_files(base_path)
     sys.exit(0 if success else 1)

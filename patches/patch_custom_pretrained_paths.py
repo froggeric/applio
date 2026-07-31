@@ -11,7 +11,6 @@ Applied at build time by build_macos.py.
 """
 
 import os
-import re
 
 
 def patch_core_py(base_path: str) -> bool:
@@ -33,7 +32,7 @@ def patch_core_py(base_path: str) -> bool:
         return True
 
     # Pattern to find: pg, pd = g_pretrained_path, d_pretrained_path
-    old_pattern = r'pg, pd = g_pretrained_path, d_pretrained_path'
+    old_pattern = r"pg, pd = g_pretrained_path, d_pretrained_path"
 
     if old_pattern not in content:
         print(f"[patch_custom_pretrained_paths] Pattern not found in core.py")
@@ -101,26 +100,28 @@ def _resolve_custom_pretrained_path(path: str) -> str:
 
     # Find a good insertion point (after imports, before first function)
     # Look for the first function definition
-    insert_pattern = r'(from functools import lru_cache\n)'
+    insert_pattern = r"(from functools import lru_cache\n)"
     if insert_pattern not in content:
-        insert_pattern = r'(from distutils.util import strtobool\n)'
+        insert_pattern = r"(from distutils.util import strtobool\n)"
 
     if insert_pattern in content:
-        content = content.replace(insert_pattern, insert_pattern + '\n' + helper_function)
+        content = content.replace(
+            insert_pattern, insert_pattern + "\n" + helper_function
+        )
     else:
         # Last resort: insert after the initial imports block
-        lines = content.split('\n')
+        lines = content.split("\n")
         insert_idx = 0
         for i, line in enumerate(lines):
-            if line.startswith('from ') or line.startswith('import '):
+            if line.startswith("from ") or line.startswith("import "):
                 insert_idx = i + 1
-            elif insert_idx > 0 and line.strip() and not line.startswith('#'):
+            elif insert_idx > 0 and line.strip() and not line.startswith("#"):
                 break
         lines.insert(insert_idx, helper_function)
-        content = '\n'.join(lines)
+        content = "\n".join(lines)
 
     # Replace the direct assignment with resolved paths
-    new_code = '''pg, pd = _resolve_custom_pretrained_path(g_pretrained_path), _resolve_custom_pretrained_path(d_pretrained_path)'''
+    new_code = """pg, pd = _resolve_custom_pretrained_path(g_pretrained_path), _resolve_custom_pretrained_path(d_pretrained_path)"""
 
     content = content.replace(old_pattern, new_code)
 
@@ -133,6 +134,7 @@ def _resolve_custom_pretrained_path(path: str) -> str:
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_core_py(base_path)
     sys.exit(0 if success else 1)

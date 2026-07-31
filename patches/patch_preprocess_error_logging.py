@@ -20,7 +20,9 @@ def patch_preprocess_py(base_path: str) -> bool:
     preprocess_py_path = os.path.join(base_path, "preprocess.py")
 
     if not os.path.exists(preprocess_py_path):
-        print(f"[patch_preprocess_error_logging] preprocess.py not found at {preprocess_py_path}")
+        print(
+            f"[patch_preprocess_error_logging] preprocess.py not found at {preprocess_py_path}"
+        )
         return False
 
     with open(preprocess_py_path, "r", encoding="utf-8") as f:
@@ -40,10 +42,10 @@ def patch_preprocess_py(base_path: str) -> bool:
     #
     # Patched: Add file-based logging before the print
 
-    old_pattern = r'''        except Exception as error:
-            print\(f"Error processing audio: \{error\}"\)'''
+    old_pattern = r"""        except Exception as error:
+            print\(f"Error processing audio: \{error\}"\)"""
 
-    new_code = '''        except Exception as error:
+    new_code = """        except Exception as error:
             # Log to file for debugging (persists across multiprocessing spawn)
             import datetime
             error_log_path = os.path.expanduser("~/Library/Logs/Applio/preprocess_errors.log")
@@ -53,7 +55,7 @@ def patch_preprocess_py(base_path: str) -> bool:
                     error_log.write(f"[{datetime.datetime.now().isoformat()}] {path}: {error}" + chr(10))
             except IOError:
                 pass  # Can't log if logging fails
-            print(f"Error processing audio: {error}")'''
+            print(f"Error processing audio: {error}")"""
 
     if re.search(old_pattern, content):
         content = re.sub(old_pattern, new_code, content)
@@ -74,6 +76,7 @@ def patch_preprocess_py(base_path: str) -> bool:
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_preprocess_py(base_path)
     sys.exit(0 if success else 1)

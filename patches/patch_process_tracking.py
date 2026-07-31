@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 
-
 # Process tracking helper code to inject
 PROCESS_TRACKER_IMPORT = '''
 # === Process Tracking (injected by patch) ===
@@ -299,7 +298,7 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
         print("[patch_process_tracking] preprocess pattern not found")
         return content, False
 
-    replacement = r'''
+    replacement = r"""
 \1# Track preprocess process with log redirection
 \1_log_dir = os.path.join(logs_path, model_name)
 \1os.makedirs(_log_dir, exist_ok=True)
@@ -326,7 +325,7 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \1    return f"Error: Preprocessing failed with code {_proc.returncode}"
 
 \1return f"Model {model_name} preprocessed successfully."
-'''
+"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -349,7 +348,7 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
         print("[patch_process_tracking] extract pattern not found")
         return content, False
 
-    replacement = r'''
+    replacement = r"""
 \1# Track extract process with log redirection
 \1_log_dir = os.path.join(logs_path, model_name)
 \1os.makedirs(_log_dir, exist_ok=True)
@@ -376,7 +375,7 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 \1    return f"Error: Feature extraction failed with code {_proc.returncode}"
 
 \1return f"Model {model_name} extracted successfully."
-'''
+"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -399,7 +398,7 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
         print("[patch_process_tracking] train pattern not found")
         return content, False
 
-    replacement = r'''
+    replacement = r"""
 \1# Track training process with log redirection
 \1_log_dir = os.path.join(logs_path, model_name)
 \1os.makedirs(_log_dir, exist_ok=True)
@@ -445,7 +444,7 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1    return f"Error: Training failed with code {_proc.returncode}"
 
 \1run_index_script(model_name, index_algorithm)
-'''
+"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -460,7 +459,7 @@ def patch_run_index_script(content: str) -> tuple[str, bool]:
     # Specific idempotency check: has this specific patch been applied?
     # Note: index script doesn't track processes (short-running, optional)
     # We check for the injected tracking comment instead (stable across message wording)
-    if '# Track index process (short-running, optional)' in content:
+    if "# Track index process (short-running, optional)" in content:
         return content, True
 
     # Pattern: result = subprocess.run(command) + upstream error check + final return
@@ -470,7 +469,7 @@ def patch_run_index_script(content: str) -> tuple[str, bool]:
         print("[patch_process_tracking] index pattern not found")
         return content, False
 
-    replacement = r'''
+    replacement = r"""
 \1# Track index process (short-running, optional)
 \1_proc = subprocess.Popen(command)
 \1_proc.wait()
@@ -478,7 +477,7 @@ def patch_run_index_script(content: str) -> tuple[str, bool]:
 \1    return f"Index generation failed for model {model_name}. Make sure you have enough GPU available to generate the Index file. Please check the console logs for more details."
 
 \1return f"Index file for {model_name} generated successfully."
-'''
+"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -497,13 +496,13 @@ def patch_voice_conversion(content: str) -> tuple[str, bool]:
     # This one is trickier - it runs TTS then does inference.
     # Upstream 3.6.3 captures output and raises RuntimeError(result.stderr),
     # so the tracked Popen must capture stderr too (via communicate()).
-    old_pattern = r'\n+([ \t]+)result = subprocess\.run\(command_tts, capture_output=True, text=True\)\n\s+if result\.returncode != 0:\n\s+raise RuntimeError\(result\.stderr\.strip\(\)\)\n\s+infer_pipeline = import_voice_converter\(\)'
+    old_pattern = r"\n+([ \t]+)result = subprocess\.run\(command_tts, capture_output=True, text=True\)\n\s+if result\.returncode != 0:\n\s+raise RuntimeError\(result\.stderr\.strip\(\)\)\n\s+infer_pipeline = import_voice_converter\(\)"
 
     if not re.search(old_pattern, content):
         print("[patch_process_tracking] voice_conversion pattern not found")
         return content, False
 
-    replacement = r'''
+    replacement = r"""
 \1# Track TTS process
 \1_started_at = _applio_dt.datetime.now().isoformat()
 \1try:
@@ -522,7 +521,7 @@ def patch_voice_conversion(content: str) -> tuple[str, bool]:
 \1})
 \1if _proc.returncode != 0:
 \1    raise RuntimeError(_stderr.strip())
-\1infer_pipeline = import_voice_converter()'''
+\1infer_pipeline = import_voice_converter()"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -535,7 +534,7 @@ def inject_process_tracker_helpers(content: str) -> str:
 
     # Find a good insertion point - after the imports, before first function
     # Look for the first function definition
-    match = re.search(r'\n\ndef ', content)
+    match = re.search(r"\n\ndef ", content)
     if match:
         insert_pos = match.start()
         content = content[:insert_pos] + PROCESS_TRACKER_IMPORT + content[insert_pos:]
@@ -608,6 +607,7 @@ def patch_core_py(base_path: str) -> bool:
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_core_py(base_path)
     sys.exit(0 if success else 1)

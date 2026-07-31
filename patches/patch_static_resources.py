@@ -46,7 +46,9 @@ def patch_file(
 
     if content == original_content:
         if total_changes == 0:
-            print(f"[patch_static_resources] {description}: no patterns found (may already be patched)")
+            print(
+                f"[patch_static_resources] {description}: no patterns found (may already be patched)"
+            )
         return True, total_changes
 
     with open(file_path, "w", encoding="utf-8") as f:
@@ -239,7 +241,13 @@ def patch_settings_sections(base_path: str) -> bool:
     - assets/config.json
     """
     sections_dir = os.path.join(base_path, "tabs", "settings", "sections")
-    files_to_patch = ["filter.py", "presence.py", "lang.py", "precision.py", "model_author.py"]
+    files_to_patch = [
+        "filter.py",
+        "presence.py",
+        "lang.py",
+        "precision.py",
+        "model_author.py",
+    ]
 
     all_success = True
 
@@ -259,7 +267,9 @@ def patch_settings_sections(base_path: str) -> bool:
             ),
         ]
 
-        success, _ = patch_file(file_path, patterns, f"tabs/settings/sections/{filename}")
+        success, _ = patch_file(
+            file_path, patterns, f"tabs/settings/sections/{filename}"
+        )
         if not success:
             all_success = False
 
@@ -327,7 +337,9 @@ def patch_all(base_path: str) -> bool:
     results.append(("assets/version_checker.py", patch_version_checker(base_path)))
     results.append(("app.py", patch_app_py(base_path)))
     results.append(("rvc/lib/utils.py", patch_rvc_lib_utils(base_path)))
-    results.append(("rvc/train/process/extract_model.py", patch_extract_model(base_path)))
+    results.append(
+        ("rvc/train/process/extract_model.py", patch_extract_model(base_path))
+    )
     results.append(("tabs/report/report.py", patch_report(base_path)))
     results.append(("tabs/plugins/plugins_core.py", patch_plugins_core(base_path)))
     results.append(("tabs/settings/sections/*.py", patch_settings_sections(base_path)))

@@ -10,6 +10,7 @@ the original used a string `!=` (macos_wrapper.py:806) which flagged downgrades
 as updates and mis-handled 3.6.10 vs 3.6.9. We use packaging.version (already a
 PyInstaller hiddenimport — Applio.spec).
 """
+
 import json
 import logging
 import os
@@ -65,8 +66,12 @@ def _get_version_info():
                 continue
     # Last resort: upstream config version (no build number).
     for root in _version_roots():
-        for _cfg in ("assets/config.json", "assets/config_template.json",
-                     "config.json", "config_template.json"):
+        for _cfg in (
+            "assets/config.json",
+            "assets/config_template.json",
+            "config.json",
+            "config_template.json",
+        ):
             try:
                 with open(os.path.join(root, _cfg), "r", encoding="utf-8") as f:
                     return json.load(f).get("version", "3.6.3")
@@ -92,11 +97,20 @@ def is_update_available(current_version, latest_version=None, release_url=None):
     if _parse_version is None:
         # Without packaging, fall back to a strict "different AND not a downgrade
         # heuristic" — but packaging is bundled, so this is defensive only.
-        logging.warning("[Update] packaging.version unavailable; falling back to degraded string compare")
-        return (latest_version != current_version, latest_version, release_url or RELEASES_URL)
+        logging.warning(
+            "[Update] packaging.version unavailable; falling back to degraded string compare"
+        )
+        return (
+            latest_version != current_version,
+            latest_version,
+            release_url or RELEASES_URL,
+        )
     try:
-        return (_parse_version(latest_version) > _parse_version(current_version),
-                latest_version, release_url or RELEASES_URL)
+        return (
+            _parse_version(latest_version) > _parse_version(current_version),
+            latest_version,
+            release_url or RELEASES_URL,
+        )
     except Exception:
         return (False, latest_version, release_url or RELEASES_URL)
 
@@ -138,6 +152,7 @@ def _run_async_on_main(work, on_main):
         result = None
         try:
             from Foundation import NSAutoreleasePool
+
             pool = NSAutoreleasePool.alloc().init()
             try:
                 result = work()
@@ -150,6 +165,7 @@ def _run_async_on_main(work, on_main):
             result = None
         try:
             from PyObjCTools import AppHelper
+
             AppHelper.callAfter(on_main, result)
         except Exception:
             on_main(result)
@@ -162,8 +178,12 @@ def check_for_updates_interactive():
     """Manual menu item: tri-state NSAlert. Network runs off the main thread so
     the 2 s menu timer / event loop never blocks (worst case = the 10 s timeout)."""
     try:
-        from AppKit import (NSAlert, NSAlertFirstButtonReturn, NSAlertStyleInformational,
-                            NSAlertStyleWarning)
+        from AppKit import (
+            NSAlert,
+            NSAlertFirstButtonReturn,
+            NSAlertStyleInformational,
+            NSAlertStyleWarning,
+        )
         from PyObjCTools import AppHelper
     except ImportError:
         logging.warning("[Update] AppKit unavailable; skipping interactive check")
@@ -183,7 +203,7 @@ def check_for_updates_interactive():
             alert.addButtonWithTitle_("OK")
             alert.setAlertStyle_(NSAlertStyleWarning)
             if alert.runModal() == NSAlertFirstButtonReturn:
-                subprocess.Popen(['open', release_url])
+                subprocess.Popen(["open", release_url])
         elif is_update_available(VERSION, latest_version, release_url)[0]:
             alert.setMessageText_("Update Available")
             alert.setInformativeText_(
@@ -196,7 +216,7 @@ def check_for_updates_interactive():
             alert.addButtonWithTitle_("Later")
             alert.setAlertStyle_(NSAlertStyleInformational)
             if alert.runModal() == NSAlertFirstButtonReturn:
-                subprocess.Popen(['open', release_url])
+                subprocess.Popen(["open", release_url])
         else:
             alert.setMessageText_("You're Up to Date")
             alert.setInformativeText_(
@@ -212,6 +232,7 @@ def check_for_updates_interactive():
 def check_for_updates_at_launch():
     """Silent unless a newer version exists. Network on a daemon thread; the alert
     (if any) is shown on the main thread."""
+
     def _on_main(result):
         latest_version, release_url, error_message = result
         if error_message or not latest_version:
@@ -220,7 +241,11 @@ def check_for_updates_at_launch():
         if not available:
             return  # silent when up to date
         try:
-            from AppKit import NSAlert, NSAlertFirstButtonReturn, NSAlertStyleInformational
+            from AppKit import (
+                NSAlert,
+                NSAlertFirstButtonReturn,
+                NSAlertStyleInformational,
+            )
         except ImportError:
             return
         alert = NSAlert.alloc().init()
@@ -233,6 +258,6 @@ def check_for_updates_at_launch():
         alert.addButtonWithTitle_("Later")
         alert.setAlertStyle_(NSAlertStyleInformational)
         if alert.runModal() == NSAlertFirstButtonReturn:
-            subprocess.Popen(['open', url])
+            subprocess.Popen(["open", url])
 
     _run_async_on_main(_fetch_result, _on_main)

@@ -9,7 +9,6 @@ Applied at build time by build_macos.py.
 """
 
 import os
-import re
 
 
 def patch_pretrained_selector(base_path: str) -> bool:
@@ -21,7 +20,9 @@ def patch_pretrained_selector(base_path: str) -> bool:
     selector_path = os.path.join(base_path, "pretrained_selector.py")
 
     if not os.path.exists(selector_path):
-        print(f"[patch_pretrained_selector] pretrained_selector.py not found at {selector_path}")
+        print(
+            f"[patch_pretrained_selector] pretrained_selector.py not found at {selector_path}"
+        )
         return False
 
     with open(selector_path, "r", encoding="utf-8") as f:
@@ -123,12 +124,15 @@ def pretrained_selector(vocoder, sample_rate):
     with open(selector_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
-    print(f"[patch_pretrained_selector] Applied file-based patch to pretrained_selector.py")
+    print(
+        f"[patch_pretrained_selector] Applied file-based patch to pretrained_selector.py"
+    )
     return True
 
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_pretrained_selector(base_path)
     sys.exit(0 if success else 1)

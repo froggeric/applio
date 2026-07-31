@@ -36,7 +36,7 @@ def patch_core_py(base_path: str) -> bool:
     # Pattern 2: Previous lazy-evaluated patch
     if "_get_logs_path()" in content:
         # Already has lazy evaluation, need to replace the function body
-        old_function_pattern = r'def _get_logs_path\(\):.*?return result\n'
+        old_function_pattern = r"def _get_logs_path\(\):.*?return result\n"
         new_function = '''def _get_logs_path():
     """Get logs path using FILE-BASED configuration (process-safe)."""
     import os
@@ -90,7 +90,9 @@ def patch_core_py(base_path: str) -> bool:
 '''
         # Check if function exists
         if re.search(old_function_pattern, content, re.DOTALL):
-            new_content = re.sub(old_function_pattern, new_function, content, flags=re.DOTALL)
+            new_content = re.sub(
+                old_function_pattern, new_function, content, flags=re.DOTALL
+            )
             with open(core_py_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             print(f"[patch_data_paths] Updated _get_logs_path() to file-based approach")
@@ -98,10 +100,12 @@ def patch_core_py(base_path: str) -> bool:
         else:
             print(f"[patch_data_paths] Found _get_logs_path but pattern doesn't match")
             # Try to find and replace just the function
-            pattern = r'(def _get_logs_path\(\):.*?)(logs_path = _get_logs_path\(\))'
+            pattern = r"(def _get_logs_path\(\):.*?)(logs_path = _get_logs_path\(\))"
             match = re.search(pattern, content, re.DOTALL)
             if match:
-                new_content = content[:match.start(1)] + new_function + content[match.start(2):]
+                new_content = (
+                    content[: match.start(1)] + new_function + content[match.start(2) :]
+                )
                 with open(core_py_path, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 print(f"[patch_data_paths] Replaced _get_logs_path function")
@@ -189,6 +193,7 @@ logs_path = _get_logs_path()
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_core_py(base_path)
     sys.exit(0 if success else 1)

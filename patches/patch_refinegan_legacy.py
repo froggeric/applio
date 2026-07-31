@@ -12,7 +12,6 @@ The legacy architecture differs from the current Applio RefineGAN:
 
 import os
 
-
 _IDEMPOTENCY_MARKER = "# RefineGAN-Legacy vocoder support added"
 
 
@@ -43,14 +42,16 @@ def patch_synthesizers(base_path: str) -> bool:
     # Add import for RefineGANLegacyGenerator
     import_line = "from rvc.lib.algorithm.generators.refinegan_legacy import RefineGANLegacyGenerator"
     if import_line not in content:
-        old_import = "from rvc.lib.algorithm.generators.refinegan import RefineGANGenerator"
+        old_import = (
+            "from rvc.lib.algorithm.generators.refinegan import RefineGANGenerator"
+        )
         content = content.replace(
             old_import,
             old_import + "\n" + import_line,
         )
 
     # Add RefineGAN-Legacy vocoder case (after RefineGAN case)
-    legacy_vocoder_case = '''            elif vocoder == "RefineGAN-Legacy":
+    legacy_vocoder_case = """            elif vocoder == "RefineGAN-Legacy":
                 self.dec = RefineGANLegacyGenerator(
                     sample_rate=sr,
                     downsample_rates=upsample_rates[::-1],
@@ -58,7 +59,7 @@ def patch_synthesizers(base_path: str) -> bool:
                     start_channels=16,
                     num_mels=inter_channels,
                     checkpointing=checkpointing,
-                )'''
+                )"""
 
     # Find RefineGAN case and add legacy case after it
     refinegan_case_end = "checkpointing=checkpointing,\n                )"
@@ -68,18 +69,22 @@ def patch_synthesizers(base_path: str) -> bool:
         if idx != -1:
             # Insert after the RefineGAN case
             insert_pos = idx + len(refinegan_case_end)
-            content = content[:insert_pos] + "\n" + legacy_vocoder_case + content[insert_pos:]
+            content = (
+                content[:insert_pos] + "\n" + legacy_vocoder_case + content[insert_pos:]
+            )
 
     # Add RefineGAN-Legacy no-f0 case
-    legacy_no_f0_case = '''            elif vocoder == "RefineGAN-Legacy":
+    legacy_no_f0_case = """            elif vocoder == "RefineGAN-Legacy":
                 print("RefineGAN-Legacy does not support training without pitch guidance.")
-                self.dec = None'''
+                self.dec = None"""
 
-    refinegan_no_f0 = '''            elif vocoder == "RefineGAN":
+    refinegan_no_f0 = """            elif vocoder == "RefineGAN":
                 print("RefineGAN does not support training without pitch guidance.")
-                self.dec = None'''
+                self.dec = None"""
     if refinegan_no_f0 in content and legacy_no_f0_case.strip() not in content:
-        content = content.replace(refinegan_no_f0, refinegan_no_f0 + "\n" + legacy_no_f0_case)
+        content = content.replace(
+            refinegan_no_f0, refinegan_no_f0 + "\n" + legacy_no_f0_case
+        )
 
     # Add idempotency marker
     content = content.rstrip() + "\n" + _IDEMPOTENCY_MARKER + "\n"

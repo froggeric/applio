@@ -35,7 +35,9 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
     # by patch_process_tracking (Popen + returncode check), and upstream already checks
     # returncode. So this patch now injects ONLY the post-run output validation
     # (model_info.json was produced) right before the success return.
-    old_pattern = r'\n([ \t]+)(return f"Model \{model_name\} preprocessed successfully\.")'
+    old_pattern = (
+        r'\n([ \t]+)(return f"Model \{model_name\} preprocessed successfully\.")'
+    )
 
     # Check if already patched by looking for our idempotency marker
     if idempotency_marker in content:
@@ -43,12 +45,14 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 
     # Check if pattern exists
     if not re.search(old_pattern, content):
-        print("[patch_subprocess_validation] preprocess pattern not found - code may have been modified")
+        print(
+            "[patch_subprocess_validation] preprocess pattern not found - code may have been modified"
+        )
         return content, False
 
     # Replacement code that validates output was produced.
     # Note: The idempotency marker "# Validate output was produced" must match the check above
-    replacement = r'''
+    replacement = r"""
 \1# Validate output was produced
 \1model_dir = os.path.join(logs_path, model_name)
 \1model_info_path = os.path.join(model_dir, "model_info.json")
@@ -62,7 +66,7 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \1total_seconds = model_info.get("total_seconds", 0)
 \1if total_seconds <= 0:
 \1    return f"Error: no audio data was processed (total_seconds={total_seconds}). Check that the dataset path '{dataset_path}' contains valid audio files (WAV, MP3, FLAC, OGG)."
-\1\2'''
+\1\2"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -91,12 +95,14 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 
     # Check if pattern exists
     if not re.search(old_pattern, content):
-        print("[patch_subprocess_validation] extract pattern not found - code may have been modified")
+        print(
+            "[patch_subprocess_validation] extract pattern not found - code may have been modified"
+        )
         return content, False
 
     # Replacement code that validates extracted directory.
     # Note: The idempotency marker "# Validate extracted files exist" must match the check above
-    replacement = r'''
+    replacement = r"""
 \1# Validate extracted files exist
 \1extracted_dir = os.path.join(model_path, "extracted")
 \1if not os.path.exists(extracted_dir):
@@ -105,7 +111,7 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 \1extracted_files = os.listdir(extracted_dir)
 \1if not extracted_files:
 \1    return f"Error: extracted directory is empty at {extracted_dir}. Preprocessing may have failed - try re-running it."
-\1\2'''
+\1\2"""
 
     new_content = re.sub(old_pattern, replacement, content)
     return new_content, True
@@ -126,7 +132,9 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 
     # Pattern to find where pg, pd are set and train_script_path begins
     # Use \s* for flexible whitespace handling
-    insert_pattern = r'(pg, pd = "", ""\s*\n\s*\n)(\s*)train_script_path = os\.path\.join'
+    insert_pattern = (
+        r'(pg, pd = "", ""\s*\n\s*\n)(\s*)train_script_path = os\.path\.join'
+    )
 
     # Check if already patched by looking for our idempotency marker
     if idempotency_marker in content:
@@ -134,13 +142,15 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 
     # Check if pattern exists
     if not re.search(insert_pattern, content):
-        print("[patch_subprocess_validation] train pattern not found - code may have been modified")
+        print(
+            "[patch_subprocess_validation] train pattern not found - code may have been modified"
+        )
         return content, False
 
     # Validation code to insert
     # Note: The idempotency marker "# Validate preprocessing and extraction before training" must match the check above
     # Use the captured indentation (\2) to maintain consistent formatting
-    validation_code = r'''\2# Validate preprocessing and extraction before training
+    validation_code = r"""\2# Validate preprocessing and extraction before training
 \2model_dir = os.path.join(logs_path, model_name)
 \2model_info_path = os.path.join(model_dir, "model_info.json")
 
@@ -165,11 +175,11 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \2if not extracted_files:
 \2    return f"Error: extracted directory is empty. Re-run feature extraction for model '{model_name}'."
 
-'''
+"""
 
     # Insert validation code between pg, pd assignment and train_script_path
     # Note: validation_code ends with just a newline, so we add \2 (indentation) before train_script_path
-    replacement = r'\1' + validation_code + r'\2train_script_path = os.path.join'
+    replacement = r"\1" + validation_code + r"\2train_script_path = os.path.join"
 
     new_content = re.sub(insert_pattern, replacement, content)
     return new_content, True
@@ -222,9 +232,13 @@ def patch_core_py(base_path: str) -> bool:
     # Check if any changes were made
     if content == original_content:
         if patches_skipped:
-            print(f"[patch_subprocess_validation] No changes made. Skipped: {', '.join(patches_skipped)}")
+            print(
+                f"[patch_subprocess_validation] No changes made. Skipped: {', '.join(patches_skipped)}"
+            )
         else:
-            print("[patch_subprocess_validation] No changes needed - all patches already applied")
+            print(
+                "[patch_subprocess_validation] No changes needed - all patches already applied"
+            )
         return True
 
     # Create backup before modifying
@@ -246,15 +260,20 @@ def patch_core_py(base_path: str) -> bool:
                 shutil.copy2(backup_path, core_py_path)
                 print(f"[patch_subprocess_validation] Restored from backup")
             except Exception as restore_err:
-                print(f"[patch_subprocess_validation] Error restoring from backup: {restore_err}")
+                print(
+                    f"[patch_subprocess_validation] Error restoring from backup: {restore_err}"
+                )
         return False
 
-    print(f"[patch_subprocess_validation] Patched core.py: {', '.join(patches_applied)}")
+    print(
+        f"[patch_subprocess_validation] Patched core.py: {', '.join(patches_applied)}"
+    )
     return True
 
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_core_py(base_path)
     sys.exit(0 if success else 1)

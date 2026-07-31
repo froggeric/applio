@@ -13,14 +13,11 @@ Usage:
     python patches/download_pretraineds.py [--dry-run]
 """
 
-import os
 import sys
 import argparse
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from tqdm import tqdm
-
 
 # Base URLs
 HUGGINGFACE_BASE = "https://huggingface.co"
@@ -99,7 +96,9 @@ def download_file(url: str, dest_path: Path, pbar: tqdm) -> bool:
         return False
 
 
-def get_destination_filename(model_name: str, vocoder: str, sample_rate: str, file_type: str) -> str:
+def get_destination_filename(
+    model_name: str, vocoder: str, sample_rate: str, file_type: str
+) -> str:
     """
     Generate the destination filename for a pretrained model.
 
@@ -114,7 +113,13 @@ def get_destination_filename(model_name: str, vocoder: str, sample_rate: str, fi
     rate = sample_rate.rstrip("k")
 
     # Sanitize model name: lowercase, underscores
-    safe_name = model_name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("-", "_")
+    safe_name = (
+        model_name.lower()
+        .replace(" ", "_")
+        .replace("(", "")
+        .replace(")", "")
+        .replace("-", "_")
+    )
 
     # Vocoder prefix
     vocoder_short = "hifigan" if vocoder == "hifi-gan" else "refinegan"
@@ -154,19 +159,21 @@ def download_models(dry_run: bool = False) -> bool:
         d_size = get_file_size(f"{HUGGINGFACE_BASE}/{d_url}") if not d_exists else 0
         g_size = get_file_size(f"{HUGGINGFACE_BASE}/{g_url}") if not g_exists else 0
 
-        downloads.append({
-            "name": model_name,
-            "vocoder": vocoder,
-            "sample_rate": sample_rate,
-            "d_url": f"{HUGGINGFACE_BASE}/{d_url}",
-            "g_url": f"{HUGGINGFACE_BASE}/{g_url}",
-            "d_path": d_path,
-            "g_path": g_path,
-            "d_exists": d_exists,
-            "g_exists": g_exists,
-            "d_size": d_size,
-            "g_size": g_size,
-        })
+        downloads.append(
+            {
+                "name": model_name,
+                "vocoder": vocoder,
+                "sample_rate": sample_rate,
+                "d_url": f"{HUGGINGFACE_BASE}/{d_url}",
+                "g_url": f"{HUGGINGFACE_BASE}/{g_url}",
+                "d_path": d_path,
+                "g_path": g_path,
+                "d_exists": d_exists,
+                "g_exists": g_exists,
+                "d_size": d_size,
+                "g_size": g_size,
+            }
+        )
         total_size += d_size + g_size
 
         status = []
@@ -196,7 +203,9 @@ def download_models(dry_run: bool = False) -> bool:
     success = True
     with tqdm(total=total_size, unit="B", unit_scale=True, desc="Total") as pbar:
         for dl in downloads:
-            print(f"  Downloading {dl['name']} ({dl['vocoder']}, {dl['sample_rate']})...")
+            print(
+                f"  Downloading {dl['name']} ({dl['vocoder']}, {dl['sample_rate']})..."
+            )
 
             if not dl["d_exists"]:
                 if not download_file(dl["d_url"], dl["d_path"], pbar):
@@ -228,9 +237,7 @@ def main():
         description="Download pretrained models to bundle in macOS build"
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Calculate sizes without downloading"
+        "--dry-run", action="store_true", help="Calculate sizes without downloading"
     )
     args = parser.parse_args()
 

@@ -38,26 +38,22 @@ def get_version_from_build_script() -> str:
 
                 # Extract APPLIO_VERSION (from get_applio_version() or direct assignment)
                 applio_match = re.search(
-                    r'APPLIO_VERSION\s*=\s*get_applio_version\(\)',
-                    content
+                    r"APPLIO_VERSION\s*=\s*get_applio_version\(\)", content
                 )
                 if not applio_match:
                     applio_match = re.search(
-                        r'APPLIO_VERSION\s*=\s*["\']([^"\']+)["\']',
-                        content
+                        r'APPLIO_VERSION\s*=\s*["\']([^"\']+)["\']', content
                     )
 
                 # Extract BUILD_NUMBER
-                build_match = re.search(
-                    r'BUILD_NUMBER\s*=\s*(\d+)',
-                    content
-                )
+                build_match = re.search(r"BUILD_NUMBER\s*=\s*(\d+)", content)
 
                 if applio_match and build_match:
                     # Read version from the tracked template first (build-time source
                     # of truth); fall back to a locally-generated config.json.
                     applio_version = "3.6.0"
                     import json
+
                     for config_path in (
                         "assets/config_template.json",
                         "assets/config.json",
@@ -76,8 +72,7 @@ def get_version_from_build_script() -> str:
 
                 # Fallback: look for VERSION = "x.y.z.w" pattern
                 version_match = re.search(
-                    r'VERSION\s*=\s*f?["\']?([\d.]+)["\']?',
-                    content
+                    r'VERSION\s*=\s*f?["\']?([\d.]+)["\']?', content
                 )
                 if version_match:
                     return version_match.group(1)
@@ -86,7 +81,9 @@ def get_version_from_build_script() -> str:
                 print(f"[patch_loading_html] Warning: Could not read build script: {e}")
 
     # Fallback version
-    print("[patch_loading_html] Warning: Could not extract version from build_macos.py, using fallback")
+    print(
+        "[patch_loading_html] Warning: Could not extract version from build_macos.py, using fallback"
+    )
     return "3.6.0.3"
 
 
@@ -116,11 +113,11 @@ def patch_footer_styles(file_path: str) -> bool:
 
     # Add centering to .footer and copyright line styles
     # Pattern finds the letter-spacing line in .footer CSS block
-    footer_style_pattern = r'(\.footer\s*{[^}]*letter-spacing:\s*[^;]+;)([^}]*})'
+    footer_style_pattern = r"(\.footer\s*{[^}]*letter-spacing:\s*[^;]+;)([^}]*})"
 
     # Add left: 0; right: 0; text-align: center; to center the footer,
     # and add styles for the version-line and copyright-line spans
-    new_style = r'\1\n            left: 0;\n            right: 0;\n            text-align: center;\2\n\n        #version-line,\n        #copyright-line {\n            display: inline-block;\n        }'
+    new_style = r"\1\n            left: 0;\n            right: 0;\n            text-align: center;\2\n\n        #version-line,\n        #copyright-line {\n            display: inline-block;\n        }"
 
     if re.search(footer_style_pattern, content):
         new_content = re.sub(footer_style_pattern, new_style, content)
@@ -162,14 +159,12 @@ def patch_loading_html(file_path: str) -> bool:
 
     # Pattern to match version in the footer
     # Matches: Applio v3.6.0.3 or v3.6.0.3 or similar patterns
-    version_pattern = r'(id="version-line"[^>]*>Applio\s+v)[\d.]+(\s*\|\s*METAL\s+ACCELERATED)'
+    version_pattern = (
+        r'(id="version-line"[^>]*>Applio\s+v)[\d.]+(\s*\|\s*METAL\s+ACCELERATED)'
+    )
 
     if re.search(version_pattern, content):
-        new_content = re.sub(
-            version_pattern,
-            rf'\g<1>{version}\g<2>',
-            content
-        )
+        new_content = re.sub(version_pattern, rf"\g<1>{version}\g<2>", content)
 
         if new_content != content:
             with open(file_path, "w", encoding="utf-8") as f:
@@ -181,17 +176,19 @@ def patch_loading_html(file_path: str) -> bool:
             return True
     else:
         # Try alternative pattern for single-line footer (legacy format)
-        legacy_pattern = r'(<div class="footer">ENGINE\s+v)[\d.]+(\s*\|\s*METAL\s+ACCELERATED</div>)'
+        legacy_pattern = (
+            r'(<div class="footer">ENGINE\s+v)[\d.]+(\s*\|\s*METAL\s+ACCELERATED</div>)'
+        )
 
         if re.search(legacy_pattern, content):
             print("[patch_loading_html] Found legacy footer format, updating...")
             new_content = re.sub(
                 legacy_pattern,
-                rf'''<div class="footer">
+                rf"""<div class="footer">
         <span id="version-line">Applio v{version} | METAL ACCELERATED</span><br>
         <span id="copyright-line">© 2026 Frédéric Guigand</span>
-    </div>''',
-                content
+    </div>""",
+                content,
             )
 
             with open(file_path, "w", encoding="utf-8") as f:

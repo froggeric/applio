@@ -11,7 +11,6 @@ without producing garbage output.
 
 import os
 
-
 _IDEMPOTENCY_MARKER = "# RefineGAN-Legacy inference detection added"
 
 

@@ -25,6 +25,7 @@ from pathlib import Path
 
 class PatchResult:
     """Result of a single patch operation."""
+
     def __init__(self, name: str, success: bool, message: str, changed: bool = False):
         self.name = name
         self.success = success
@@ -33,7 +34,11 @@ class PatchResult:
 
     def __str__(self):
         status = "✓" if self.success else "✗"
-        change = " (modified)" if self.changed else " (already patched)" if self.success else ""
+        change = (
+            " (modified)"
+            if self.changed
+            else " (already patched)" if self.success else ""
+        )
         return f"  {status} {self.name}: {self.message}{change}"
 
 
@@ -47,30 +52,46 @@ def patch_sampling_rate_choices(content: str) -> tuple[str, PatchResult]:
     name = "sampling_rate choices"
 
     # Find the sampling_rate Radio section
-    sr_start = content.find('sampling_rate = gr.Radio(')
+    sr_start = content.find("sampling_rate = gr.Radio(")
     if sr_start == -1:
-        return content, PatchResult(name, False, "Could not find sampling_rate Radio definition")
+        return content, PatchResult(
+            name, False, "Could not find sampling_rate Radio definition"
+        )
 
     # Find the end of this Radio call (matching closing paren)
-    sr_end = content.find('\n                )', sr_start)
+    sr_end = content.find("\n                )", sr_start)
     if sr_end == -1:
-        sr_end = content.find('\n)', sr_start)
+        sr_end = content.find("\n)", sr_start)
 
-    sr_section = content[sr_start:sr_end] if sr_end != -1 else content[sr_start:sr_start+500]
+    sr_section = (
+        content[sr_start:sr_end] if sr_end != -1 else content[sr_start : sr_start + 500]
+    )
 
     # Check if already patched
     if '"44100"' in sr_section:
-        return content, PatchResult(name, True, "Already contains 44100 in sampling_rate choices", changed=False)
+        return content, PatchResult(
+            name, True, "Already contains 44100 in sampling_rate choices", changed=False
+        )
 
     # Find and replace the choices list within this section
     old_pattern = 'choices=["32000", "40000", "48000"]'
     new_pattern = 'choices=["32000", "40000", "44100", "48000"]'
 
     if old_pattern not in sr_section:
-        return content, PatchResult(name, False, f"Could not find expected choices pattern: {old_pattern}")
+        return content, PatchResult(
+            name, False, f"Could not find expected choices pattern: {old_pattern}"
+        )
 
     # Apply patch
-    new_content = content[:sr_start] + sr_section.replace(old_pattern, new_pattern) + content[sr_end:] if sr_end != -1 else content[:sr_start] + sr_section.replace(old_pattern, new_pattern) + content[sr_start + len(sr_section):]
+    new_content = (
+        content[:sr_start]
+        + sr_section.replace(old_pattern, new_pattern)
+        + content[sr_end:]
+        if sr_end != -1
+        else content[:sr_start]
+        + sr_section.replace(old_pattern, new_pattern)
+        + content[sr_start + len(sr_section) :]
+    )
 
     return new_content, PatchResult(name, True, "Added 44100 to choices", changed=True)
 
@@ -93,15 +114,21 @@ def patch_toggle_vocoder_hifigan(content: str) -> tuple[str, PatchResult]:
         # Check if already patched
         check_pattern = r'if\s+vocoder\s*==\s*"HiFi-GAN":\s*return\s*\{[^}]*"choices":\s*\[[^\]]*"44100"[^\]]*\]'
         if re.search(check_pattern, content, re.DOTALL):
-            return content, PatchResult(name, True, "Already contains 44100", changed=False)
-        return content, PatchResult(name, False, "Could not find HiFi-GAN choices pattern")
+            return content, PatchResult(
+                name, True, "Already contains 44100", changed=False
+            )
+        return content, PatchResult(
+            name, False, "Could not find HiFi-GAN choices pattern"
+        )
 
     old_choices = match.group(2)
     new_choices = '"32000", "40000", "44100", "48000"'
 
-    new_content = content[:match.start(2)] + new_choices + content[match.end(2):]
+    new_content = content[: match.start(2)] + new_choices + content[match.end(2) :]
 
-    return new_content, PatchResult(name, True, f"Added 44100 to HiFi-GAN choices", changed=True)
+    return new_content, PatchResult(
+        name, True, f"Added 44100 to HiFi-GAN choices", changed=True
+    )
 
 
 def patch_toggle_vocoder_refinegan(content: str) -> tuple[str, PatchResult]:
@@ -122,15 +149,21 @@ def patch_toggle_vocoder_refinegan(content: str) -> tuple[str, PatchResult]:
         # Check if already patched
         check_pattern = r'def\s+toggle_vocoder\(vocoder\):.+?else:\s*return\s*\{[^}]*"choices":\s*\[[^\]]*"44100"[^\]]*\]'
         if re.search(check_pattern, content, re.DOTALL):
-            return content, PatchResult(name, True, "Already contains 44100", changed=False)
-        return content, PatchResult(name, False, "Could not find RefineGAN choices pattern")
+            return content, PatchResult(
+                name, True, "Already contains 44100", changed=False
+            )
+        return content, PatchResult(
+            name, False, "Could not find RefineGAN choices pattern"
+        )
 
     old_choices = match.group(2)
     new_choices = '"24000", "32000", "44100"'
 
-    new_content = content[:match.start(2)] + new_choices + content[match.end(2):]
+    new_content = content[: match.start(2)] + new_choices + content[match.end(2) :]
 
-    return new_content, PatchResult(name, True, f"Added 44100 to RefineGAN choices", changed=True)
+    return new_content, PatchResult(
+        name, True, f"Added 44100 to RefineGAN choices", changed=True
+    )
 
 
 def patch_file(file_path: Path, dry_run: bool = False) -> bool:
@@ -150,7 +183,7 @@ def patch_file(file_path: Path, dry_run: bool = False) -> bool:
 
     # Read file
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding="utf-8")
     except Exception as e:
         print(f"✗ Error reading file: {e}")
         return False
@@ -195,7 +228,7 @@ def patch_file(file_path: Path, dry_run: bool = False) -> bool:
         return True
 
     try:
-        file_path.write_text(content, encoding='utf-8')
+        file_path.write_text(content, encoding="utf-8")
         print("✓ File patched successfully")
         return True
     except Exception as e:
@@ -211,12 +244,12 @@ def main():
         "file",
         nargs="?",
         default="tabs/train/train.py",
-        help="Path to train.py (default: tabs/train/train.py)"
+        help="Path to train.py (default: tabs/train/train.py)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be changed without modifying the file"
+        help="Show what would be changed without modifying the file",
     )
 
     args = parser.parse_args()
