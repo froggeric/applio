@@ -272,19 +272,8 @@ MAX_LOG_SCAN_BYTES = 64 * 1024 * 1024  # bound I/O; only the tail of a huge log 
 # =================================================================
 # 2.5. IPC Notification Constants
 # =================================================================
-IPC_NOTIFICATION_NAME = "com.applio.wrapper.visibility"
-# Wrapper -> launcher: ask the whole app to quit (1.3 unified quit path).
-IPC_QUIT_REQUEST_NAME = "com.applio.wrapper.quit_request"
-# 2nd instance -> 1st instance (single-process only): surface the main window.
+# 2nd instance -> 1st instance: surface the main window (single-instance surfacing).
 IPC_BRING_TO_FRONT_NAME = "com.applio.bring_to_front"
-
-# --- Phase 2 single-process spike ------------------------------------------------
-# When True, the launcher process runs the pywebview GUI itself instead of
-# spawning macos_wrapper.py as a child. OFF (default) == today's two-process
-# behavior, byte-for-byte unchanged. Gated behind an env flag so the crux
-# (does our NSApplicationDelegate survive webview.start()?) can be exercised
-# without disturbing the production path.
-APPLIO_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "1") == "1"
 
 # --- Single-instance lock (1.6) -----------------------------------------------
 # Fixed path (NOT the user-chosen data dir, which may not exist on first run).
@@ -338,8 +327,8 @@ def release_single_instance_lock():
 
 # Logging setup — own the root logger explicitly. logging.basicConfig is a NO-OP
 # if the root logger already has handlers (an earlier import adds one in the
-# frozen build), leaving the launcher — and the wrapper output it captures via
-# _read_wrapper_output — silently unlogged (applio_launcher.log stays stale).
+# frozen build), leaving the launcher silently unlogged (applio_launcher.log
+# stays stale).
 log_dir = os.path.expanduser("~/Library/Logs/Applio")
 os.makedirs(log_dir, exist_ok=True)
 _root_logger = logging.getLogger()
@@ -3402,49 +3391,17 @@ class ProcessDashboardController(NSObject):
             logging.debug("[Dashboard] Update timer stopped")
     
     def openMainWindow_(self, sender):
-        """Handle 'Open Main Window' button click.
-        
-        Signals the wrapper process to show its window via runtime_paths.json.
-        """
+        """Handle 'Open Main Window' button click — surface the in-process window."""
         launcher = self._launcher
-        if APPLIO_SINGLE_PROCESS and launcher is not None and getattr(launcher, "_main_window", None):
-            # Phase 2: the window lives in THIS process — show it directly.
-            logging.info("[Dashboard] Open Main Window (single-process)")
+        if launcher is not None and getattr(launcher, "_main_window", None):
+            # The window lives in THIS process — show it directly.
+            logging.info("[Dashboard] Open Main Window")
             try:
                 AppHelper.callAfter(launcher._main_window.show)
                 from AppKit import NSApp
                 NSApp.activateIgnoringOtherApps_(True)
             except Exception as e:
                 logging.warning(f"[Dashboard] Open Main Window failed: {e}")
-            return
-        import json
-        
-        logging.info("[Dashboard] Open Main Window button clicked")
-        
-        # Signal wrapper via runtime_paths.json
-        config_locations = [
-            os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
-            os.path.expanduser("~/.applio/runtime_paths.json"),
-        ]
-        
-        for config_path in config_locations:
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, "r") as f:
-                        config = json.load(f)
-                    
-                    # Set flag to show main window
-                    config["show_main_window"] = True
-                    
-                    temp_path = config_path + ".tmp"
-                    with open(temp_path, "w") as f:
-                        json.dump(config, f, indent=2)
-                    os.rename(temp_path, config_path)
-                    
-                    logging.info(f"[Dashboard] Signaled wrapper to show main window via {config_path}")
-                    break
-                except Exception as e:
-                    logging.warning(f"[Dashboard] Failed to signal wrapper: {e}")
     
     def show(self):
         """Show or bring the dashboard window to front.
@@ -3739,16 +3696,15 @@ class ProcessDashboardController(NSObject):
             if self._current_state == "active":
                 self.transition_to_idle()
 
-        # Feature 2: in single-process mode, surface the dashboard when a job
-        # appears (idle->active), but only if the user opened it this session
-        # (never force-open for a user who doesn't use the dashboard).
+        # Surface the dashboard when a job appears (idle->active), but only if
+        # the user opened it this session (never force-open for a user who
+        # doesn't use the dashboard).
         if (
-            APPLIO_SINGLE_PROCESS
-            and not was_active
+            not was_active
             and self._current_state == "active"
             and self._opened_this_session
         ):
-            logging.info("[Dashboard] idle->active transition: auto-showing (single-process)")
+            logging.info("[Dashboard] idle->active transition: auto-showing")
             self._surface_window()
     
     def get_state(self) -> str:
@@ -3931,27 +3887,19 @@ class ApplioAppDelegate(NSObject):
     def applicationShouldHandleReopen_hasVisibleWindows_(self, sender, flag):
         """Dock-click / LaunchServices reopen when already running.
 
-        The main window lives in the wrapper subprocess (Phase 1), so we signal
-        it to show itself via the runtime_paths.json flag it polls (<=2 s) and
-        bring this app to the front. Phase 2 makes this a direct
-        makeKeyAndOrderFront: on a window this same process owns.
+        The main window lives in THIS process, so we show it directly via
+        makeKeyAndOrderFront: and bring the app to the front. callAfter keeps
+        the show off the AppKit reopen callback's stack.
         """
-        logging.info("[AppDelegate] reopen fired (single-process=%s)", APPLIO_SINGLE_PROCESS)
+        logging.info("[AppDelegate] reopen fired")
         launcher = self._get_launcher()
         if launcher:
-            if APPLIO_SINGLE_PROCESS and getattr(launcher, "_main_window", None):
-                # Phase 2: the main window lives in THIS process — show it
-                # directly, no file-IPC detour. callAfter keeps the show off
-                # the AppKit reopen callback's stack.
+            if getattr(launcher, "_main_window", None):
+                # The main window lives in THIS process — show it directly.
                 try:
                     AppHelper.callAfter(launcher._main_window.show)
                 except Exception as e:
                     logging.warning(f"[AppDelegate] reopen show failed: {e}")
-            else:
-                try:
-                    launcher._signal_show_main_window()
-                except Exception as e:
-                    logging.warning(f"[AppDelegate] reopen signal failed: {e}")
             try:
                 from AppKit import NSApp
                 NSApp.activateIgnoringOtherApps_(True)
@@ -3967,18 +3915,16 @@ class ApplioAppDelegate(NSObject):
         equivalent to the NSTerminateLater+reply pattern but cannot hang the
         quit if a reply were ever missed.
         """
-        logging.info("[AppDelegate] terminate fired (single-process=%s)", APPLIO_SINGLE_PROCESS)
+        logging.info("[AppDelegate] terminate fired")
         launcher = self._get_launcher()
         if not launcher:
             return 1  # NSTerminateNow
 
-        # If the user already confirmed a quit, skip re-prompting. Two flags:
-        #   - _quit_confirmed: two-process, set by wrapperQuitRequested_ (the
-        #     wrapper asked us to quit via distributed notification).
-        #   - _user_confirmed_quit: single-process, set by on_window_closing
-        #     right before it defers NSApp.terminate_ (window-close Terminate).
-        confirmed = getattr(launcher, "_quit_confirmed", False) or getattr(
-            launcher, "_user_confirmed_quit", False
+        # If the user already confirmed a quit (the window-close Terminate path
+        # sets _user_confirmed_quit right before deferring NSApp.terminate_),
+        # skip re-prompting. (_quit_confirmed is a legacy flag kept for safety.)
+        confirmed = getattr(launcher, "_user_confirmed_quit", False) or getattr(
+            launcher, "_quit_confirmed", False
         )
         try:
             active = [] if confirmed else get_active_processes()
@@ -4013,13 +3959,11 @@ class ApplioAppDelegate(NSObject):
                 logging.warning(f"[AppDelegate] quit-confirm alert failed: {e}")
                 # Fall through to terminate — never block quit on a UI failure.
 
-        # Confirmed or nothing active: run the cascade, then allow termination.
-        if APPLIO_SINGLE_PROCESS:
-            # Single-process (Task 2b): signal the Gradio supervisor to abort
-            # any retry/backoff loop as we tear the process down.
-            _applio = getattr(launcher, "_applio_app", None)
-            if _applio is not None:
-                _applio._stopping = True
+        # Confirmed or nothing active: signal the Gradio supervisor to abort any
+        # retry/backoff loop, run the cascade, then allow termination.
+        _applio = getattr(launcher, "_applio_app", None)
+        if _applio is not None:
+            _applio._stopping = True
         try:
             launcher._terminate_children()
         except Exception as e:
@@ -4043,10 +3987,9 @@ class ApplioAppDelegate(NSObject):
 # =================================================================
 
 class ApplioLauncher:
-    """Main launcher managing wrapper process and UI."""
+    """Main launcher: runs the in-process pywebview/Gradio GUI and native menu."""
 
     def __init__(self):
-        self.wrapper_process = None
         self.progress_window = None
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
@@ -4054,43 +3997,28 @@ class ApplioLauncher:
         self._dist_center = None  # NSDistributedNotificationCenter reference
         self._menu_handler = None  # NSObject proxy for menu actions (initialized in _setup_menu)
         self._app_delegate = None  # NSApplicationDelegate (reopen/terminate), attached in _setup_menu
-        self._applio_app = None  # Single-process: the in-process GUI (ApplioApp) from start_gui
-        self._main_window = None  # Single-process: pywebview window handle (None in two-process)
-        self._quit_confirmed = False  # Wrapper already confirmed quit -> skip re-prompt in delegate
-        self._user_confirmed_quit = False  # Single-process window-close Terminate -> skip re-prompt
-        self._wrapper_died = False  # Wrapper exited/crashed; checked by a main-thread timer, NOT the signal handler
-        self._wrapper_died_pid = None
-        self._wrapper_relaunched = False  # Once-guard for automatic wrapper relaunch
+        self._applio_app = None  # In-process GUI (ApplioApp) from start_gui
+        self._main_window = None  # pywebview window handle
+        self._quit_confirmed = False  # Legacy flag (unused in single-process; kept for safety)
+        self._user_confirmed_quit = False  # Window-close Terminate -> skip re-prompt
         self._setup_signal_handlers()
-        self._setup_ipc_observer()  # Setup distributed notification listener
-
-    def _signal_show_main_window(self):
-        """Write the show_main_window flag the wrapper polls (Phase 1 IPC).
-
-        Mirrors ProcessDashboardController.openMainWindow_ so the dock-click
-        reopen path and the Show Main Window menu item share one mechanism.
-        """
-        import json
-
-        config_locations = [
-            os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
-            os.path.expanduser("~/.applio/runtime_paths.json"),
-        ]
-        for config_path in config_locations:
-            if not os.path.exists(config_path):
-                continue
-            try:
-                with open(config_path, "r") as f:
-                    config = json.load(f)
-                config["show_main_window"] = True
-                temp_path = config_path + ".tmp"
-                with open(temp_path, "w") as f:
-                    json.dump(config, f, indent=2)
-                os.rename(temp_path, config_path)
-                logging.info(f"[Launcher] Signaled wrapper to show main window via {config_path}")
-                return
-            except Exception as e:
-                logging.warning(f"[Launcher] Failed to signal show_main_window: {e}")
+        # Single-instance surfacing: observe a 2nd instance's bring_to_front
+        # request (posted when a second launch fails the single-instance flock).
+        # The main window is in-process, so we surface it on the main thread.
+        try:
+            from Foundation import NSDistributedNotificationCenter
+            self._dist_center = NSDistributedNotificationCenter.defaultCenter()
+            self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
+                self,
+                "bringToFront:",
+                IPC_BRING_TO_FRONT_NAME,
+                None,
+                4,  # NSNotificationSuspensionBehaviorDeliverImmediately
+            )
+            logging.info("[Launcher] single-instance bring_to_front observer registered")
+        except ImportError:
+            logging.warning("[Launcher] NSDistributedNotificationCenter not available")
+            self._dist_center = None
 
     def start(self):
         """Main entry point."""
@@ -4102,20 +4030,15 @@ class ApplioLauncher:
         # the lock, signal it to surface its window and exit.
         if not acquire_single_instance_lock():
             logging.warning("[Launcher] Another instance is already running; signaling it and exiting.")
-            if APPLIO_SINGLE_PROCESS:
-                # Single-process: the 1st instance's window is in-process, so the
-                # two-process file flag (_signal_show_main_window) is a no-op.
-                # Post a distributed notification; the 1st instance surfaces its
-                # own main window via bringToFront_.
-                try:
-                    from Foundation import NSDistributedNotificationCenter
-                    NSDistributedNotificationCenter.defaultCenter().postNotificationName_object_(
-                        IPC_BRING_TO_FRONT_NAME, None
-                    )
-                except Exception as e:
-                    logging.warning(f"[Launcher] bring_to_front post failed: {e}")
-            else:
-                self._signal_show_main_window()
+            # The 1st instance's window is in-process. Post a distributed
+            # notification; it surfaces its own main window via bringToFront_.
+            try:
+                from Foundation import NSDistributedNotificationCenter
+                NSDistributedNotificationCenter.defaultCenter().postNotificationName_object_(
+                    IPC_BRING_TO_FRONT_NAME, None
+                )
+            except Exception as e:
+                logging.warning(f"[Launcher] bring_to_front post failed: {e}")
             sys.exit(0)
 
         # 1. Validate existing processes
@@ -4142,39 +4065,22 @@ class ApplioLauncher:
             logging.info(f"[Launcher] Found {len(active)} active processes")
             self._show_progress_window_for_processes(active)
 
-        if APPLIO_SINGLE_PROCESS:
-            # --- single-process spike: the launcher process IS the GUI process ---
-            # No wrapper to spawn/reap; this process runs pywebview + Gradio
-            # directly. webview.start drives the run loop below (NO menu= — we
-            # keep our native NSMenu; _reassert_menu_and_delegate re-seats the
-            # delegate + menu after webview clobbers them on window creation).
-            import macos_wrapper, webview
-            self._applio_app = macos_wrapper.start_gui(launcher=self)
-            self._main_window = getattr(self._applio_app, "window", None)
-            logging.info("[Launcher] Starting webview event loop (single-process)")
-            # Silent launch-time update check (daemon thread; alert only if newer).
-            AppHelper.callAfter(self._launch_time_update_check)
-            webview.start(func=self._reassert_menu_and_delegate, debug=False)
-        else:
-            # --- two-process (unchanged) ---
-            # 3.5. Crash recovery (1.6): reap a leftover wrapper from a prior
-            # (crashed) session before spawning a fresh one, so the new wrapper
-            # can bind port 6969 cleanly.
-            self._reap_orphan_wrapper(state)
+        # The launcher process IS the GUI process — it runs pywebview + Gradio
+        # directly. webview.start drives the run loop below (NO menu= — we keep
+        # our native NSMenu; _reassert_menu_and_delegate re-seats the delegate +
+        # menu after webview clobbers them on window creation).
+        import macos_wrapper, webview
+        self._applio_app = macos_wrapper.start_gui(launcher=self)
+        self._main_window = getattr(self._applio_app, "window", None)
+        logging.info("[Launcher] Starting webview event loop")
+        # Silent launch-time update check (daemon thread; alert only if newer).
+        AppHelper.callAfter(self._launch_time_update_check)
+        webview.start(func=self._reassert_menu_and_delegate, debug=False)
 
-            # 4. Spawn wrapper process
-            self._spawn_wrapper()
-
-            # 5. Run event loop
-            logging.info("[Launcher] Starting event loop")
-            # Silent launch-time update check (daemon thread; alert only if newer).
-            AppHelper.callAfter(self._launch_time_update_check)
-            AppHelper.runEventLoop(installInterrupt=True)
-
-        # Run loop returned (Ctrl-C via installInterrupt, or NSApp.stop). Run the
-        # termination cascade before exit — signal handlers may not fire reliably
-        # while blocked in the CFRunLoop, so this post-loop call is the reliable
-        # path (1.7).
+        # Run loop returned (webview.start returned, e.g. NSApp.stop on quit).
+        # Run the termination cascade before exit — signal handlers may not fire
+        # reliably while blocked in the CFRunLoop, so this post-loop call is the
+        # reliable path (1.7).
         logging.info("[Launcher] Event loop ended; running termination cascade")
         try:
             self._terminate_children()
@@ -4187,71 +4093,14 @@ class ApplioLauncher:
         signal.signal(signal.SIGINT, self._handle_interrupt)
         signal.signal(signal.SIGTERM, self._handle_terminate)
 
-    def _setup_ipc_observer(self):
-        """Setup observer for wrapper window visibility changes via distributed notifications."""
-        try:
-            from Foundation import NSDistributedNotificationCenter
-            
-            self._dist_center = NSDistributedNotificationCenter.defaultCenter()
-            self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
-                self,
-                "wrapperVisibilityChanged:",
-                IPC_NOTIFICATION_NAME,
-                None,
-                4  # NSNotificationSuspensionBehaviorDeliverImmediately
-            )
-            # Also observe the wrapper's quit request (1.3 unified quit path).
-            self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
-                self,
-                "wrapperQuitRequested:",
-                IPC_QUIT_REQUEST_NAME,
-                None,
-                4  # NSNotificationSuspensionBehaviorDeliverImmediately
-            )
-            # Also observe a 2nd instance's bring_to_front request (single-process
-            # single-instance surfacing). Inert in two-process (never posted there).
-            self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
-                self,
-                "bringToFront:",
-                IPC_BRING_TO_FRONT_NAME,
-                None,
-                4  # NSNotificationSuspensionBehaviorDeliverImmediately
-            )
-            logging.info("[Launcher] IPC observer registered for distributed notifications")
-        except ImportError:
-            logging.warning("[Launcher] NSDistributedNotificationCenter not available, using file-based IPC only")
-            self._dist_center = None
-
-    def wrapperVisibilityChanged_(self, notification):
-        """Handle wrapper window visibility change notification.
-        
-        Called when wrapper window is hidden (Keep Running mode).
-        """
-        try:
-            user_info = notification.userInfo()
-            if not user_info:
-                return
-            
-            visible = user_info.get("visible", True)
-            if not visible:
-                logging.info("[Launcher] Wrapper window hidden via IPC notification")
-                # Show progress window if there are active processes
-                active = get_active_processes()
-                if active:
-                    # Must run on main thread
-                    AppHelper.callAfter(self._show_progress_window_for_processes, active)
-        except Exception as e:
-            logging.warning(f"[Launcher] Error handling visibility change: {e}")
-
     def bringToFront_(self, notification):
-        """Single-process: a 2nd instance failed the lock and asked us to surface.
+        """A 2nd instance failed the single-instance lock and asked us to surface.
 
-        Inert in two-process (that path never posts this notification). The
-        main window is in-process (self._main_window), so we surface it on the
-        main thread via AppHelper.callAfter, matching the reopen pattern.
+        The main window is in-process (self._main_window), so we surface it on
+        the main thread via AppHelper.callAfter, matching the reopen pattern.
         """
         try:
-            if APPLIO_SINGLE_PROCESS and getattr(self, "_main_window", None):
+            if getattr(self, "_main_window", None):
                 from PyObjCTools import AppHelper
                 from AppKit import NSApp
                 AppHelper.callAfter(self._main_window.show)
@@ -4260,57 +4109,12 @@ class ApplioLauncher:
         except Exception as e:
             logging.warning(f"[Launcher] bring_to_front failed: {e}")
 
-    def wrapperQuitRequested_(self, notification):
-        """The wrapper asked the whole app to quit (1.3 unified quit path).
-
-        Deferred via AppHelper.callAfter so NSApp.terminate_ is NOT invoked
-        re-entrantly from inside the distributed-notification callback.
-        """
-        logging.info("[Launcher] Quit requested by wrapper via IPC")
-        self._quit_confirmed = True  # delegate skips re-prompting
-
-        def _do_terminate():
-            try:
-                from AppKit import NSApplication
-                NSApplication.sharedApplication().terminate_(None)
-            except Exception as e:
-                logging.warning(f"[Launcher] terminate_ after quit request failed: {e}")
-                sys.exit(0)
-
-        AppHelper.callAfter(_do_terminate)
-
-    def _check_wrapper_died(self):
-        """Main-thread response to a wrapper exit: relaunch once, else quit.
-
-        Called by the periodic menu-update timer — NEVER from the SIGCHLD
-        handler (subprocess.Popen is not async-signal-safe alongside CFRunLoop).
-        """
-        if not self._wrapper_died or self._terminating:
-            return
-        self._wrapper_died = False  # consume the event
-
-        if self._wrapper_relaunched:
-            logging.warning("[Launcher] Wrapper exited again after relaunch; quitting")
-            try:
-                from AppKit import NSApplication
-                NSApplication.sharedApplication().terminate_(None)
-            except Exception:
-                sys.exit(0)
-            return
-
-        logging.info("[Launcher] Relaunching wrapper after unexpected exit")
-        self._wrapper_relaunched = True
-        try:
-            self._spawn_wrapper()
-        except Exception as e:
-            logging.error(f"[Launcher] Wrapper relaunch failed: {e}")
-
     def _handle_child_exit(self, signum, frame):
         """Handle child process exit (SIGCHLD).
 
-        Async-signal-safe: only reaps children and sets a flag. The relaunch /
-        quit decision is made on the main thread in _check_wrapper_died (via
-        the timer), NOT here.
+        Async-signal-safe: reaps exited children so they don't become zombies.
+        (In single-process there is no wrapper subprocess to track — this only
+        reaps Gradio/training child processes spawned within this process.)
         """
         try:
             while True:
@@ -4318,11 +4122,6 @@ class ApplioLauncher:
                 if pid == 0:
                     break
                 logging.info(f"[Launcher] Child process {pid} exited")
-                wrapper_pid = self.wrapper_process.pid if self.wrapper_process else None
-                if wrapper_pid is not None and pid == wrapper_pid:
-                    logging.info("[Launcher] Wrapper process exited")
-                    self._wrapper_died = True
-                    self._wrapper_died_pid = pid
         except ChildProcessError:
             pass
 
@@ -4337,39 +4136,33 @@ class ApplioLauncher:
         sys.exit(0)
 
     def _handle_terminate(self, signum, frame):
-        """Handle SIGTERM with cascade termination."""
+        """Handle SIGTERM by suppressing it (a training-cleanup artifact).
+
+        The launcher IS the GUI process, so a normal quit never arrives as
+        SIGTERM — it goes through applicationShouldTerminate_ (Cmd+Q / window
+        close / NSApp.terminate), which quits via a deferred
+        AppHelper.callAfter(NSApp.terminate_(None)) with _user_confirmed_quit.
+        A SIGTERM here is, in practice, the leaked-resource teardown fired by
+        training's os._exit(2333333): RVC ends training by os._exit-ing the
+        worker WITHOUT draining its persistent DataLoader workers
+        (num_workers=4, persistent_workers=True), so they are orphaned but
+        remain in THIS process group, and their teardown signals the whole
+        group — which would kill the entire app. Suppress the cascade quit and
+        stay running — the orphaned workers self-terminate on their broken
+        parent pipe within seconds (and already received this very signal if it
+        was a group-wide killpg). Dedupe the log line so a burst of strays
+        doesn't spam.
+        """
         if self._terminating:
             return
-        if APPLIO_SINGLE_PROCESS:
-            # In single-process the launcher IS the GUI process, so a normal
-            # quit never arrives as SIGTERM -- it goes through
-            # applicationShouldTerminate_ (Cmd+Q / window close / NSApp.terminate).
-            # A SIGTERM here is, in practice, the leaked-resource teardown fired
-            # by training's os._exit(2333333): RVC ends training by os._exit-ing
-            # the worker WITHOUT draining its persistent DataLoader workers
-            # (num_workers=4, persistent_workers=True), so they are orphaned but
-            # remain in THIS process group, and their teardown signals the whole
-            # group. In two-process that only ever took down the wrapper
-            # subprocess (the launcher survived and re-spawned it); in
-            # single-process it would kill the entire app. Suppress the cascade
-            # quit and stay running -- the orphaned workers self-terminate on
-            # their broken parent pipe within seconds (and already received this
-            # very signal if it was a group-wide killpg). Dedupe the log line so
-            # a burst of strays doesn't spam.
-            now = time.time()
-            if now - getattr(self, "_last_spurious_sigterm", 0.0) > 5.0:
-                self._last_spurious_sigterm = now
-                logging.info(
-                    "[Launcher] SIGTERM in single-process mode; suppressing app "
-                    "quit (training-cleanup artifact). The app stays running; "
-                    "use Cmd+Q to quit."
-                )
-            return
-        self._terminating = True
-        logging.info("[Launcher] Terminate received, initiating cascade shutdown")
-        self._terminate_children()
-        self._cleanup()
-        sys.exit(0)
+        now = time.time()
+        if now - getattr(self, "_last_spurious_sigterm", 0.0) > 5.0:
+            self._last_spurious_sigterm = now
+            logging.info(
+                "[Launcher] SIGTERM; suppressing app quit (training-cleanup "
+                "artifact). The app stays running; use Cmd+Q to quit."
+            )
+        return
 
     def _terminate_children(self, timeout: float = 5.0):
         """Terminate all child processes gracefully with escalation.
@@ -4414,97 +4207,6 @@ class ApplioLauncher:
             
         except ProcessLookupError:
             logging.info("[Launcher] No child processes to terminate")
-
-    def _reap_orphan_wrapper(self, state):
-        """Reap a leftover wrapper process from a prior (crashed) session.
-
-        `wrapper_pid` is written by _spawn_wrapper but historically never read
-        back. On a fresh launch after a crash, a prior wrapper + Gradio may
-        still be alive holding port 6969; kill it so the new wrapper binds
-        cleanly. Clears the stale pid regardless.
-        """
-        prior_pid = state.get("wrapper_pid")
-        if not prior_pid:
-            return
-        try:
-            import psutil
-            if psutil.pid_exists(prior_pid):
-                try:
-                    proc = psutil.Process(prior_pid)
-                    cmdline = " ".join(proc.cmdline() or [])
-                    name = proc.name() or ""
-                except Exception:
-                    cmdline, name = "", ""
-                # Best-effort identity check before killing.
-                if "macos_wrapper" in cmdline or "Applio" in name or "python" in name.lower():
-                    logging.warning(
-                        f"[Launcher] Reaping orphan wrapper PID {prior_pid} from prior session"
-                    )
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=5)
-                    except Exception:
-                        try:
-                            proc.kill()
-                        except Exception:
-                            pass
-        except Exception as e:
-            logging.warning(f"[Launcher] Orphan-wrapper reap check failed: {e}")
-        finally:
-            try:
-                state["wrapper_pid"] = None
-                save_process_state(state)
-            except Exception:
-                pass
-
-    def _spawn_wrapper(self):
-        """Spawn macos_wrapper.py as child process."""
-        wrapper_path = self._find_wrapper_path()
-        if not wrapper_path:
-            logging.error("[Launcher] Could not find macos_wrapper.py")
-            sys.exit(1)
-
-        logging.info(f"[Launcher] Spawning wrapper: {wrapper_path}")
-
-        # Set environment variable so wrapper knows it's running under launcher
-        env = os.environ.copy()
-        env["APPLIO_LAUNCHED_BY_LAUNCHER"] = "1"
-
-        self.wrapper_process = subprocess.Popen(
-            [sys.executable, wrapper_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            universal_newlines=True,
-            env=env,  # Pass modified environment
-        )
-
-        # Save wrapper PID
-        state = load_process_state()
-        state["wrapper_pid"] = self.wrapper_process.pid
-        save_process_state(state)
-
-        logging.info(f"[Launcher] Wrapper spawned with PID {self.wrapper_process.pid}")
-
-        # Start thread to read wrapper output
-        threading.Thread(target=self._read_wrapper_output, daemon=True).start()
-
-    def _find_wrapper_path(self):
-        """Find macos_wrapper.py path."""
-        candidates = [
-            os.path.join(BASE_PATH, "macos_wrapper.py"),
-            os.path.join(os.path.dirname(BASE_PATH), "macos_wrapper.py"),
-        ]
-        for path in candidates:
-            if os.path.exists(path):
-                return path
-        return None
-
-    def _read_wrapper_output(self):
-        """Read stdout from wrapper."""
-        for line in iter(self.wrapper_process.stdout.readline, ''):
-            if line:
-                logging.info(f"[Wrapper] {line.rstrip()}")
 
     def _setup_menu(self):
         """Setup native macOS menu bar."""
@@ -4611,57 +4313,16 @@ class ApplioLauncher:
         )
 
     def menuUpdateTimerFired_(self, timer):
-        """Periodic menu state update + wrapper-death check."""
+        """Periodic menu state update + dashboard heartbeat."""
         self._update_menu_state()
-        # Feature 2: single-process heartbeat for the dashboard. Keeps its state
-        # fresh (idle<->active transitions) so it can auto-show on a new job.
-        # Strictly gated on APPLIO_SINGLE_PROCESS and only drives an EXISTING
-        # controller — never force-creates the dashboard for a user who hasn't
-        # opened it. Two-process behavior is unchanged.
-        if APPLIO_SINGLE_PROCESS and self._dashboard_controller:
+        # Dashboard heartbeat: keep its state fresh (idle<->active transitions)
+        # so it can auto-show on a new job. Only drives an EXISTING controller —
+        # never force-creates the dashboard for a user who hasn't opened it.
+        if self._dashboard_controller:
             try:
                 self._dashboard_controller.update_process_list()
             except Exception as e:
                 logging.warning(f"[Launcher] dashboard heartbeat failed: {e}")
-        # No wrapper subprocess in single-process mode — skip the death check.
-        if not APPLIO_SINGLE_PROCESS:
-            self._check_wrapper_died()
-
-    def _check_wrapper_window_hidden(self):
-        """Check if wrapper window was hidden (Keep Running clicked).
-
-        Returns True if wrapper_window_visible is False in runtime config.
-        Also resets the flag to True to prevent repeated triggers.
-        """
-        import json
-
-        config_locations = [
-            os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
-            os.path.expanduser("~/.applio/runtime_paths.json"),
-        ]
-
-        for config_path in config_locations:
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, "r") as f:
-                        config = json.load(f)
-
-                    # Check if wrapper window was hidden
-                    if config.get("wrapper_window_visible") is False:
-                        logging.info("[Launcher] Detected wrapper window hidden, showing progress window")
-
-                        # Reset the flag to prevent repeated triggers
-                        config["wrapper_window_visible"] = True
-                        temp_path = config_path + ".tmp"
-                        with open(temp_path, "w") as f:
-                            json.dump(config, f, indent=2)
-                        os.rename(temp_path, config_path)
-
-                        return True
-                except Exception as e:
-                    logging.warning(f"[Launcher] Failed to check runtime config: {e}")
-
-        return False
 
     def _check_show_progress_monitor_signal(self):
         """Check if wrapper requested to show Progress Monitor via IPC.
@@ -4719,14 +4380,6 @@ class ApplioLauncher:
                     self._dashboard_controller.show()
             except Exception as e:
                 logging.error(f"[Launcher] dashboard via IPC failed: {e}")
-        # No wrapper subprocess in single-process mode — skip the hidden-window check.
-        if not APPLIO_SINGLE_PROCESS and self._check_wrapper_window_hidden():
-            active = get_active_processes()
-            if active:
-                try:
-                    self._show_progress_window_for_processes(active)
-                except Exception as e:
-                    logging.error(f"[Launcher] progress window failed: {e}")
 
         dyn = getattr(self, "_dynamic_items", {})
         if not dyn:
@@ -5027,23 +4680,16 @@ class ApplioLauncher:
             logging.info("[Launcher] Dashboard shown")
 
     def showMainWindow_(self, sender):
-        """Show main Gradio window.
-
-        Note: The main window is managed by macos_wrapper.py running in a subprocess.
-        This menu item is primarily for user awareness; the wrapper handles window visibility.
-        """
+        """Show the main Gradio window (lives in THIS process)."""
         logging.info("[Launcher] Show Main Window requested")
-        if APPLIO_SINGLE_PROCESS and self._main_window:
-            # Phase 2: the window lives in THIS process — show it directly.
+        if self._main_window:
+            # The window lives in THIS process — show it directly.
             try:
                 AppHelper.callAfter(self._main_window.show)
                 from AppKit import NSApp
                 NSApp.activateIgnoringOtherApps_(True)
             except Exception as e:
                 logging.warning(f"[Launcher] Show Main Window failed: {e}")
-        else:
-            # The main window lives in the wrapper subprocess; signal it to show.
-            self._signal_show_main_window()
 
     def _create_dashboard(self):
         """Create the ProcessDashboardController instance.
@@ -5111,10 +4757,6 @@ class ApplioLauncher:
         if self.progress_window:
             self.progress_window._cleanup()
             self.progress_window = None
-
-        # Terminate wrapper process
-        if self.wrapper_process and self.wrapper_process.poll() is None:
-            self.wrapper_process.terminate()
 
 
 # =================================================================
