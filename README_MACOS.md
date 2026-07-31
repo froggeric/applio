@@ -593,13 +593,8 @@ detects `argv[1].endswith('.py')` and `runpy.run_path`s the script, so upstream'
 
 One process means one dock icon, one menu bar, and one window, with none of the quirks of the old
 two-process layout: Hide actually hides the window, and the menu bar no longer swaps depending on
-which window is frontmost.
-
-> **Legacy fallback (two-process):** the previous layout ran `applio_launcher.py` (dock icon + menu)
-> and `macos_wrapper.py` (the window, an **Accessory** dock-hidden child) as two cooperating
-> processes, coordinated through a polled `runtime_paths.json` flag and
-> `NSDistributedNotificationCenter`. It is kept as a safety net. Set `APPLIO_SINGLE_PROCESS=0` (for
-> example, `launchctl setenv APPLIO_SINGLE_PROCESS 0` before opening the app) to opt back into it.
+which window is frontmost. (The previous two-process layout and the `APPLIO_SINGLE_PROCESS` flag
+were removed in 3.6.3.7; single-process is now the only architecture.)
 
 ### Native Menu
 

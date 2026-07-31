@@ -7,6 +7,29 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ---
 
+## [3.6.3.7] - 2026-07-31
+
+### Added
+- **Process Dashboard: batch voice-conversion progress.** The dashboard now tracks batch inference
+  (Process → Open Progress Dashboard, ⌘⇧P): files converted / total, current file, derived ETA, and
+  speed (files/min), with an auto-show on batch start. Completed and cancelled batch runs appear in
+  the dashboard history, and a stale `running` record left by a crash or quit is marked `interrupted`
+  on the next launch so the dashboard never shows a phantom running job.
+
+### Changed
+- **Single-process is now the only architecture.** The two-process code and the `APPLIO_SINGLE_PROCESS`
+  flag were removed; the app runs as one native process (one dock icon, one menu, one window). The
+  previous legacy fallback (`APPLIO_SINGLE_PROCESS=0`) is gone.
+
+### Fixed
+- **Inference "Stop" no longer quits the whole app.** In single-process the inference PID was the app
+  PID, so the old PID-kill Stop quit Applio mid-batch. Batch inference Stop now cancels cooperatively
+  via a cancel flag checked per file. Also fixes a frozen-build issue where batch inference could not
+  write its stop-PID file in the read-only app bundle (the PID file is gone, replaced by the cancel
+  flag in the writable data directory).
+
+---
+
 ## [3.6.3.6] - 2026-07-30
 
 ### Added
