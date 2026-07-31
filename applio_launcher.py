@@ -573,6 +573,48 @@ def get_active_processes():
         ]
 
 
+def _read_inference_progress():
+    """Read ~/Applio/.applio/inference_progress.json, or None if missing/corrupt.
+
+    Reuses the launcher's own get_process_state_path 3-tier resolver so this is
+    guaranteed to read from the SAME .applio dir the launcher reads history and
+    active-process state from (env > runtime_paths.json > ~/Applio).
+    """
+    path = os.path.join(os.path.dirname(get_process_state_path()), "inference_progress.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def _synthesize_inference_proc():
+    """Synthesize a dashboard proc dict from the live inference_progress.json.
+
+    Returns None when there is no active batch (missing file, or a terminal
+    status like completed/cancelled/error). The synthesized proc is appended to
+    _active_processes so it flows through the EXISTING sidebar / detail-panel /
+    action-bar / history plumbing; every branch that touches pid/log paths keys
+    off the ``_is_inference`` marker to stay off the subprocess codepath.
+    """
+    inf = _read_inference_progress()
+    if not inf or inf.get("status") not in ("running", "cancelling"):
+        return None
+    return {
+        "type": "inference", "status": inf["status"],
+        "model_name": inf.get("model_name", ""),
+        "total": inf.get("total", 0), "processed": inf.get("processed", 0),
+        "converted": inf.get("converted", 0), "skipped": inf.get("skipped", 0),
+        "current_file": inf.get("current_file", ""),
+        "started_at": inf.get("started_at"),
+        "started_at_epoch": inf.get("started_at"),
+        "output_folder": inf.get("output_folder"),
+        "_is_inference": True,
+    }
+
+
 # =================================================================
 # 4.5. Process History Management
 # =================================================================
@@ -2656,6 +2698,22 @@ class ProcessDashboardController(NSObject):
         # on the process actually being displayed, not a stale selection.
         self._current_proc = proc
 
+        # Batch inference has no subprocess - it runs in the GUI process, so it
+        # has no PID/log/trainining.log. Branch off the subprocess codepath and
+        # render onto the SAME outlets the training path uses. Re-read the LIVE
+        # record each tick so the bar climbs every ~1s (the table rebuild only
+        # refreshes the row every ~3s).
+        if proc.get("_is_inference"):
+            live = _read_inference_progress()
+            if live and live.get("status") in ("running", "cancelling"):
+                proc = dict(proc)
+                proc.update(live)
+                proc["_is_inference"] = True
+                proc["started_at_epoch"] = live.get("started_at")
+                self._current_proc = proc
+            self._render_inference_detail(proc)
+            return
+
         try:
             self.detail_panel.setHidden_(False)
 
@@ -2857,13 +2915,83 @@ class ProcessDashboardController(NSObject):
             logging.warning(f"[Dashboard] Unexpected error reading log: {e}")
             self.detail_log_view.setString_("Unexpected error reading log file")
 
+    def _render_inference_detail(self, proc):
+        """Render a synthesized batch-inference proc onto the detail panel.
+
+        Maps inference progress onto the SAME outlets the training path uses
+        (outlet names confirmed in _create_detail_panel): the progress bar climbs
+        with processed/total, the "best" label carries speed, the "current" label
+        carries converted/skipped/current file, and the log view carries a
+        one-shot status summary (the batch has no training.log). For a HISTORICAL
+        inference row selected from the sidebar, the caller has already let ``proc``
+        keep the terminal record so compute_inference_stats uses ended_at.
+        """
+        from applio_inference_stats import compute_inference_stats
+        try:
+            self.detail_panel.setHidden_(False)
+            if hasattr(self, "placeholder_view") and self.placeholder_view:
+                self.placeholder_view.setHidden_(True)
+            model_name = proc.get("model_name", "")
+            if hasattr(self, "detail_name") and self.detail_name:
+                self.detail_name.setStringValue_(
+                    f"Inference: {model_name}" if model_name else "Inference")
+            status = proc.get("status", "running")
+            label = {"running": "Running", "cancelling": "Stopping…"}.get(status, status.title())
+            if hasattr(self, "detail_status") and self.detail_status:
+                self.detail_status.setStringValue_(label)
+            stats = compute_inference_stats(proc, now=time.time())
+            total = proc.get("total", 0) or 0
+            processed = proc.get("processed", 0) or 0
+            converted = proc.get("converted", 0) or 0
+            skipped = proc.get("skipped", 0) or 0
+            if hasattr(self, "detail_progress") and self.detail_progress:
+                self.detail_progress.stopAnimation_(None)
+                self.detail_progress.setIndeterminate_(False)
+                self.detail_progress.setDoubleValue_(stats["pct"])
+            if hasattr(self, "detail_progress_text") and self.detail_progress_text:
+                self.detail_progress_text.setStringValue_(
+                    f"{processed}/{total} files ({stats['pct']}%)")
+            if hasattr(self, "detail_current_label") and self.detail_current_label:
+                cur = proc.get("current_file", "")
+                self.detail_current_label.setStringValue_(
+                    f"Converted {converted}  |  Skipped {skipped}" +
+                    (f"  |  File: {cur}" if cur else ""))
+                self.detail_current_label.setHidden_(False)
+            if hasattr(self, "detail_best_label") and self.detail_best_label:
+                self.detail_best_label.setStringValue_(
+                    f"Speed {stats['speed']} files/min")
+                self.detail_best_label.setHidden_(False)
+            if hasattr(self, "detail_eta") and self.detail_eta:
+                self.detail_eta.setStringValue_(f"Estimated time: {stats['eta']}s")
+            if hasattr(self, "detail_chart") and self.detail_chart:
+                self.detail_chart.setHidden_(True)   # no loss curve for inference
+            if hasattr(self, "detail_log_view") and self.detail_log_view:
+                self.detail_log_view.setString_(
+                    f"Status: {label}\n{converted} converted, {skipped} skipped of {total}.\n"
+                    f"Speed {stats['speed']} files/min, elapsed {stats['elapsed']}s.")
+            self._update_action_bar(proc)
+        except Exception as e:
+            logging.warning(f"[Dashboard] inference detail render failed: {e}")
+
     # =================================================================
     # Action bar (Feature 4)
     # =================================================================
 
     def _resolve_log_path(self, proc):
-        """Resolve the log file path for a proc (log_file or log_path), or None."""
+        """Resolve the log file path for a proc (log_file or log_path), or None.
+
+        For an inference proc, Reveal/Open should target the batch's output
+        folder (a directory, not a file); realpath + isdir guard so we never
+        hand a stale/missing path to NSWorkspace.
+        """
         if not proc:
+            return None
+        if proc.get("_is_inference"):
+            out = proc.get("output_folder")
+            if out:
+                real = os.path.realpath(out)
+                if os.path.isdir(real):
+                    return real
             return None
         return proc.get("log_file") or proc.get("log_path")
 
@@ -2886,7 +3014,25 @@ class ProcessDashboardController(NSObject):
         status (STATUS_STOPPED) queried from psutil — robust across process
         switches, no stale flag. Reveal/Open are enabled whenever a log path
         resolves (works for historical processes too).
+
+        REGRESSION GUARD: inference procs have no pid, so the pid-based logic
+        below would DISABLE Stop and break the cooperative cancel. Branch first.
         """
+        if proc is not None and proc.get("_is_inference"):
+            is_running = proc.get("status") in ("running", "cancelling")
+            has_output = bool(proc.get("output_folder"))
+            if hasattr(self, "stop_btn") and self.stop_btn:
+                self.stop_btn.setEnabled_(is_running)
+            if hasattr(self, "pause_btn") and self.pause_btn:
+                # Pause is meaningless for an in-process batch (no PID to SIGSTOP)
+                self.pause_btn.setEnabled_(False)
+                self.pause_btn.setTitle_("Pause")
+            if hasattr(self, "reveal_btn") and self.reveal_btn:
+                self.reveal_btn.setEnabled_(has_output)
+            if hasattr(self, "open_btn") and self.open_btn:
+                self.open_btn.setEnabled_(has_output)
+            return
+
         pid = self._current_pid(proc)
         pid_alive = bool(pid)
         is_stopped = False
@@ -2909,8 +3055,30 @@ class ProcessDashboardController(NSObject):
             self.open_btn.setEnabled_(has_log)
 
     def stopProcess_(self, sender):
-        """Stop (SIGTERM/terminate) the selected active process. Gated on a live pid."""
+        """Stop (SIGTERM/terminate) the selected active process. Gated on a live pid.
+
+        For an inference proc there is no PID to kill - the batch runs in the
+        GUI process. Cooperatively cancel it by writing the cancel flag the
+        patcher's loop checks between files. MUST branch BEFORE the pid
+        early-return (inference procs have no pid).
+        """
         proc = getattr(self, "_current_proc", None) or self._selected_process
+        if proc is not None and proc.get("_is_inference"):
+            if proc.get("status") not in ("running", "cancelling"):
+                return
+            try:
+                data_path = os.environ.get("APPLIO_DATA_PATH") or os.path.expanduser("~/Applio")
+                flag = os.path.join(data_path, ".applio", "inference_cancel.flag")
+                os.makedirs(os.path.dirname(flag), exist_ok=True)
+                open(flag, "w").close()
+                if hasattr(self, "detail_status") and self.detail_status:
+                    self.detail_status.setStringValue_("Stopping…")
+                if hasattr(self, "stop_btn") and self.stop_btn:
+                    self.stop_btn.setEnabled_(False)
+                logging.info("[Dashboard] Wrote inference cancel flag")
+            except OSError as e:
+                logging.warning(f"[Dashboard] Could not write inference cancel flag: {e}")
+            return
         pid = self._current_pid(proc)
         if not pid:
             logging.info("[Dashboard] Stop requested but no live process")
@@ -3204,6 +3372,9 @@ class ProcessDashboardController(NSObject):
         except Exception as e:
             logging.warning(f"[Dashboard] Could not refresh active processes: {e}")
             # Keep existing data on error
+        _inf_proc = _synthesize_inference_proc()
+        if _inf_proc:
+            self._active_processes.append(_inf_proc)
         
         try:
             self._recent_processes = get_recent_processes(limit=5)
@@ -3681,6 +3852,13 @@ class ProcessDashboardController(NSObject):
         except Exception as e:
             logging.warning(f"[Dashboard] Could not get active processes: {e}")
             self._active_processes = []
+
+        # Synthesize the batch-inference proc on top of the subprocess procs so
+        # the sidebar / idle->active auto-show / detail panel all light up for
+        # an in-app batch with no PID of its own.
+        _inf_proc = _synthesize_inference_proc()
+        if _inf_proc:
+            self._active_processes.append(_inf_proc)
 
         try:
             self._recent_processes = get_recent_processes(limit=5)
