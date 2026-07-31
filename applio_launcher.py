@@ -2772,7 +2772,14 @@ class ProcessDashboardController(NSObject):
         # render onto the SAME outlets the training path uses. Re-read the LIVE
         # record each tick so the bar climbs every ~1s (the table rebuild only
         # refreshes the row every ~3s).
-        if proc.get("_is_inference"):
+        if proc.get("_is_inference") or proc.get("type") == "inference":
+            # A completed/historical inference row comes from process_history
+            # (type=inference) without the _is_inference marker the live synth
+            # sets; tag it so the renderer + action bar treat it as inference.
+            if not proc.get("_is_inference"):
+                proc = dict(proc)
+                proc["_is_inference"] = True
+                self._current_proc = proc
             live = _read_inference_progress()
             if live and live.get("status") in ("running", "cancelling"):
                 proc = dict(proc)
@@ -3008,6 +3015,26 @@ class ProcessDashboardController(NSObject):
             label = {"running": "Running", "cancelling": "Stopping…"}.get(status, status.title())
             if hasattr(self, "detail_status") and self.detail_status:
                 self.detail_status.setStringValue_(label)
+            # Normalize a history entry for compute_inference_stats: history
+            # rows store started_at/completed_at as ISO strings and omit
+            # processed/ended_at. Work on a copy so the stored entry is untouched.
+            proc = dict(proc)
+            if not proc.get("processed"):
+                proc["processed"] = (proc.get("converted", 0) or 0) + (proc.get("skipped", 0) or 0)
+            import datetime as _inf_dt
+            _sa = proc.get("started_at")
+            if isinstance(_sa, str):
+                try:
+                    proc["started_at"] = _inf_dt.datetime.fromisoformat(_sa).timestamp()
+                except ValueError:
+                    proc["started_at"] = time.time()
+            if "ended_at" not in proc:
+                _ca = proc.get("completed_at")
+                if isinstance(_ca, str):
+                    try:
+                        proc["ended_at"] = _inf_dt.datetime.fromisoformat(_ca).timestamp()
+                    except ValueError:
+                        pass
             stats = compute_inference_stats(proc, now=time.time())
             total = proc.get("total", 0) or 0
             processed = proc.get("processed", 0) or 0
