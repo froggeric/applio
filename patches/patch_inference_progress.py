@@ -158,6 +158,12 @@ INFER_BATCH_REPLACEMENT = r'''        # Inference progress tracking (3.6.3.7): c
         except OSError:
             pass
         try:
+            # Ensure the output folder exists (otherwise the first convert fails
+            # with an opaque soundfile "System error" when the output path does
+            # not exist yet). exist_ok=True is a no-op when it already exists.
+            # A genuine creation failure (permissions) raises here and is caught
+            # below as a clear error instead of soundfile's opaque message.
+            _infer_os.makedirs(audio_output_path, exist_ok=True)
             for idx, a in enumerate(audio_files):
                 if _infer_cancel_requested():
                     status = "cancelling"
