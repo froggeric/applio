@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Applio Launcher - Process Group Leader
+Applio Launcher - Native single-process entry point.
 
-Main entry point for Applio.app. Spawns macos_wrapper.py as a child process
-and hosts the native progress monitoring window.
+Main entry point for Applio.app. Runs the pywebview/Gradio GUI in-process
+(via macos_wrapper.start_gui) and hosts the native menu bar, dock, and the
+Process Dashboard window.
 
-Architecture:
-    applio_launcher.py (parent, process group leader)
-        └── macos_wrapper.py (child)
-                └── training subprocesses (grandchildren)
+Architecture (single process):
+    applio_launcher.py  (this file; the whole native app)
+      -> macos_wrapper.start_gui()  (in-process: env bootstrap + Gradio + webview window)
+           -> training / preprocess / extract / tts subprocesses
 """
 
 # =================================================================
@@ -152,7 +153,6 @@ def _update_check():
 # We detect this and delegate to the script via runpy.
 #
 # This handles:
-# - macos_wrapper.py (spawner for Gradio UI)
 # - rvc/train/train.py (training)
 # - rvc/train/preprocess/preprocess.py (preprocessing)
 # - rvc/train/extract/extract.py (feature extraction)
@@ -173,7 +173,7 @@ if len(sys.argv) > 1:
             # =================================================================
             # 2.1. Subprocess Mode Activation Policy (CRITICAL)
             # =================================================================
-            # When running as a subprocess (e.g., macos_wrapper.py), hide from Dock.
+            # When running as a subprocess (e.g., training scripts), hide from Dock.
             # This MUST happen BEFORE NSApplication is created by the script.
             # NSApplicationActivationPolicyAccessory (1) = No Dock icon
             if getattr(sys, "frozen", False) and NATIVE_APIS_AVAILABLE:
@@ -3972,8 +3972,7 @@ class ApplioAppDelegate(NSObject):
 
     def applicationWillTerminate_(self, notification):
         """Belt-and-suspenders: ensure the cascade runs even if termination came
-        via a path that bypassed applicationShouldTerminate_ (e.g. NSApp.terminate
-        from the quit-request observer, or system logout)."""
+        via a path that bypassed applicationShouldTerminate_ (e.g. system logout)."""
         launcher = self._get_launcher()
         if launcher:
             try:
@@ -3999,7 +3998,7 @@ class ApplioLauncher:
         self._app_delegate = None  # NSApplicationDelegate (reopen/terminate), attached in _setup_menu
         self._applio_app = None  # In-process GUI (ApplioApp) from start_gui
         self._main_window = None  # pywebview window handle
-        self._quit_confirmed = False  # Legacy flag (unused in single-process; kept for safety)
+        self._quit_confirmed = False  # Legacy flag (unused; kept for safety)
         self._user_confirmed_quit = False  # Window-close Terminate -> skip re-prompt
         self._setup_signal_handlers()
         # Single-instance surfacing: observe a 2nd instance's bring_to_front
@@ -4113,8 +4112,8 @@ class ApplioLauncher:
         """Handle child process exit (SIGCHLD).
 
         Async-signal-safe: reaps exited children so they don't become zombies.
-        (In single-process there is no wrapper subprocess to track — this only
-        reaps Gradio/training child processes spawned within this process.)
+        (No wrapper subprocess exists — this only reaps Gradio/training child
+        processes spawned within this process.)
         """
         try:
             while True:
@@ -4170,8 +4169,7 @@ class ApplioLauncher:
         Args:
             timeout: Seconds to wait for graceful shutdown before SIGKILL
         """
-        # Mark teardown so the wrapper-death timer doesn't try to relaunch
-        # the wrapper mid-cascade (the wrapper dying here is expected).
+        # Mark teardown so signal handlers don't re-enter mid-cascade.
         self._terminating = True
         if _LAUNCHER_PGID is None:
             return
@@ -4370,7 +4368,7 @@ class ApplioLauncher:
 
     def _update_menu_state(self):
         """Update dynamic menu items from the 2 s timer."""
-        # Keep existing IPC + hidden-window handling (was already here).
+        # Keep existing IPC handling (was already here).
         if self._check_show_progress_monitor_signal():
             try:
                 if not self._dashboard_controller:
@@ -4588,7 +4586,7 @@ class ApplioLauncher:
             )
             alert.setAlertStyle_(NSAlertStyleInformational)
             alert.addButtonWithTitle_("OK")
-            # The Gradio window (wrapper subprocess) can hold focus; bring the
+            # The Gradio window can hold focus; bring the
             # launcher forward so the modal is actually visible.
             try:
                 NSApp.activateIgnoringOtherApps_(True)
