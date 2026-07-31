@@ -614,6 +614,76 @@ def _synthesize_inference_proc():
     }
 
 
+def _sweep_stale_inference_progress():
+    """Mark a stale 'running' inference record (app crashed/quit mid-batch) as
+    'interrupted' so the dashboard never shows a phantom running job. Appends a
+    schema-compatible history entry and removes any stale cancel flag. Safe to
+    call when no record exists (no-op) and to call multiple times. Never raises
+    — every I/O path is wrapped so the sweep cannot crash startup."""
+    inf = _read_inference_progress()
+    if not inf or inf.get("status") != "running":
+        return
+    import time as _t, datetime as _dt
+    started = inf.get("started_at") or _t.time()
+    ended = _t.time()
+    inf["status"] = "interrupted"
+    inf["error"] = "interrupted by app restart"
+    inf["ended_at"] = ended
+    inf["elapsed"] = ended - started
+    inf["current_file"] = ""
+    # Write the progress file atomically (0o600) — reuse the launcher's resolver.
+    prog_path = os.path.join(os.path.dirname(get_process_state_path()), "inference_progress.json")
+    try:
+        os.makedirs(os.path.dirname(prog_path), exist_ok=True)
+        tmp = prog_path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(inf, f)
+        os.replace(tmp, prog_path)
+    except OSError as e:
+        logging.warning(f"[Launcher] inference sweep write failed: {e}")
+    # Append interrupted history entry (fcntl LOCK_EX, schema-compatible).
+    hist_path = get_history_file_path()
+    try:
+        os.makedirs(os.path.dirname(hist_path), exist_ok=True)
+        with open(hist_path + ".lock", "a") as _lf:
+            fcntl.flock(_lf.fileno(), fcntl.LOCK_EX)
+            try:
+                hist = {"version": 1, "history": []}
+                if os.path.exists(hist_path):
+                    try:
+                        with open(hist_path, "r", encoding="utf-8") as f:
+                            hist = json.load(f) or hist
+                    except json.JSONDecodeError:
+                        pass
+                hist.setdefault("history", []).insert(0, {
+                    "type": "inference",
+                    "model_name": inf.get("model_name", ""),
+                    "started_at": _dt.datetime.fromtimestamp(started).isoformat(),
+                    "completed_at": _dt.datetime.fromtimestamp(ended).isoformat(),
+                    "status": "interrupted",
+                    "total": inf.get("total", 0),
+                    "converted": inf.get("converted", 0),
+                    "skipped": inf.get("skipped", 0),
+                    "process_id": "inference-%s" % started,
+                })
+                hist["history"] = hist["history"][:HISTORY_MAX_ENTRIES]
+                tmp = hist_path + ".tmp"
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    json.dump(hist, f, indent=2)
+                os.replace(tmp, hist_path)
+            finally:
+                fcntl.flock(_lf.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        logging.warning(f"[Launcher] inference history append failed: {e}")
+    # Clear a stale cancel flag (best-effort).
+    try:
+        os.remove(os.path.join(os.path.dirname(get_process_state_path()), "inference_cancel.flag"))
+    except OSError:
+        pass
+
+
 # =================================================================
 # 4.5. Process History Management
 # =================================================================
@@ -4230,6 +4300,14 @@ class ApplioLauncher:
                 logging.info(f"[Launcher] Cleaned up {removed} old history entries")
         except Exception as e:
             logging.warning(f"[Launcher] History cleanup failed: {e}")
+
+        # 1.6. Recover a stale inference_progress.json left by a crash/quit
+        # mid-batch: rewrite it to "interrupted" + append a history entry, so the
+        # dashboard never shows a phantom running job on next launch.
+        try:
+            _sweep_stale_inference_progress()
+        except Exception as e:
+            logging.warning(f"[Launcher] inference progress sweep failed: {e}")
 
         active = get_active_processes()
 
