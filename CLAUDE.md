@@ -82,7 +82,7 @@ assets/
 | App configuration | `assets/config.json` |
 | Platform setup | `rvc/lib/platform.py` |
 | macOS native wrapper | `macos_wrapper.py` |
-| Build configuration | `build_macos.py` (datas / HIDDEN_IMPORTS / pyinstaller_args) — **NOT `Applio.spec`** (gitignored at `.gitignore:34` and never read by the build; the build runs `PyInstaller.__main__.run(pyinstaller_args)` from `build_macos.py`). `menu_spec` and `applio_update_check` (lazy-imported) are in `HIDDEN_IMPORTS`. |
+| Build configuration | `build_macos.py` (datas / HIDDEN_IMPORTS / pyinstaller_args) - **NOT `Applio.spec`** (gitignored at `.gitignore:34` and never read by the build; the build runs `PyInstaller.__main__.run(pyinstaller_args)` from `build_macos.py`). `menu_spec` and `applio_update_check` (lazy-imported) are in `HIDDEN_IMPORTS`. |
 
 ## Code Conventions
 
@@ -149,28 +149,31 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 that require Python 3.11+ (numpy 2.4.6, scipy 1.18, matplotlib 3.11, pandas 2.3+). The fork
 stays on 3.10 (PyInstaller), so `requirements_macos.txt` uses the latest py3.10-compatible
 versions instead: **numpy 2.2.6, scipy 1.15.3, numba 0.66.0, matplotlib 3.10.9, pandas 2.2.x+**.
-(pandas 2.3.x imports fine on 3.10 but needs numpy 2.x ABI — the old numpy 1.26 caused
+(pandas 2.3.x imports fine on 3.10 but needs numpy 2.x ABI - the old numpy 1.26 caused
 `pandas._libs.tslibs.vectorized` failures.) If the fork ever moves to Python 3.11, these can
 re-align to upstream's exact pins; that needs `brew install python@3.11` + a fresh `venv_macos`.
 
-**Phase 2 — single-process merge (experimental opt-in, behind `APPLIO_SINGLE_PROCESS`):**
+**Phase 2 - single-process merge (now the default; `APPLIO_SINGLE_PROCESS`):**
 Merging the two-process launcher+wrapper into ONE native process (fixes: Hide doesn't hide the
-Gradio window; the menu swaps by which process is frontmost). Gated on `APPLIO_SINGLE_PROCESS=1`;
-flag OFF (default) = unchanged two-process. **Status:** functionally complete and **frozen-validated**
-(training works in the built `dist/Applio.app` on Apple Silicon); Tasks through 3a done (single-instance
-surfacing via `bring_to_front`). The **Process Dashboard overhaul is complete** — real-time metrics
-(best epoch/loss, current/total epoch, step, speed, derived ETA + epoch-fraction bar), a loss-vs-epoch
-curve with always-on green highlights at significant improvements, an action bar (Stop / Pause-Resume /
-Reveal Log / Open Log), best-epoch durability across restart + retraining the same model, auto-show on
-job start, and idle-state history browsing. **Remaining:** Task 4 only — delete the dead two-process
-code + drop the flag. Self-contained plan + task breakdown:
+Gradio window; the menu swaps by which process is frontmost). The flag default flipped to `"1"`, so
+**single-process is now the standard** - the app runs as one process out of the box (one dock icon,
+one menu, one window). Two-process is the **legacy fallback**: set `APPLIO_SINGLE_PROCESS=0` to opt
+back into it. **Status:** functionally complete and **frozen-validated** (training, reopen, quit,
+menu, and dashboard all work in the built `dist/Applio.app` on Apple Silicon); Tasks through 3a done
+(single-instance surfacing via `bring_to_front`). The **Process Dashboard overhaul is complete** -
+real-time metrics (best epoch/loss, current/total epoch, step, speed, derived ETA + epoch-fraction
+bar), a loss-vs-epoch curve with always-on green highlights at significant improvements, an action
+bar (Stop / Pause-Resume / Reveal Log / Open Log), best-epoch durability across restart + retraining
+the same model, auto-show on job start, and idle-state history browsing. **Remaining:** Task 4 only -
+delete the dead two-process code + drop the flag. Self-contained plan + task breakdown:
 `~/.claude/plans/phase2-single-process-merge.md`. Branch `feat/phase2-single-process`.
-- **Run single-process (dev):** `APPLIO_SINGLE_PROCESS=1 venv_macos/bin/python applio_launcher.py`
-- **Run single-process (built app, no rebuild):** `launchctl setenv APPLIO_SINGLE_PROCESS 1 && open dist/Applio.app` (unset after: `launchctl unsetenv APPLIO_SINGLE_PROCESS`).
-- **Architecture:** the launcher calls `macos_wrapper.start_gui(launcher=self)` (import-safe since Step 0 — `import macos_wrapper` has zero side effects) then `webview.start(func=self._reassert_menu_and_delegate)`. pywebview clobbers `NSApp.delegate()` and wipes the main menu once at `first_show`; the func re-seats both on the main thread via `AppHelper.callAfter`. With NO `menu=` passed, pywebview does NOT re-wipe on focus (`windowDidBecomeKey_`'s `if i and i.menu` guard is False when `i.menu` is None) — verified against `venv_macos/.../webview/platforms/cocoa.py`.
-- **Gotchas:** (1) `NSApplication.delegate` is a WEAK (assign) ref — REUSE `self._app_delegate` (created in `_setup_menu`); NEVER inline `ApplioAppDelegate.alloc()…` in `_reassert_menu_and_delegate` (its only Python ref would GC → dangling delegate → crash on next reopen/quit). (2) `on_window_closing` runs on the MAIN thread — quit via `AppHelper.callAfter(lambda: NSApp.terminate_(None))`, NEVER synchronous (the ≤5 s `killpg`-wait would block the close event + re-enter AppKit → spinning cursor); `_user_confirmed_quit` (set before the deferred terminate) prevents the double-prompt. (3) The Gradio supervisor `_supervised_backend` (N=3, linear backoff) wraps `start_backend`, which RAISES in single-process (two-process swallows + `_request_launcher_quit`); `OSError` (e.g. EADDRINUSE) fails fast; `exc_info=True` keeps the traceback. (4) `setup_logging` is ADDITIVE in single-process (no `removeHandler`, no `sys.stdout`/`stderr` reassign) so launcher logs reach `applio_launcher.log`. (5) Every shared-code change is gated on `APPLIO_SINGLE_PROCESS` (launcher) / `_SINGLE_PROCESS` (wrapper) — flag OFF is byte-for-byte two-process. (6) A hard GUI crash (segfault) is unrecoverable in single-process (was isolated to the wrapper) — accepted tradeoff; training checkpoints + `active_processes.json` mitigate data loss.
-- **Single-process DEV can't run training/dataset scripts** — they resolve to `~/Applio/rvc/train/*` (data dir), not the repo → `No such file`. Training works only in the FROZEN build (scripts bundled, resolved via `_MEIPASS`). Validate single-process training on `dist/Applio.app`, not dev.
-- **Single-process dev hides Gradio/training stdout** (§6.11 dropped the stdout→log redirect) — a "generic error" in the UI is invisible in the log. Read the background-launch task's stdout file (`/private/tmp/.../tasks/<id>.output`) or run in a foreground terminal.
+- **Run single-process (dev, the default):** `venv_macos/bin/python applio_launcher.py`
+- **Run single-process (built app, the default):** `open dist/Applio.app`
+- **Opt back into two-process (legacy fallback):** `APPLIO_SINGLE_PROCESS=0 venv_macos/bin/python applio_launcher.py` (dev), or `launchctl setenv APPLIO_SINGLE_PROCESS 0 && open dist/Applio.app` (built; unset after with `launchctl unsetenv APPLIO_SINGLE_PROCESS`).
+- **Architecture:** the launcher calls `macos_wrapper.start_gui(launcher=self)` (import-safe since Step 0 - `import macos_wrapper` has zero side effects) then `webview.start(func=self._reassert_menu_and_delegate)`. pywebview clobbers `NSApp.delegate()` and wipes the main menu once at `first_show`; the func re-seats both on the main thread via `AppHelper.callAfter`. With NO `menu=` passed, pywebview does NOT re-wipe on focus (`windowDidBecomeKey_`'s `if i and i.menu` guard is False when `i.menu` is None) - verified against `venv_macos/.../webview/platforms/cocoa.py`.
+- **Gotchas:** (1) `NSApplication.delegate` is a WEAK (assign) ref - REUSE `self._app_delegate` (created in `_setup_menu`); NEVER inline `ApplioAppDelegate.alloc()…` in `_reassert_menu_and_delegate` (its only Python ref would GC → dangling delegate → crash on next reopen/quit). (2) `on_window_closing` runs on the MAIN thread - quit via `AppHelper.callAfter(lambda: NSApp.terminate_(None))`, NEVER synchronous (the ≤5 s `killpg`-wait would block the close event + re-enter AppKit → spinning cursor); `_user_confirmed_quit` (set before the deferred terminate) prevents the double-prompt. (3) The Gradio supervisor `_supervised_backend` (N=3, linear backoff) wraps `start_backend`, which RAISES in single-process (two-process swallows + `_request_launcher_quit`); `OSError` (e.g. EADDRINUSE) fails fast; `exc_info=True` keeps the traceback. (4) `setup_logging` is ADDITIVE in single-process (no `removeHandler`, no `sys.stdout`/`stderr` reassign) so launcher logs reach `applio_launcher.log`. (5) Every shared-code change is gated on `APPLIO_SINGLE_PROCESS` (launcher) / `_SINGLE_PROCESS` (wrapper) - the two-process path (`=0`) is byte-for-byte the legacy layout. (6) A hard GUI crash (segfault) is unrecoverable in single-process (was isolated to the wrapper) - accepted tradeoff; training checkpoints + `active_processes.json` mitigate data loss.
+- **Single-process DEV can't run training/dataset scripts** - they resolve to `~/Applio/rvc/train/*` (data dir), not the repo → `No such file`. Training works only in the FROZEN build (scripts bundled, resolved via `_MEIPASS`). Validate single-process training on `dist/Applio.app`, not dev.
+- **Single-process dev hides Gradio/training stdout** (§6.11 dropped the stdout→log redirect) - a "generic error" in the UI is invisible in the log. Read the background-launch task's stdout file (`/private/tmp/.../tasks/<id>.output`) or run in a foreground terminal.
 
 **macOS Development:**
 - Use `requirements_macos.txt` (includes pywebview, pyinstaller, pyobjc)
@@ -183,7 +186,7 @@ code + drop the flag. Self-contained plan + task breakdown:
   - `PYTORCH_ENABLE_MPS_FALLBACK=1`
   - `GRADIO_TEMP_DIR=~/Library/Caches/Applio/gradio`
   - `HF_HOME=~/Library/Application Support/Applio/huggingface`
-- macOS has no `timeout` command — use `gtimeout` (coreutils) or background-launch + poll; never bare `timeout N` in a run/test command.
+- macOS has no `timeout` command - use `gtimeout` (coreutils) or background-launch + poll; never bare `timeout N` in a run/test command.
 
 **External Data Storage:**
 - First-run prompts user to select data location via native macOS folder dialog
@@ -221,20 +224,20 @@ code + drop the flag. Self-contained plan + task breakdown:
 - All fixes must go through `patches/` - NEVER modify upstream files directly
 - **After patching, verify `git status` shows no upstream files have patch markers.** If present, restore with `git checkout` before committing.
 - When stuck after 3+ fix attempts: STOP and question the architecture (per systematic-debugging skill)
-- **Launch `macos_wrapper.py` from a foreground terminal**, not `nohup ... &` — pywebview's
+- **Launch `macos_wrapper.py` from a foreground terminal**, not `nohup ... &` - pywebview's
   AppKit event loop needs an interactive GUI session and blocks/idles when backgrounded.
 - **Local `rvc/models` must NOT be deleted.** The default `build_macos.py` is a *lite*
   build: `clean_bundled_models()` strips model weights from `dist/Applio.app` (the bundle
-  only — shipped app stays ~1.6GB) and never touches the local filesystem. So keeping the
+  only - shipped app stays ~1.6GB) and never touches the local filesystem. So keeping the
   ~1.8G of models in gitignored `rvc/models/` does NOT bloat the shipped app, and `rm -rf
   rvc/models/*` only forces a costly ~2G re-download. Leave local models in place; the
   bundle is re-stripped on every build. (A model-bundled build is `--models-installer`, a
-  separate app — there is no CLI flag to bundle models into the main app; `--lite` is
+  separate app - there is no CLI flag to bundle models into the main app; `--lite` is
   `store_true, default=True`, i.e. always on.)
 - **Corrupted `venv_macos` package:** if `import torch`/`pandas` fails with a partial-init /
   circular-import error, the installed wheel is corrupt → fix with
   `venv_macos/bin/python -m pip install --force-reinstall --no-deps <pkg>`.
-- **Frozen subprocess CWD is the bundle (`sys._MEIPASS`/Frameworks), not the data dir** —
+- **Frozen subprocess CWD is the bundle (`sys._MEIPASS`/Frameworks), not the data dir**,
   so `os.getcwd()`/`now_dir`-relative paths break. Resolve user/data paths absolutely:
   `APPLIO_DATA_PATH` env → `runtime_paths.json` `data_path` → `~/Applio`.
 - **`logging.basicConfig` is a no-op once an earlier import configured the root logger** →
@@ -243,15 +246,15 @@ code + drop the flag. Self-contained plan + task breakdown:
 - **`core.py`'s `from datetime import datetime` rebinds `datetime` to the class**, so injected
   `datetime.datetime.now()` in patches throws `AttributeError`. In patches use
   `import datetime as <alias>` + `<alias>.datetime.now()`.
-- **`os._exit(N)` skips stdout flushing** — a preceding diagnostic `print` is lost (e.g.
+- **`os._exit(N)` skips stdout flushing** - a preceding diagnostic `print` is lost (e.g.
   `rvc/train/train.py` sample-rate error). Recover via a line-buffered tee (`open(...,buffering=1)`)
   or `PYTHONUNBUFFERED=1`.
 - **Reproduce frozen-subprocess behavior without the GUI:** `dist/Applio.app/Contents/MacOS/Applio
-  /tmp/script.py args` — entry `applio_launcher.py` dispatches to the script (CWD=bundle).
-- `ps -E -p <pid>` (macOS) dumps a frozen process's env — check inherited `APPLIO_*`/`PATH`.
+  /tmp/script.py args` - entry `applio_launcher.py` dispatches to the script (CWD=bundle).
+- `ps -E -p <pid>` (macOS) dumps a frozen process's env - check inherited `APPLIO_*`/`PATH`.
 
 **Build process gotchas:**
-- Single entitlements file: `assets/entitlements.plist` (the old `scripts/entitlements_dev_id.plist` was deleted — it had drifted). Signing/notarization is built into `build_macos.py --sign --notarize --dmg` (the standalone `scripts/*.sh` were removed).
+- Single entitlements file: `assets/entitlements.plist` (the old `scripts/entitlements_dev_id.plist` was deleted - it had drifted). Signing/notarization is built into `build_macos.py --sign --notarize --dmg` (the standalone `scripts/*.sh` were removed).
 - No microphone entitlement needed - pywebview wrapper doesn't capture audio; Gradio handles it via browser
 - **Patcher escape sequences:** In triple-quoted strings, `\\n` produces literal newline. Use `chr(10)` for newlines in patched code.
 - Patches in `patches/` are applied to source files before PyInstaller, then source files are restored to pristine state
@@ -261,43 +264,43 @@ code + drop the flag. Self-contained plan + task breakdown:
 - PyInstaller cache corruption: clear `~/Library/Application Support/pyinstaller/`
 - **Signing & notarization (working):** `venv_macos/bin/python build_macos.py --sign --notarize --dmg`
   produces a notarized+stapled `.app` and `.dmg`. Auth = `--keychain-profile applio-notarize`
-  (App Store Connect **Team Key**, **App Manager** role — stored via
+  (App Store Connect **Team Key**, **App Manager** role - stored via
   `xcrun notarytool store-credentials`). Pipeline: inside-out Mach-O sign (leaf binaries get
   `--options runtime --timestamp` only; entitlements only on the outer bundle) → notarize `.app`
   (ditto zip) → staple `.app` → build+sign `.dmg` (`--timestamp`) → notarize `.dmg` → staple `.dmg`.
   `CFBundleVersion` must be ≤3 numeric segments (derived `3060305`-style integer, NOT the 4-segment
   display VERSION). A stapled artifact should not need `xattr -cr` from end users. **Validated
-  end-to-end 2026-07-26** — `v3.6.3.5` is the first notarized release (both `.app` + `.dmg` pass
+  end-to-end 2026-07-26** - `v3.6.3.5` is the first notarized release (both `.app` + `.dmg` pass
   `spctl`/`stapler validate` as `Notarized Developer ID`). Cut a release: `build_macos.py --sign
   --notarize --dmg` → commit/push → `git tag v<VERSION>` → `gh release create v<VERSION>
   dist/Applio-<VERSION>.dmg` (if `gh release` 403s on scope, use `gh api` to create + `curl` to upload
-  the asset — see "GitHub releases" below).
+  the asset - see "GitHub releases" below).
 - **CI signing:** `.github/workflows/release-macos.yml` (tag `v*` → build+sign+notarize+staple, attaches
   the DMG to the release) and `ci-macos.yml` (build-only, path-filtered, no cert). The release job runs
   in a protected `signing` **environment** and uses inline API-key auth (`build_macos.py --api-key …
-  --api-key-id … --api-issuer …` — no keychain on the runner; the `--keychain-profile` path is for
+  --api-key-id … --api-issuer …` - no keychain on the runner; the `--keychain-profile` path is for
   local). Secrets in the `signing` env: `MACOS_CERTIFICATE` (base64 .p12), `MACOS_CERTIFICATE_PWD`,
   `APP_STORE_CONNECT_KEY` (base64 .p8), `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER`. These
-  are GitHub-side settings — a human must create the env + secrets; can't be done from code. macOS
+  are GitHub-side settings - a human must create the env + secrets; can't be done from code. macOS
   runners bill at ~10× and are metered even on public repos, hence the path-filtering + tag-only triggers.
   **Validated end-to-end 2026-07-27** (test tag → green run → notarized DMG auto-attached to the release;
-  ~15 min). Each release run PAUSES for manual approval (required reviewers on the `signing` env) —
+  ~15 min). Each release run PAUSES for manual approval (required reviewers on the `signing` env);
   approve via Actions UI → *Review deployments* → `signing` → *Approve and deploy*; can't be done from code.
 - **DMG symlink trap:** `create_dmg` MUST use `shutil.copytree(..., symlinks=True)`. Python.framework
   uses symlinks (`Python -> Versions/Current/Python`, `Resources -> Versions/Current/Resources`,
   `Current -> Versions/3.x`); the default `symlinks=False` flattens them into real files, breaking
   the framework's signature seal → the DMG notarization is rejected with "The signature of the binary
-  is invalid" on the Python framework paths (the `.app` zip notarization still passes — only the DMG
+  is invalid" on the Python framework paths (the `.app` zip notarization still passes - only the DMG
   copy breaks). Staple the `.app` before building the DMG.
 - **Mach-O detection must use bytes mode:** `file -b <path>` can emit non-UTF-8 bytes → `subprocess.run(text=True)`
   raises UnicodeDecodeError mid-sign. Use `capture_output=True` (no `text=True`) and test `b"Mach-O" in r.stdout`.
 - **Verifying a notarized DMG:** `spctl --assess --type execute <dmg>` reports "rejected (…does not seem to be an
-  app)" / "Insufficient Context" — expected for a disk image. The authoritative DMG check is
+  app)" / "Insufficient Context" - expected for a disk image. The authoritative DMG check is
   `xcrun stapler validate <dmg>` → "The validate action worked!". (`.app` uses spctl; `.dmg` uses stapler.)
   Applied in `_final_verify`: the `.app` is gated on spctl/codesign/stapler, the `.dmg` ONLY on stapler
-  validate — do NOT regress to gating the DMG on spctl (it hard-fails the whole build on a valid DMG;
+  validate - do NOT regress to gating the DMG on spctl (it hard-fails the whole build on a valid DMG;
   this exact bug shipped once and was caught by the CI release test).
-- **Background build exit codes:** don't end a backgrounded build with `; echo "exit=$?"` — the task reports the
+- **Background build exit codes:** don't end a backgrounded build with `; echo "exit=$?"` - the task reports the
   LAST command's exit (the echo = 0), masking a failed build. Make the build the final command and read its real
   exit/output (`tail` the output file, check for `BUILD COMPLETE` / hard-fail markers).
 - **Cert-free gates for signing changes:** a plain `build_macos.py` run (no `--sign`) is safe (`--help`/`py_compile`
@@ -306,7 +309,7 @@ code + drop the flag. Self-contained plan + task breakdown:
 - **GHA macOS runners have no `rg`:** use `grep -E`/`grep -Eq` in workflow steps (a `rg -q` in
   `ci-macos.yml` once failed the run with "command not found"; locally `rg` exists, so this is CI-only).
 - **Monitoring a CI run:** `gh run watch <id> -R froggeric/applio-macOS-native-app --exit-status`
-  (make it the LAST command — a trailing `echo` masks its real exit). `status=waiting` = the `signing`
+  (make it the LAST command - a trailing `echo` masks its real exit). `status=waiting` = the `signing`
   environment's required-reviewer gate (approve in the Actions UI, not from code); `status=queued` =
   waiting for a runner. `gh run view <id> --log-failed` pulls the failed step's output.
 - **Testing `release-macos.yml`:** push a throwaway tag (`git tag vX-citest && git push --tags`),
@@ -322,7 +325,7 @@ code + drop the flag. Self-contained plan + task breakdown:
 
 **Pywebview gotchas:**
 - Menu callbacks need lambda wrappers: `MenuAction("About", lambda: show_about_dialog())` not `MenuAction("About", show_about_dialog)`
-- **Menu is spec-driven (`menu_spec.py`):** ONE source of truth rendered by both processes. The launcher renders the full dynamic menu (PyObjC); the standalone wrapper renders a STATIC subset (pywebview `Menu`/`MenuAction` are immutable and cannot bind shortcuts — `venv_macos/.../webview/menu.py`). Standalone renderer MUST: title the app menu `__app__` (NOT "Applio" — that duplicates it), set `webview.settings['SHOW_DEFAULT_MENUS']=False` BEFORE `webview.start` (else pywebview auto-adds View/Edit; note: `webview.start` has NO `webview_settings` kwarg — use `webview.settings[...]`), and omit `app.about/hide/hide_others/quit` from its `__app__` payload (pywebview's unconditional `_add_app_menu` injects them). Verify with `venv_macos/bin/python tests/test_menu_spec.py`.
+- **Menu is spec-driven (`menu_spec.py`):** ONE source of truth rendered by both processes. The launcher renders the full dynamic menu (PyObjC); the standalone wrapper renders a STATIC subset (pywebview `Menu`/`MenuAction` are immutable and cannot bind shortcuts - `venv_macos/.../webview/menu.py`). Standalone renderer MUST: title the app menu `__app__` (NOT "Applio" - that duplicates it), set `webview.settings['SHOW_DEFAULT_MENUS']=False` BEFORE `webview.start` (else pywebview auto-adds View/Edit; note: `webview.start` has NO `webview_settings` kwarg - use `webview.settings[...]`), and omit `app.about/hide/hide_others/quit` from its `__app__` payload (pywebview's unconditional `_add_app_menu` injects them). Verify with `venv_macos/bin/python tests/test_menu_spec.py`.
 - **Update-check version compare must use `packaging.version`** (already a hiddenimport). The old `check_for_updates` used string `!=` (flagged downgrades as updates). Shared logic lives in `applio_update_check.py`; the manual item + a silent launch-time check both use it; network runs off the main thread (NSAutoreleasePool on the worker thread).
 
 **Native macOS dialogs (PyObjC):**
@@ -333,8 +336,8 @@ code + drop the flag. Self-contained plan + task breakdown:
 - CRITICAL: PyObjC method names - `method:with:param:` becomes `method_with_param_` (colons→underscores, append trailing underscore), e.g., `systemFontOfSize:weight:` → `systemFontOfSize_weight_` NOT `systemFontOfSize_ofWeight_`
 - CRITICAL: NSBox doesn't have `setFillColor_()` in PyObjC - use bordered style or layer-based background instead
 - `addSubview:positioned:relativeTo:` → `addSubview_positioned_relativeTo_` (NOT `addSubview_positioned_relative_`)
-- CRITICAL: any class used as an NSWindow/NSTableView delegate, dataSource, or NSNotificationCenter observer MUST be an NSObject subclass (`class X(NSObject)` + `alloc().initWith…_()` + `objc.super(X, self).init()`) — a plain Python class crashes on `conformsToProtocol:` (ProcessDashboardController hit this). Same pattern as MenuActionHandler/ApplioAppDelegate.
-- PyObjC preserves ObjC selector case — `-[NSColor CGColor]` is `.CGColor()`, not `.cgColor()`. Verify a name imports (`python -c "from AppKit import X"`) BEFORE adding it to the `try/except`-wrapped top-level AppKit import (L72-89) — a bad name silently flips `NATIVE_APIS_AVAILABLE=False` app-wide.
+- CRITICAL: any class used as an NSWindow/NSTableView delegate, dataSource, or NSNotificationCenter observer MUST be an NSObject subclass (`class X(NSObject)` + `alloc().initWith…_()` + `objc.super(X, self).init()`) - a plain Python class crashes on `conformsToProtocol:` (ProcessDashboardController hit this). Same pattern as MenuActionHandler/ApplioAppDelegate.
+- PyObjC preserves ObjC selector case - `-[NSColor CGColor]` is `.CGColor()`, not `.cgColor()`. Verify a name imports (`python -c "from AppKit import X"`) BEFORE adding it to the `try/except`-wrapped top-level AppKit import (L72-89) - a bad name silently flips `NATIVE_APIS_AVAILABLE=False` app-wide.
 
 **Progress window responsiveness:**
 - Timer must be started AFTER background thread: call `_start_timer()` after `_start_file_thread()`
@@ -397,7 +400,7 @@ code + drop the flag. Self-contained plan + task breakdown:
 - Patch order: `patch_process_tracking.py` runs before `patch_subprocess_validation.py`.
   After the 3.6.3 rework, `subprocess_validation` anchors on the success-`return` line (which
   survives process_tracking's Popen transformation), so it injects only its post-run output
-  validation (model_info.json / extracted-dir checks) — both patches now coexist on the same
+  validation (model_info.json / extracted-dir checks) - both patches now coexist on the same
   functions instead of being mutually exclusive.
 
 **GitHub releases:**

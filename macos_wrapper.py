@@ -36,7 +36,7 @@ import webbrowser
 # runs in the launcher's process (no separate wrapper subprocess). This is a
 # read-only name binding (no side effects), so importing this module stays
 # import-safe (Step 0 invariant). Gate every shared-code change below on this.
-_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "0") == "1"
+_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "1") == "1"
 
 # =================================================================
 # 1.1. Activation Policy for Subprocess Mode

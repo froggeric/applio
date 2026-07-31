@@ -135,7 +135,7 @@ The `merge_rvc.py` script is a standalone CLI tool for merging RVC voice models 
 # Activate the environment
 source venv_macos/bin/activate
 
-# Simplest usage — auto-naming from model metadata, auto output directory
+# Simplest usage - auto-naming from model metadata, auto output directory
 python merge_rvc.py \
     --model-a '/path/to/Sade/Sade.pth' \
     --model-b '/path/to/Ani Lorak/AnilorakV2.pth' \
@@ -170,9 +170,9 @@ python merge_rvc.py \
 
 When `--name` is not specified, the merge name is derived automatically:
 
-1. **Source metadata.json** — reads `metadata.json` next to each model file and extracts the `title` field, stripping parenthetical context like "(Israeli Singer)" and suffixes like "[RVC V2] [450 Epochs]"
-2. **Parent folder name** — falls back to the containing folder name (strips `-Weights`, `-Weights-2`, `_v2` suffixes)
-3. **Filename stem** — last resort, strips FAISS naming prefixes
+1. **Source metadata.json** - reads `metadata.json` next to each model file and extracts the `title` field, stripping parenthetical context like "(Israeli Singer)" and suffixes like "[RVC V2] [450 Epochs]"
+2. **Parent folder name** - falls back to the containing folder name (strips `-Weights`, `-Weights-2`, `_v2` suffixes)
+3. **Filename stem** - last resort, strips FAISS naming prefixes
 
 Examples:
 - Models with `metadata.json` titles "Sade" and "Ani Lorak (Ukrainian Singer)" → `"Sade + Ani Lorak (0.50)"`
@@ -241,10 +241,10 @@ A `metadata.json` is automatically written to the output directory containing fu
 ```
 
 The metadata includes:
-- **Merge parameters** — ratio, weighted mode, seed, timestamp
-- **Source provenance** — original file paths, sizes, MD5 checksums, plus data from source `metadata.json` files (title, author, description, tags, training info)
-- **Model stats** — layer count, sample rate, f0, version, vocoder, output file size/hash
-- **Index stats** — vector count, dimension, mode (equal/weighted), ratio, output file size
+- **Merge parameters** - ratio, weighted mode, seed, timestamp
+- **Source provenance** - original file paths, sizes, MD5 checksums, plus data from source `metadata.json` files (title, author, description, tags, training info)
+- **Model stats** - layer count, sample rate, f0, version, vocoder, output file size/hash
+- **Index stats** - vector count, dimension, mode (equal/weighted), ratio, output file size
 
 ### Usage Examples
 
@@ -285,11 +285,11 @@ python merge_rvc.py \
     --use-weighted --name 'A Dominant'
 # Creates: ./A Dominant/A Dominant.pth, A Dominant.index, metadata.json
 
-# Dry run — validate compatibility without creating files
+# Dry run - validate compatibility without creating files
 python merge_rvc.py \
     --model-a a.pth --model-b b.pth --ratio 0.5 --dry-run
 
-# Weighted dry run — preview replication counts
+# Weighted dry run - preview replication counts
 python merge_rvc.py \
     --index-a a.index --index-b b.index \
     --use-weighted --ratio 0.8 --dry-run
@@ -328,9 +328,9 @@ Indexes must have matching dimensions (768 for standard RVC).
 
 ### Dependencies
 
-- `torch` — Model loading/saving
-- `faiss-cpu` — Index manipulation
-- `numpy` — Array operations
+- `torch` - Model loading/saving
+- `faiss-cpu` - Index manipulation
+- `numpy` - Array operations
 
 All dependencies are included in the Applio virtual environment. For full technical details, see `MERGE_ALGORITHM.md`.
 
@@ -353,7 +353,7 @@ All dependencies are included in the Applio virtual environment. For full techni
    - Verify: `security find-identity -v -p codesigning` → shows
      `Developer ID Application: Your Name (TEAMID)`.
 
-2. **Create an App Store Connect API key** (authenticates notarytool — use this, **not** an
+2. **Create an App Store Connect API key** (authenticates notarytool - use this, **not** an
    app-specific password):
    - [App Store Connect](https://appstoreconnect.apple.com) → Users and Access → Integrations →
      **App Store Connect API** → **Team Keys** → **+**. Access: **App Manager** (the minimum role
@@ -394,9 +394,9 @@ python build_macos.py --sign --dmg --notarize
 
 Two fork-added workflows live in `.github/workflows/`:
 
-- **`ci-macos.yml`** — a build-only smoke test (ad-hoc, **no cert**). Path-filtered to run only on
+- **`ci-macos.yml`** - a build-only smoke test (ad-hoc, **no cert**). Path-filtered to run only on
   build-relevant changes to `main` / PRs; catches build regressions cheaply. No secrets required.
-- **`release-macos.yml`** — on a pushed `v*` tag (or "Run workflow"): builds, signs, notarizes,
+- **`release-macos.yml`** - on a pushed `v*` tag (or "Run workflow"): builds, signs, notarizes,
   staples, and attaches `Applio-<VERSION>.dmg` to the release. Auth uses the App Store Connect API
   key inline (`build_macos.py --api-key …`), so it needs no keychain on the runner. **Validated
   end-to-end 2026-07-27** (test tag → green → notarized DMG attached to the release). Each run pauses
@@ -407,16 +407,16 @@ secrets **to that environment** + add **Required Reviewers** so the cert can't b
 
 | Secret | Value |
 |--------|-------|
-| `MACOS_CERTIFICATE` | `base64` of the Developer ID Application `.p12` — export the cert+key from Keychain Access with a password, then `base64 -i your.p12 \| pbcopy` |
+| `MACOS_CERTIFICATE` | `base64` of the Developer ID Application `.p12` - export the cert+key from Keychain Access with a password, then `base64 -i your.p12 \| pbcopy` |
 | `MACOS_CERTIFICATE_PWD` | that `.p12`'s export password |
-| `APP_STORE_CONNECT_KEY` | `base64` of the App Store Connect API key (`AuthKey_*.p8`) — `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
+| `APP_STORE_CONNECT_KEY` | `base64` of the App Store Connect API key (`AuthKey_*.p8`) - `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
 | `APP_STORE_CONNECT_KEY_ID` | the 10-char Key ID |
 | `APP_STORE_CONNECT_ISSUER` | the Issuer ID (UUID) |
 
 **Cut a release:** bump `BUILD_NUMBER` (+ version if needed), commit to `main`, then
 `git tag vX.Y.Z && git push --tags`. The workflow builds the notarized DMG and attaches it to the
 release for that tag. (The upstream `release.yml` may also fire on a `config_template.json` version
-bump and generate notes — `release-macos.yml` only attaches the DMG, so they coexist.)
+bump and generate notes - `release-macos.yml` only attaches the DMG, so they coexist.)
 
 > **Cost note:** macOS runners bill at ~10× Linux minutes and are metered even on public repos.
 > The release build is ~40–60 min; the build-only CI ~20 min. That's why `ci-macos.yml` is
@@ -551,9 +551,9 @@ Additional models available via Download tab in the app:
 
 | Rank | Model | Why |
 |------|-------|-----|
-| **#1** | RefineGAN VCTK 44k | VCTK is a speech dataset—doesn't add musical vibrato to spoken words. |
+| **#1** | RefineGAN VCTK 44k | VCTK is a speech dataset, so it doesn't add musical vibrato to spoken words. |
 | **#2** | HiFi-GAN TITAN 48k | Excellent for deep, rich "Radio Announcer" voice. |
-| **#3** | HiFi-GAN KLM49 48k | Can make speakers sound like they're slightly singing—good for anime dubbing. |
+| **#3** | HiFi-GAN KLM49 48k | Can make speakers sound like they're slightly singing, good for anime dubbing. |
 
 ## Sample Rate Support
 
@@ -583,35 +583,34 @@ Applio.app/
 ```
 User data (models, datasets, training output) lives in the user-selected external location, **not** the bundle.
 
-### Runtime: two cooperating processes
-The native app runs as **two processes**, because macOS app contracts (dock icon, menu bar, reopen,
-quit cascade) are per-process:
-- **`applio_launcher.py`** — the `.app` EXE (**Regular** activation policy): owns the dock icon +
-  menu bar + `NSApplicationDelegate`. It re-execs as training/preprocess/extract **subprocesses**
-  (the entry detects `argv[1].endswith('.py')` and `runpy.run_path`s the script, so upstream's
-  `Popen([sys.executable, script])` works against the frozen binary). It `subprocess.Popen`s the wrapper.
-- **`macos_wrapper.py`** — an **Accessory** (dock-hidden) child: owns the only window, runs
-  **Gradio in-process** (daemon thread, port 6969; loading screen on 5678) inside a **pywebview**
-  `WKWebView`, with its own native menu. Reachable from the launcher via a 2 s-polled
-  `runtime_paths.json` flag + `NSDistributedNotificationCenter`.
+### Runtime: a single native process
+The app runs as **one process**. `applio_launcher.py` is the `.app` EXE (**Regular** activation
+policy): it owns the dock icon, menu bar, and `NSApplicationDelegate`, and hosts the Gradio UI in a
+**pywebview** `WKWebView` in the same process (Gradio runs in-process on a daemon thread, port 6969;
+loading screen on 5678). It re-execs as training/preprocess/extract **subprocesses** (the entry
+detects `argv[1].endswith('.py')` and `runpy.run_path`s the script, so upstream's
+`Popen([sys.executable, script])` works against the frozen binary).
 
-> **Experimental — single-process mode:** set the environment variable `APPLIO_SINGLE_PROCESS=1`
-> (e.g. `launchctl setenv APPLIO_SINGLE_PROCESS 1` before opening the app) to merge the two
-> processes into one. It gives smoother window/menu behavior — Hide actually hides the window, and the
-> menu bar no longer swaps by which window is frontmost — and is functionally complete (training
-> works in the built app). It is still **experimental and off by default**; leave it unset for the
-> standard two-process app.
+One process means one dock icon, one menu bar, and one window, with none of the quirks of the old
+two-process layout: Hide actually hides the window, and the menu bar no longer swaps depending on
+which window is frontmost.
+
+> **Legacy fallback (two-process):** the previous layout ran `applio_launcher.py` (dock icon + menu)
+> and `macos_wrapper.py` (the window, an **Accessory** dock-hidden child) as two cooperating
+> processes, coordinated through a polled `runtime_paths.json` flag and
+> `NSDistributedNotificationCenter`. It is kept as a safety net. Set `APPLIO_SINGLE_PROCESS=0` (for
+> example, `launchctl setenv APPLIO_SINGLE_PROCESS 0` before opening the app) to opt back into it.
 
 ### Native Menu
 
-The menu bar is defined once in `menu_spec.py` and rendered by both processes, so the bundled app
-and the standalone dev wrapper stay in sync. Five menus:
+The menu bar is defined once in `menu_spec.py` and rendered by both the bundled app and the
+standalone dev wrapper, so they stay in sync. Five menus:
 
 | Menu | Items |
 |------|-------|
 | **Applio** | About, Check for Updates…, Hide ⌘H, Quit ⌘Q |
 | **File** | Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …) |
-| **Process** | Live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`) + Open Progress Dashboard ⌘⇧P (the pause/resume/stop controls live in the dashboard — see below) |
+| **Process** | Live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`) + Open Progress Dashboard ⌘⇧P (the pause/resume/stop controls live in the dashboard - see below) |
 | **Window** | Minimize ⌘M, Zoom, Show Main |
 | **Help** | Studio Production Guide, Online Docs, Report an Issue, Discord |
 
@@ -620,7 +619,7 @@ and the standalone dev wrapper stay in sync. Five menus:
 when its folder actually exists. The **File → data items are disabled until first run** (i.e. until
 you've chosen a data location).
 
-**Standalone dev mode** (`python macos_wrapper.py`) shows a **static subset** of the same menu —
+**Standalone dev mode** (`python macos_wrapper.py`) shows a **static subset** of the same menu:
 pywebview's `Menu`/`MenuAction` are immutable, so it has no keyboard shortcuts and no live Process
 status. For the full dynamic menu, run the built app.
 
@@ -631,24 +630,24 @@ flagged downgrades as updates). Network runs off the main thread.
 
 ### Process Dashboard
 
-Open from **Process → Open Progress Dashboard** (⌘⇧P). It is a live window that monitors a training
-run while it runs — and remembers finished runs so you can review them later.
+Open from **Process → Open Progress Dashboard** (⌘⇧P). It is a live window that follows a training
+run while it runs, and keeps finished runs so you can review them later.
 
-- **Real-time metrics** — best epoch + its loss, current/total epoch, step, speed, and a derived ETA,
-  beside an epoch-fraction progress bar.
-- **Loss-vs-epoch curve** — plots evaluation loss per epoch and **highlights significant improvements**
+- **Real-time metrics:** best epoch and its loss, current/total epoch, step, speed, and a derived
+  ETA, beside an epoch-fraction progress bar.
+- **Loss-vs-epoch curve:** plots evaluation loss per epoch and **highlights significant improvements**
   (green markers at notable loss drops), so your model's best checkpoint is visible at a glance.
-- **Controls** — Stop, Pause / Resume, Reveal Log in Finder, and Open Log.
-- **Durable best epoch** — best-epoch metrics are snapshotted into history, so they survive an app
+- **Controls:** Stop, Pause / Resume, Reveal Log in Finder, and Open Log.
+- **Durable best epoch:** best-epoch metrics are snapshotted into history, so they survive an app
   restart and re-training the same model.
-- **Auto-show** — the dashboard opens itself when a job starts.
-- **History** — when no job is running, browse the metrics of finished runs.
+- **Auto-show:** the dashboard opens itself when a job starts.
+- **History:** when no job is running, browse the metrics of finished runs.
 
-The dashboard lives in the launcher process and parses the training log directly (no RVC import), so
-it works identically in dev mode and the frozen app.
+The dashboard runs in the app process and parses the training log directly (no RVC import), so it
+works identically in dev mode and the frozen app.
 
 ### Frozen-CWD invariant
-In the frozen app the working directory is the bundle, not the data dir — so upstream's CWD-relative
+In the frozen app the working directory is the bundle, not the data dir - so upstream's CWD-relative
 paths (`logs/`, `assets/config.json`, dataset folders) break. The wrapper does `os.chdir(DATA_PATH)`
 before importing Gradio, and build-time patches (`patches/patch_*.py`) resolve paths absolutely via
 `APPLIO_DATA_PATH` → `runtime_paths.json` → `~/Applio`. This is the root cause behind most
@@ -656,7 +655,7 @@ before importing Gradio, and build-time patches (`patches/patch_*.py`) resolve p
 
 ### Build-time patches (minimal upstream delta)
 Upstream files are **never** edited in the repo. `build_macos.py:pre_build_patch()` applies
-`patches/*.py` to the source just before PyInstaller, then `post_build_restore()` reverts them — so
+`patches/*.py` to the source just before PyInstaller, then `post_build_restore()` reverts them - so
 `git status` stays clean. See "Fork Modifications" below.
 
 ### Lite build
@@ -666,20 +665,20 @@ touched. (A model-bundled build is the separate `--models-installer` app.)
 
 ### Signing & notarization pipeline (technical)
 `build_macos.py --sign --notarize --dmg` runs, in order, each step gating the next:
-1. **Inside-out sign** — discover every Mach-O under `Contents/{Frameworks,Resources,MacOS}`
+1. **Inside-out sign** - discover every Mach-O under `Contents/{Frameworks,Resources,MacOS}`
    (including bare executables the old `*.so`/`*.dylib` glob missed), sign each leaf with
    `--options runtime --timestamp` (**no** entitlements on leaves), then seal the outer bundle with
    `assets/entitlements.plist` (**no** `--deep`). Hard-fail `codesign --verify`.
-2. **Notarize `.app`** — `ditto`-zip → `xcrun notarytool submit --keychain-profile applio-notarize
+2. **Notarize `.app`** - `ditto`-zip → `xcrun notarytool submit --keychain-profile applio-notarize
    --wait` → parse `status: Accepted` (auto-pull the JSON log on failure, which names the offending binary).
-3. **Staple `.app`** — `xcrun stapler staple` + `validate`.
-4. **Build + sign `.dmg`** from the **stapled** app — `shutil.copytree(symlinks=True)` preserves the
+3. **Staple `.app`** - `xcrun stapler staple` + `validate`.
+4. **Build + sign `.dmg`** from the **stapled** app - `shutil.copytree(symlinks=True)` preserves the
    `Python.framework` symlinks; sign the DMG with `codesign --timestamp` (no runtime/entitlements).
 5. **Notarize `.dmg`** → **staple `.dmg`**.
-6. **Final Gatekeeper gate** — `spctl` + `stapler validate` must report `source=Notarized Developer ID`.
+6. **Final Gatekeeper gate** - `spctl` + `stapler validate` must report `source=Notarized Developer ID`.
 
 Authentication is an App Store Connect **Team Key** (role **App Manager**) stored via
-`xcrun notarytool store-credentials` — **no secrets live in the repo** (the `.p8` stays outside it,
+`xcrun notarytool store-credentials` - **no secrets live in the repo** (the `.p8` stays outside it,
 and `.gitignore` excludes `*.p8`/`*.p12`/`*.key`).
 
 ## Fork Modifications (Build-Time Patches)
@@ -752,7 +751,7 @@ The app is signed with entitlements from `assets/entitlements.plist`:
 | `cs.allow-unsigned-executable-memory` | true | ctypes/libffi (required for PyInstaller+Python) |
 | `cs.disable-library-validation` | true | Load bundled third-party .dylib/.so (PyInstaller) |
 
-No `device.audio-input` — audio is captured by the browser in the Gradio UI, not the app process.
+No `device.audio-input` - audio is captured by the browser in the Gradio UI, not the app process.
 These entitlements are applied only to the outer `.app` bundle/main executable; leaf `.so`/`.dylib`
 binaries are signed with hardened runtime + timestamp only.
 
@@ -868,7 +867,7 @@ DMG to the release automatically.
    Applio release changed). This drives `VERSION` (→ `Applio-<VERSION>.dmg`) and the derived
    `CFBundleVersion`.
 2. Commit and push to `main`.
-3. Push a tag matching the version — `git tag v<VERSION> && git push --tags` — which triggers
+3. Push a tag matching the version - `git tag v<VERSION> && git push --tags` - which triggers
    `release-macos.yml`.
 4. **Approve the run** (the `signing` environment uses required reviewers): Actions tab → the run →
    *Review deployments* → tick `signing` → *Approve and deploy*.
@@ -889,10 +888,10 @@ Use this if CI is unavailable or you want the artifact immediately.
    ```bash
    venv_macos/bin/python build_macos.py --sign --notarize --dmg
    ```
-   (For inline API-key auth without a keychain profile — e.g. headless — add
+   (For inline API-key auth without a keychain profile - e.g. headless - add
    `--api-key <file.p8> --api-key-id <ID> --api-issuer <UUID>`.)
 3. Confirm `git status` is clean (restore any dirty upstream file with `git checkout -- <file>`).
-4. Smoke-test the DMG on a clean Mac (drag to /Applications, launch — opens **without** `xattr -cr`).
+4. Smoke-test the DMG on a clean Mac (drag to /Applications, launch - opens **without** `xattr -cr`).
 5. Create the release and upload the DMG:
    ```bash
    gh release create v<VERSION> "dist/Applio-<VERSION>.dmg" --generate-notes
@@ -902,4 +901,4 @@ Use this if CI is unavailable or you want the artifact immediately.
 
 > **Verification reference (either path):** the `.app` must report `source=Notarized Developer ID`
 > under `spctl`; the `.dmg` is verified with `xcrun stapler validate` (spctl on a disk image says
-> "rejected … does not seem to be an app" — that's expected, not a failure).
+> "rejected … does not seem to be an app" - that's expected, not a failure).

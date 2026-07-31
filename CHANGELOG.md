@@ -7,22 +7,24 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ---
 
-## [3.6.3.6] — 2026-07-30
+## [3.6.3.6] - 2026-07-30
 
 ### Added
 - **Process Dashboard** (Process → Open Progress Dashboard, ⌘⇧P): a live training-monitoring window.
-  Shows real-time metrics — best epoch + loss, current/total epoch, step, speed, and a derived ETA —
+  Shows real-time metrics - best epoch + loss, current/total epoch, step, speed, and a derived ETA,
   beside an epoch-fraction progress bar, plus a **loss-vs-epoch curve that highlights significant
   improvements** (green markers + epoch numbers at notable loss drops). An **action bar** offers
   Stop / Pause-Resume / Reveal Log in Finder / Open Log. **Best-epoch metrics are snapshotted into
   history**, so they survive an app restart and re-training the same model. The dashboard
   **auto-shows when a job starts**, and when idle lets you **browse finished runs** from history.
-- **Phase 2 single-process merge (experimental, behind `APPLIO_SINGLE_PROCESS=1`):** merges the
-  two-process launcher+wrapper into one native process (fixes Hide-not-hiding + menu-swaps-by-focus).
-  Functionally complete and **frozen-validated** (training works in the built app). Tasks through 3a
-  done (single-instance surfacing via `bring_to_front`); opt-in, **OFF by default** (the default
-  remains two-process; flag-off is byte-for-byte the two-process path). Remaining: dead two-process
-  code removal + drop the flag (Task 4). Plan: `~/.claude/plans/phase2-single-process-merge.md`.
+- **Phase 2 single-process merge (now the default):** merges the two-process launcher+wrapper into
+  one native process (fixes Hide-not-hiding + menu-swaps-by-focus). The `APPLIO_SINGLE_PROCESS` flag
+  default flipped to `"1"`, so single-process is now the standard (the app runs as one process out of
+  the box: one dock icon, one menu, one window); two-process is the legacy fallback
+  (`APPLIO_SINGLE_PROCESS=0`, byte-for-byte the old path). Functionally complete and
+  **frozen-validated** (training, reopen, quit, menu, and dashboard all work in the built app). Tasks
+  through 3a done (single-instance surfacing via `bring_to_front`). Remaining: dead two-process code
+  removal + drop the flag (Task 4). Plan: `~/.claude/plans/phase2-single-process-merge.md`.
 - **Native menu overhaul:** one shared `menu_spec.py` rendered by a PyObjC renderer
   (launcher) and a pywebview static-subset renderer (standalone). New Process + Help menus;
   Reveal-in-Finder rescued; Hide ⌘H / Minimize ⌘M; the dead Menu B deleted.
@@ -30,19 +32,19 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   launch-time check alerts only if a newer version exists. Version comparison fixed (was a buggy
   string compare; now `packaging.version`).
 - **Studio Production Guide** bundled (rendered HTML) under Help.
-- `tests/test_menu_spec.py` — pure-Python structure + version-compare gate.
+- `tests/test_menu_spec.py` - pure-Python structure + version-compare gate.
 - **CI: macOS build + signed/notarized releases via GitHub Actions.**
-  - `.github/workflows/ci-macos.yml` — path-filtered, build-only smoke test (ad-hoc, no cert) with
+  - `.github/workflows/ci-macos.yml` - path-filtered, build-only smoke test (ad-hoc, no cert) with
     `CFBundleVersion` + `codesign` assertions.
-  - `.github/workflows/release-macos.yml` — on a `v*` tag, builds + signs + notarizes + staples the
+  - `.github/workflows/release-macos.yml` - on a `v*` tag, builds + signs + notarizes + staples the
     `.app`/`.dmg` on a `macos-14` runner and attaches the DMG to the release. Runs in a protected
     `signing` environment; inline App Store Connect API-key auth (no keychain on the runner). Validated
     end-to-end.
-- `build_macos.py --api-key/--api-key-id/--api-issuer` — inline notarytool auth (CI/headless);
+- `build_macos.py --api-key/--api-key-id/--api-issuer` - inline notarytool auth (CI/headless);
   `--keychain-profile` remains the default for local runs.
 
 ### Fixed
-- **Process Dashboard window did not open at all** — `ProcessDashboardController` now subclasses
+- **Process Dashboard window did not open at all** - `ProcessDashboardController` now subclasses
   `NSObject` (a plain Python class crashed on `conformsToProtocol:`) and the missing `AppKit`
   constants (`NSBoxPrimary`, …) are imported so the window constructs. Loss-vs-epoch axes are fixed
   and the stray "Title" placeholder text removed.
@@ -52,12 +54,12 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ---
 
-## [3.6.3.5] — 2026-07-26
+## [3.6.3.5] - 2026-07-26
 
 ### Added
 - **Developer ID code signing + Apple notarization.** `build_macos.py --sign --notarize --dmg` now
   produces a **Gatekeeper-clean, signed + notarized + stapled** `.app` and `.dmg`. This is the first
-  notarized release — end users no longer need `xattr -cr`. Authentication uses an App Store Connect
+  notarized release - end users no longer need `xattr -cr`. Authentication uses an App Store Connect
   API key (`--keychain-profile`); no secrets live in the repo.
 - Voice model + FAISS index **merger tool** (`merge_rvc.py`) with weighted merging, auto-naming from
   model metadata, and merge-metadata output. See `MERGE_ALGORITHM.md`.
@@ -65,12 +67,12 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   unsupported macOS instead of a cryptic crash).
 
 ### Fixed (frozen-app reliability)
-- Custom-pretrained **dropdown empty** and **downloads landing inside the bundle** — both now resolve
+- Custom-pretrained **dropdown empty** and **downloads landing inside the bundle** - both now resolve
   to the external data directory when frozen (the frozen-CWD invariant).
-- **Version surfaces inconsistent** — About dialog, loading screen, wrapper log, and the in-app
+- **Version surfaces inconsistent** - About dialog, loading screen, wrapper log, and the in-app
   version checker now all read `3.6.3.x` consistently (the checker reads the bundle's
   `config_template.json`, not a stale data-dir copy).
-- **Training process tracking** — `verify_process_identity` now treats `psutil.AccessDenied` as
+- **Training process tracking** - `verify_process_identity` now treats `psutil.AccessDenied` as
   "alive" so the quit-while-training confirmation fires reliably mid-training.
 - **Frozen training pipeline** (preprocess → extract → train) + dev-mode dock icon + error logging.
 
@@ -91,6 +93,6 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ---
 
-## [3.6.3] — 2026-03-03 (upstream sync baseline)
+## [3.6.3] - 2026-03-03 (upstream sync baseline)
 
 First release on the upstream 3.6.3 base. See `git log v3.6.3..HEAD` for the full delta.

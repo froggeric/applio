@@ -284,7 +284,7 @@ IPC_BRING_TO_FRONT_NAME = "com.applio.bring_to_front"
 # behavior, byte-for-byte unchanged. Gated behind an env flag so the crux
 # (does our NSApplicationDelegate survive webview.start()?) can be exercised
 # without disturbing the production path.
-APPLIO_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "0") == "1"
+APPLIO_SINGLE_PROCESS = os.environ.get("APPLIO_SINGLE_PROCESS", "1") == "1"
 
 # --- Single-instance lock (1.6) -----------------------------------------------
 # Fixed path (NOT the user-chosen data dir, which may not exist on first run).
