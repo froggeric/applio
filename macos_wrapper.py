@@ -161,33 +161,6 @@ GITHUB_REPO = "froggeric/applio-macOS-native-app"
 RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
-# =================================================================
-# 1.9. IPC Notification Constants
-# =================================================================
-IPC_NOTIFICATION_NAME = "com.applio.wrapper.visibility"
-
-def _notify_launcher_visibility(visible: bool):
-    """Notify launcher of window visibility change via distributed notification.
-    
-    Uses NSDistributedNotificationCenter for fast cross-process IPC.
-    Latency: ~5-20ms vs ~2000ms for file polling.
-    
-    Args:
-        visible: True if window is visible, False if hidden
-    """
-    try:
-        from Foundation import NSDistributedNotificationCenter
-        center = NSDistributedNotificationCenter.defaultCenter()
-        center.postNotificationName_object_userInfo_deliverImmediately_(
-            IPC_NOTIFICATION_NAME,
-            None,
-            {"visible": visible},
-            True  # deliverImmediately
-        )
-        logging.info(f"[Wrapper] Notified launcher: visible={visible}")
-    except Exception as e:
-        logging.warning(f"[Wrapper] Failed to notify launcher: {e}")
-
 
 # =================================================================
 # 1.6. Process Tracking for Background Operations
@@ -442,11 +415,6 @@ def on_window_closing():
             # Hide the main window instead of closing
             if _main_window_ref:
                 _main_window_ref.hide()
-            if _launcher_ref is None:
-                # Standalone only: no launcher owns this window, so update the
-                # wrapper's own visibility bookkeeping.
-                _notify_launcher_visibility(False)
-                _set_wrapper_window_visible(False)
             logging.info("[Window] Main window hidden, processes continue in background")
             return False  # Cancel close, window is just hidden
 
@@ -643,7 +611,6 @@ def _write_runtime_config():
         "logs_path": os.path.join(data_path, "logs"),
         "datasets_path": os.path.join(data_path, "assets", "datasets"),
         "audios_path": os.path.join(data_path, "assets", "audios"),
-        "wrapper_window_visible": True,  # IPC: tells launcher if wrapper window is hidden
         "timestamp": time.time() if 'time' in dir() else 0
     }
 
@@ -668,46 +635,6 @@ def _write_runtime_config():
             print(f"[runtime_config] Wrote config to: {config_path}")
         except Exception as e:
             print(f"[runtime_config] Failed to write config to {config_path}: {e}")
-
-
-def _set_wrapper_window_visible(visible: bool):
-    """
-    Update wrapper_window_visible flag in runtime config.
-
-    This is used for IPC: when wrapper hides its window, launcher
-    detects this and shows the progress monitoring window.
-    """
-    import json
-
-    config_locations = [
-        os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
-        os.path.expanduser("~/.applio/runtime_paths.json"),
-    ]
-
-    for config_path in config_locations:
-        if not os.path.exists(config_path):
-            continue
-
-        try:
-            # Read existing config
-            with open(config_path, "r") as f:
-                config = json.load(f)
-
-            # Update the visibility flag
-            config["wrapper_window_visible"] = visible
-
-            # Write atomically
-            temp_path = config_path + ".tmp"
-            with open(temp_path, "w") as f:
-                json.dump(config, f, indent=2)
-            os.rename(temp_path, config_path)
-
-            logging.info(f"[runtime_config] Updated wrapper_window_visible={visible}")
-            return True
-        except Exception as e:
-            logging.warning(f"[runtime_config] Failed to update config at {config_path}: {e}")
-
-    return False
 
 
 # The frozen _write_runtime_config() call now runs inside start_gui() (after
