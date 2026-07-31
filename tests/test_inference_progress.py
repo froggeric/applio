@@ -38,3 +38,11 @@ def test_zero_total():
     r = {"total": 0, "processed": 0, "converted": 0, "skipped": 0, "started_at": 1000.0}
     s = compute_inference_stats(r, now=1001.0)
     assert s["pct"] == 0.0 and s["eta"] == 0.0
+
+
+def test_skip_semantics_eta_uses_converted_only():
+    r = {"total": 10, "processed": 4, "converted": 2, "skipped": 2, "started_at": 1000.0}
+    s = compute_inference_stats(r, now=1010.0)
+    assert s["pct"] == 40.0          # processed/total (skips count as processed)
+    assert s["eta"] == 30.0          # (10-4) * (10/2) — avg from converted, remaining from processed
+    assert s["speed"] == 12.0        # 2/(10/60)

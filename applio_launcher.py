@@ -609,7 +609,6 @@ def _synthesize_inference_proc():
         "converted": inf.get("converted", 0), "skipped": inf.get("skipped", 0),
         "current_file": inf.get("current_file", ""),
         "started_at": inf.get("started_at"),
-        "started_at_epoch": inf.get("started_at"),
         "output_folder": inf.get("output_folder"),
         "_is_inference": True,
     }
@@ -2699,7 +2698,7 @@ class ProcessDashboardController(NSObject):
         self._current_proc = proc
 
         # Batch inference has no subprocess - it runs in the GUI process, so it
-        # has no PID/log/trainining.log. Branch off the subprocess codepath and
+        # has no PID/log/training.log. Branch off the subprocess codepath and
         # render onto the SAME outlets the training path uses. Re-read the LIVE
         # record each tick so the bar climbs every ~1s (the table rebuild only
         # refreshes the row every ~3s).
@@ -2709,7 +2708,6 @@ class ProcessDashboardController(NSObject):
                 proc = dict(proc)
                 proc.update(live)
                 proc["_is_inference"] = True
-                proc["started_at_epoch"] = live.get("started_at")
                 self._current_proc = proc
             self._render_inference_detail(proc)
             return
@@ -2922,9 +2920,10 @@ class ProcessDashboardController(NSObject):
         (outlet names confirmed in _create_detail_panel): the progress bar climbs
         with processed/total, the "best" label carries speed, the "current" label
         carries converted/skipped/current file, and the log view carries a
-        one-shot status summary (the batch has no training.log). For a HISTORICAL
-        inference row selected from the sidebar, the caller has already let ``proc``
-        keep the terminal record so compute_inference_stats uses ended_at.
+        one-shot status summary (the batch has no training.log). For a
+        terminal/historical inference row — history entries are wired in B4 —
+        the caller lets ``proc`` keep the stored terminal stats so
+        compute_inference_stats uses ended_at.
         """
         from applio_inference_stats import compute_inference_stats
         try:
@@ -3067,10 +3066,10 @@ class ProcessDashboardController(NSObject):
             if proc.get("status") not in ("running", "cancelling"):
                 return
             try:
-                data_path = os.environ.get("APPLIO_DATA_PATH") or os.path.expanduser("~/Applio")
-                flag = os.path.join(data_path, ".applio", "inference_cancel.flag")
+                data_dir = os.path.dirname(get_process_state_path())
+                flag = os.path.join(data_dir, "inference_cancel.flag")
                 os.makedirs(os.path.dirname(flag), exist_ok=True)
-                open(flag, "w").close()
+                Path(flag).touch()
                 if hasattr(self, "detail_status") and self.detail_status:
                     self.detail_status.setStringValue_("Stopping…")
                 if hasattr(self, "stop_btn") and self.stop_btn:
