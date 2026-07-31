@@ -391,13 +391,30 @@ history browsing.
 
 **Background process tracking:**
 - State file: `~/.applio/active_processes.json` (single source of truth)
-- Process types: training, preprocess, extract, inference, tts
+- Process types: training, preprocess, extract, tts (inference is in-process and tracked separately - see below)
 - POSIX signals: SIGSTOP (pause), SIGCONT (resume), SIGTERM (terminate)
 - Patch order: `patch_process_tracking.py` runs before `patch_subprocess_validation.py`.
   After the 3.6.3 rework, `subprocess_validation` anchors on the success-`return` line (which
   survives process_tracking's Popen transformation), so it injects only its post-run output
   validation (model_info.json / extracted-dir checks) - both patches now coexist on the same
   functions instead of being mutually exclusive.
+
+**Batch-inference progress tracking (3.6.3.7):** inference runs IN-PROCESS (not a subprocess), so it
+is NOT in `active_processes.json`. Tracked separately:
+- `patches/patch_inference_progress.py` injects into `rvc/infer/infer.py:convert_audio_batch` to write
+  `~/Applio/.applio/inference_progress.json` (single writer, atomic temp+`os.replace`, no lock) +
+  check a cancel flag per file + append a schema-compatible history entry; it also
+  `os.makedirs(audio_output_path, exist_ok=True)` (batch inference failed with an opaque soundfile
+  "System error" on a missing output folder).
+- `patches/patch_stop_infer.py` rewrites `stop_infer` to write `~/Applio/.applio/inference_cancel.flag`
+  (cooperative) - the old PID-kill killed the whole app because the inference PID == the app PID in
+  single-process.
+- The dashboard synthesizes an `_is_inference` proc into `_active_processes` from the progress file
+  (`_synthesize_inference_proc` in `applio_launcher.py`, at BOTH `update_process_list` +
+  `refresh_process_list`); the stats math lives in the AppKit-free `applio_inference_stats.py`
+  (pytest-importable). `_render_inference_detail` normalizes the history schema (ISO started_at /
+  completed_at to epoch) so completed runs show counts/duration. `_sweep_stale_inference_progress`
+  marks a stale `running` record `interrupted` on startup.
 
 **GitHub releases:**
 - Repo name for releases: `froggeric/applio-macOS-native-app`

@@ -637,6 +637,9 @@ run while it runs, and keeps finished runs so you can review them later.
   restart and re-training the same model.
 - **Auto-show:** the dashboard opens itself when a job starts.
 - **History:** when no job is running, browse the metrics of finished runs.
+- **Batch inference:** converting a folder of audio shows the same live card (files converted / total,
+  current file, ETA, speed), auto-opens on start, and finished or cancelled batches appear in history
+  with their counts. Stop cancels at the next file without quitting the app.
 
 The dashboard runs in the app process and parses the training log directly (no RVC import), so it
 works identically in dev mode and the frozen app.

@@ -27,6 +27,10 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   via a cancel flag checked per file. Also fixes a frozen-build issue where batch inference could not
   write its stop-PID file in the read-only app bundle (the PID file is gone, replaced by the cancel
   flag in the writable data directory).
+- **Batch conversion creates its output folder.** Batch inference now creates the output folder if it
+  does not exist (it previously failed on the first file with an opaque soundfile "System error" when
+  the chosen output path was missing). Completed batch runs also show their file counts and duration
+  on the dashboard and in history, not just a bare "completed" status.
 
 ---
 
