@@ -60,18 +60,14 @@ def _configure_activation_policy():
 # is load-bearing; see start_gui).
 
 # =================================================================
-# 1.2. PyWebView Activation Policy Patch (CRITICAL)
+# 1.2. PyWebView Activation Policy Patch (retained no-op stubs)
 # =================================================================
-# pywebview's cocoa.py line 59 unconditionally calls:
-#     app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular
-# This runs at class definition time when webview.platforms.cocoa is imported,
-# overriding our Accessory policy set above.
-#
-# Solution: Monkey-patch setActivationPolicy_ to ignore Regular (0) calls
-# when running under launcher, preserving our Accessory (1) policy.
-
-_PYWEBVIEW_POLICY_PATCHED = False
-_ORIGINAL_SET_ACTIVATION_POLICY = None
+# Historically this section monkey-patched NSApplication.setActivationPolicy_
+# so a separate wrapper subprocess could hide its Dock icon under the launcher
+# (two-process mode). Two-process mode and the patch logic have both been
+# removed; single-process owns activation policy in the launcher. The two
+# functions below are retained as no-op stubs because start_gui() calls them in
+# order with the other bootstrap steps (see each function's docstring).
 
 def _patch_pywebview_activation_policy():
     """No-op in single-process mode.
@@ -79,28 +75,18 @@ def _patch_pywebview_activation_policy():
     The Accessory-policy monkey-patch was only needed when a separate wrapper
     subprocess had to hide its Dock icon under the launcher. Single-process has
     no subprocess, so the launcher's Regular policy is the only one. Retained as
-    a no-op because start_gui() calls it in order with the other bootstrap steps
-    (and _unpatch_pywebview_activation_policy is a guarded no-op when nothing
-    was patched).
+    a no-op because start_gui() calls it in order with the other bootstrap steps.
     """
-    global _PYWEBVIEW_POLICY_PATCHED
-    if _PYWEBVIEW_POLICY_PATCHED:
-        return
     return
 
 def _unpatch_pywebview_activation_policy():
-    """Restore original setActivationPolicy_ method after webview import."""
-    global _PYWEBVIEW_POLICY_PATCHED, _ORIGINAL_SET_ACTIVATION_POLICY
-    
-    if not _PYWEBVIEW_POLICY_PATCHED or _ORIGINAL_SET_ACTIVATION_POLICY is None:
-        return
-    
-    try:
-        from AppKit import NSApplication
-        NSApplication.setActivationPolicy_ = _ORIGINAL_SET_ACTIVATION_POLICY
-        _ORIGINAL_SET_ACTIVATION_POLICY = None
-    except:
-        pass
+    """No-op in single-process mode.
+
+    With _patch_pywebview_activation_policy() a no-op, nothing is ever patched,
+    so there is nothing to restore. Retained as a no-op because start_gui()
+    calls it in order with the other teardown steps.
+    """
+    return
 
 # Applied from start_gui() BEFORE `import webview` (see start_gui).
 
@@ -343,19 +329,6 @@ class ProcessController:
             return False
 
     @staticmethod
-    def terminate_all() -> int:
-        """Terminate all tracked processes. Returns count terminated."""
-        count = 0
-        state = read_active_processes()
-        for ptype, info in state.get("processes", {}).items():
-            if info and info.get("pid"):
-                if ProcessController.terminate(info["pid"]):
-                    count += 1
-                clear_process(ptype)
-        logging.info(f"[ProcessController] Terminated {count} processes")
-        return count
-
-    @staticmethod
     def pause_all() -> int:
         """Pause all running processes. Returns count paused."""
         count = 0
@@ -386,7 +359,6 @@ class ProcessController:
 
 # Global references to prevent garbage collection
 _main_window_ref = None
-_shutting_down = False  # Global flag to prevent multiple shutdown attempts
 _launcher_ref = None    # Launcher handle exposed by start_gui() for on_window_closing (Phase 2)
 
 
@@ -454,11 +426,7 @@ def on_window_closing():
         False to cancel the close event (pywebview uses inverted logic!)
         None/True to allow the close to proceed
     """
-    global _shutting_down, _main_window_ref
-
-    if _shutting_down:
-        logging.info("[Window] Already shutting down, ignoring duplicate close event")
-        return False  # Cancel duplicate close (False = cancel in pywebview)
+    global _main_window_ref
 
     # Check for active processes before closing
     if has_active_processes():
@@ -475,8 +443,8 @@ def on_window_closing():
             if _main_window_ref:
                 _main_window_ref.hide()
             if _launcher_ref is None:
-                # Two-process only: tell the launcher the window went hidden so
-                # it can surface the progress window for active processes.
+                # Standalone only: no launcher owns this window, so update the
+                # wrapper's own visibility bookkeeping.
                 _notify_launcher_visibility(False)
                 _set_wrapper_window_visible(False)
             logging.info("[Window] Main window hidden, processes continue in background")
@@ -1167,7 +1135,7 @@ class ApplioApp:
         self.progress = 0
         self.stage = "1/4"
         self.log_file = os.path.expanduser("~/Library/Logs/Applio/applio_wrapper.log")
-        # Launcher handle (None in standalone / two-process wrapper mode).
+        # Launcher handle (None in standalone).
         self.launcher = launcher
         # Reentrancy guard for shutdown (used by later Phase 2 tasks).
         self._stopping = False
