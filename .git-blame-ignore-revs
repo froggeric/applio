@@ -1,0 +1,6 @@
+# Commits to skip in git blame (GitHub honors this file automatically;
+# local git needs: git config blame.ignoreRevsFile .git-blame-ignore-revs).
+# Only add pure-style/formatting commits here — never behavior changes.
+
+# PR #1 — repo-wide black reformat of fork-owned .py files (+2604/-1343, 40 files)
+1ad76442ac20e6d7842f07a8f3152481b9ed6559
