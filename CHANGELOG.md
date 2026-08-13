@@ -7,6 +7,37 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ---
 
+## [3.6.4.0] - 2026-08-13
+
+First release on the **upstream Applio 3.6.4** base. Signed and notarized — download the DMG and
+open it directly (no `xattr -cr` needed).
+
+### Synced with upstream Applio 3.6.4
+
+- **New command-line interface.** Upstream rebuilt Applio's CLI on [Click](https://click.palletsprojects.com/)
+  (`python core.py <command>`), replacing the old argparse parser. This is a terminal/developer
+  feature; the macOS app is unaffected — its UI, training, inference, TTS, and the script-launching
+  functions it calls are unchanged.
+- **Realtime voice conversion fixes** from upstream: block-frame processing and a warmup
+  progress-bar fix.
+- New runtime dependency **`click`** (pinned `click==8.1.8` in `requirements_macos.txt`); it is
+  bundled into the app, so users need do nothing.
+
+### Notes
+
+- Every macOS-specific feature carries over unchanged and is validated on this build: the
+  single-process native app, the Process Dashboard (training + batch inference), the RefineGAN-Legacy
+  vocoder, 44.1 kHz training, the native menu bar, and external data storage.
+- Build verified end-to-end: all 24 build-time patches apply cleanly against the upstream-rewritten
+  `core.py`/`app.py`, and the app boots to the main UI reporting version 3.6.4.
+
+### Changed
+
+- `BUILD_NUMBER` reset to `0` for the new upstream base — display version `3.6.4.0`,
+  `CFBundleVersion` `3060400`.
+
+---
+
 ## [3.6.3.7] - 2026-07-31
 
 ### Added

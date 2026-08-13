@@ -109,8 +109,12 @@ git merge upstream/main
 ```
 
 The fork keeps macOS work in separate files, so the git merge is nearly conflict-free
-(last sync 3.6.2 → 3.6.3 on 2026-07-24: only `.gitignore`, `rvc/train/preprocess/preprocess.py`,
-and `tabs/train/train.py` touched both sides; only `.gitignore` actually conflicted).
+(last sync 3.6.3 → 3.6.4 on 2026-08-13: **conflict-free** — all 12 upstream-changed files were
+pristine on the fork side, and the CLI-revamp rewrite of `core.py` left the `run_*_script` functions
+our patches anchor on untouched, so all 24 patches applied with zero re-pointing; new dep `click`
+pinned in `requirements_macos.txt`). Prior sync 3.6.2 → 3.6.3 on 2026-07-24 touched `.gitignore`,
+`rvc/train/preprocess/preprocess.py`, and `tabs/train/train.py` on both sides; only `.gitignore`
+actually conflicted.
 **The real work after a merge is re-pointing build-time patches** (see "Re-pointing patches
 after an upstream sync" below), because upstream rewrites the source our `patches/*.py` anchor on.
 
