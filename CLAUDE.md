@@ -86,7 +86,13 @@ assets/
 
 ## Code Conventions
 
-- **Formatter**: Black (auto-runs via GitHub Actions on push to main)
+- **Formatter**: Black (auto-runs via GitHub Actions on push to main). The inherited
+  `code_formatter.yml` runs black+autoflake on every push touching `*.py` and opens a
+  **perpetual `formatter/main` PR** (`peter-evans/create-pull-request`, `delete-branch: true`)
+  that respawns on each push until the tree is black-clean. To clear it: merge the PR (all
+  reformatted files are fork-owned → no upstream-delta cost; black leaves patch-anchor strings
+  in `r'''...'''` untouched), after which the workflow is a no-op guardian. PR #1 merged
+  2026-08-13; its SHA is in `.git-blame-ignore-revs` (append future bulk-format commits there).
 - **Import cleanup**: autoflake
 - **Encoding**: UTF-8 for all file operations
 - **No formal test suite** - manual testing through Gradio UI
@@ -130,6 +136,9 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 - `patches/`, `macos_wrapper.py`, `build_macos.py`, `Applio.spec`
 - `menu_spec.py`, `applio_update_check.py`, `tests/test_menu_spec.py`, `STUDIO_PRODUCTION_GUIDE.html`
 - `install_applio_mac.sh`, `requirements_macos.txt`, `CLAUDE.md`
+- Fork-only additions also live INSIDE `rvc/`: `rvc/lib/algorithm/generators/refinegan_legacy.py`,
+  `rvc/lib/tools/applio_paths.py`, `rvc/lib/tools/process_log_parser.py` (verify any path with the
+  `git ls-tree` command below).
 
 **Verify file origin:** `git ls-tree upstream/main --name-only | grep <path>`
 
