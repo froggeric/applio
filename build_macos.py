@@ -89,7 +89,7 @@ import PyInstaller.__main__
 # Configuration
 # =================================================================
 APP_NAME = "Applio"
-BUILD_NUMBER = 7  # Increment for each build
+BUILD_NUMBER = 0  # Reset for 3.6.4 (first fork release on upstream 3.6.4)
 
 
 # Read version from the tracked assets/config_template.json first (the source of
@@ -237,7 +237,7 @@ else:
 # single monotonic integer (base-100 per segment) so build order is preserved
 # even when patch ≥ 10 (naive APPLIO_VERSION.replace(".","") gives "3635" which
 # is valid but non-monotonic at patch≥10). Segments must stay < 100.
-CFBUNDLE_SHORT_VERSION = APPLIO_VERSION  # "3.6.3" (display version, ≤3 segments)
+CFBUNDLE_SHORT_VERSION = APPLIO_VERSION  # "3.6.4" (display version, ≤3 segments)
 _v = (APPLIO_VERSION.split(".") + ["0", "0", "0"])[:3]
 _major, _minor, _patch = (int(x) for x in _v)
 CFBUNDLE_VERSION = str(

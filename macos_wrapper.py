@@ -157,10 +157,10 @@ def _get_version_info():
     for _cfg in ("assets/config.json", "assets/config_template.json"):
         try:
             with open(os.path.join(BASE_PATH, _cfg), "r", encoding="utf-8") as f:
-                return json.load(f).get("version", "3.6.3")
+                return json.load(f).get("version", "3.6.4")
         except Exception:
             continue
-    return "3.6.3"
+    return "3.6.4"
 
 
 VERSION = _get_version_info()

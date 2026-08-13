@@ -1,11 +1,12 @@
 # Core dependencies
-# Aligned with upstream requirements.txt (3.6.3) where applicable; macOS-only
+# Aligned with upstream requirements.txt (3.6.4) where applicable; macOS-only
 # packaging/native-UI packages are appended at the bottom.
 numpy==2.2.6  # latest numpy 2.x for Python 3.10 (2.3+ requires py3.11); pandas 2.x needs numpy 2.x ABI
 requests==2.34.2
 tqdm==4.68.4
 wget==3.2
 PyYAML
+click==8.1.8  # CLI framework — upstream 3.6.4 core.py revamp; app.py imports core which imports click
 
 # Audio processing
 ffmpeg-python>=0.2.0
