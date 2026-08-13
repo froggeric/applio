@@ -23,7 +23,6 @@ Applied at build time by build_macos.py (registered as a "dir" patcher; base_pat
 import os
 import sys
 
-
 HELPER_CODE = '''
 
 
@@ -99,7 +98,9 @@ def patch_download_py(base_path: str) -> bool:
             )
             patched = True
         else:
-            print(f"[patch_download_paths] WARNING: assignment not found: {old.strip()}")
+            print(
+                f"[patch_download_paths] WARNING: assignment not found: {old.strip()}"
+            )
 
     if patched:
         with open(download_py_path, "w", encoding="utf-8") as f:

@@ -16,6 +16,7 @@ Architecture (single process):
 # 0. Multiprocessing Safety (MUST BE FIRST)
 # =================================================================
 import multiprocessing
+
 multiprocessing.freeze_support()
 
 # =================================================================
@@ -24,12 +25,13 @@ multiprocessing.freeze_support()
 import os
 import logging
 
+
 # =================================================================
 # 0.6. Process Group Setup (MUST BE EARLY)
 # =================================================================
 def _setup_process_group():
     """Establish this process as session leader for cascade termination.
-    
+
     When the launcher terminates, all child processes in the session
     will receive the signal, enabling graceful cascade shutdown.
     """
@@ -41,6 +43,7 @@ def _setup_process_group():
     except OSError as e:
         logging.warning(f"[Launcher] Could not create session: {e}")
         return None
+
 
 _LAUNCHER_PGID = _setup_process_group()
 
@@ -65,6 +68,7 @@ import menu_spec
 # Optional psutil for process verification
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
@@ -72,19 +76,54 @@ except ImportError:
 # macOS native APIs
 try:
     from AppKit import (
-        NSApplication, NSApp, NSMenu, NSMenuItem, NSWindow,
-        NSButton, NSTextField, NSProgressIndicator, NSScrollView,
-        NSTextView, NSTableView, NSTableColumn, NSMakeRect, NSTitledWindowMask, NSClosableWindowMask,
-        NSMiniaturizableWindowMask, NSBackingStoreBuffered, NSCenterTextAlignment,
-        NSRightTextAlignment, NSFont, NSBezelBorder, NSApplicationActivationPolicyRegular,
+        NSApplication,
+        NSApp,
+        NSMenu,
+        NSMenuItem,
+        NSWindow,
+        NSButton,
+        NSTextField,
+        NSProgressIndicator,
+        NSScrollView,
+        NSTextView,
+        NSTableView,
+        NSTableColumn,
+        NSMakeRect,
+        NSTitledWindowMask,
+        NSClosableWindowMask,
+        NSMiniaturizableWindowMask,
+        NSBackingStoreBuffered,
+        NSCenterTextAlignment,
+        NSRightTextAlignment,
+        NSFont,
+        NSBezelBorder,
+        NSApplicationActivationPolicyRegular,
         NSAccessibilityAnnouncementRequestedNotification,
-        NSCommandKeyMask, NSShiftKeyMask, NSAlternateKeyMask, NSBox, NSColor,
-        NSBoxPrimary, NSView, NSProgressIndicatorBarStyle,
-        NSFontWeightMedium, NSFontWeightSemibold, NSFontWeightRegular,
-        NSBezierPath, NSWorkspace, NSAttributedString,
-        NSFontAttributeName, NSForegroundColorAttributeName,
+        NSCommandKeyMask,
+        NSShiftKeyMask,
+        NSAlternateKeyMask,
+        NSBox,
+        NSColor,
+        NSBoxPrimary,
+        NSView,
+        NSProgressIndicatorBarStyle,
+        NSFontWeightMedium,
+        NSFontWeightSemibold,
+        NSFontWeightRegular,
+        NSBezierPath,
+        NSWorkspace,
+        NSAttributedString,
+        NSFontAttributeName,
+        NSForegroundColorAttributeName,
     )
-    from Foundation import NSRunLoop, NSDate, NSNotificationCenter, NSURL, NSRange, NSObject
+    from Foundation import (
+        NSRunLoop,
+        NSDate,
+        NSNotificationCenter,
+        NSURL,
+        NSRange,
+        NSObject,
+    )
     from PyObjCTools import AppHelper
     import objc
 
@@ -106,12 +145,11 @@ if NATIVE_APIS_AVAILABLE:
                 # Use userInfo dictionary for the announcement message
                 userInfo = {"AXAnnouncementKey": message}
                 NSAccessibilityPostNotification(
-                    element,
-                    NSAccessibilityAnnouncementRequestedNotification,
-                    userInfo
+                    element, NSAccessibilityAnnouncementRequestedNotification, userInfo
                 )
             except Exception:
                 pass  # Silently fail if accessibility not available
+
     except ImportError:
         # Fallback for older PyObjC versions without NSAccessibilityPostNotification
         def _announce_for_accessibility(element, message):
@@ -122,11 +160,12 @@ if NATIVE_APIS_AVAILABLE:
                 )
             except Exception:
                 pass
+
 else:
     # Fallback when native APIs are not available at all
     def _announce_for_accessibility(element, message):
         """No-op fallback when native APIs are unavailable."""
-        pass
+
 
 # Performance tuning for Apple Silicon
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
@@ -142,7 +181,9 @@ else:
 
 def _update_check():
     import applio_update_check
+
     return applio_update_check
+
 
 # =================================================================
 # 2. Subprocess Mode Detection (MUST BE BEFORE LOGGING)
@@ -161,7 +202,7 @@ def _update_check():
 if len(sys.argv) > 1:
     potential_script = sys.argv[1]
     # Accept any .py script, not just macos_wrapper.py
-    if potential_script.endswith('.py') and not potential_script.startswith('-'):
+    if potential_script.endswith(".py") and not potential_script.startswith("-"):
         # Find the script - check both absolute path and relative to BASE_PATH
         script_path = None
         if os.path.exists(potential_script):
@@ -178,7 +219,11 @@ if len(sys.argv) > 1:
             # NSApplicationActivationPolicyAccessory (1) = No Dock icon
             if getattr(sys, "frozen", False) and NATIVE_APIS_AVAILABLE:
                 try:
-                    from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+                    from AppKit import (
+                        NSApplication,
+                        NSApplicationActivationPolicyAccessory,
+                    )
+
                     app = NSApplication.sharedApplication()
                     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
                 except Exception:
@@ -194,7 +239,9 @@ if len(sys.argv) > 1:
             # resolves args that ARE existing paths, so non-path args like the
             # sample rate or booleans are left untouched.
             script_args = list(sys.argv[2:])
-            _data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+            _data_path = os.environ.get(
+                "APPLIO_DATA_PATH", os.path.expanduser("~/Applio")
+            )
             _resolved_args = []
             for _arg in script_args:
                 if (
@@ -222,6 +269,7 @@ if len(sys.argv) > 1:
 
             # Delegate to script via runpy
             import runpy
+
             sys.argv = [script_path_abs] + _resolved_args
             runpy.run_path(script_path_abs, run_name="__main__")
             sys.exit(0)
@@ -266,8 +314,10 @@ LOG_SCROLL_INTERVAL = 5
 # long runs. The training.log is flooded with per-step tqdm progress between
 # the sparse per-epoch summary lines, so we stream the whole file rather than
 # a 1MB tail (which only spanned the last few evaluated epochs).
-MAX_EPOCH_POINTS = 2000            # generous cap on plotted epoch points
-MAX_LOG_SCAN_BYTES = 64 * 1024 * 1024  # bound I/O; only the tail of a huge log is scanned
+MAX_EPOCH_POINTS = 2000  # generous cap on plotted epoch points
+MAX_LOG_SCAN_BYTES = (
+    64 * 1024 * 1024
+)  # bound I/O; only the tail of a huge log is scanned
 
 # =================================================================
 # 2.5. IPC Notification Constants
@@ -277,8 +327,12 @@ IPC_BRING_TO_FRONT_NAME = "com.applio.bring_to_front"
 
 # --- Single-instance lock (1.6) -----------------------------------------------
 # Fixed path (NOT the user-chosen data dir, which may not exist on first run).
-LAUNCHER_LOCK_PATH = os.path.expanduser("~/Library/Application Support/Applio/.launcher.lock")
-_LAUNCHER_SINGLE_INSTANCE_LOCK_FH = None  # kept open to hold the flock for the process lifetime
+LAUNCHER_LOCK_PATH = os.path.expanduser(
+    "~/Library/Application Support/Applio/.launcher.lock"
+)
+_LAUNCHER_SINGLE_INSTANCE_LOCK_FH = (
+    None  # kept open to hold the flock for the process lifetime
+)
 
 
 def acquire_single_instance_lock():
@@ -324,6 +378,7 @@ def release_single_instance_lock():
             fh.close()
         except Exception:
             pass
+
 
 # Logging setup — own the root logger explicitly. logging.basicConfig is a NO-OP
 # if the root logger already has handlers (an earlier import adds one in the
@@ -374,7 +429,9 @@ def get_process_state_path():
                     config = json.load(f)
                     data_path = config.get("data_path")
                     if data_path:
-                        return os.path.join(data_path, ".applio", "active_processes.json")
+                        return os.path.join(
+                            data_path, ".applio", "active_processes.json"
+                        )
             except (json.JSONDecodeError, IOError):
                 pass
 
@@ -422,7 +479,9 @@ def load_process_state(retry_on_lock_fail=True):
         lock_file = open(lock_path, "a+")
         if not _acquire_file_lock(lock_file):
             if retry_on_lock_fail:
-                logging.warning("[Launcher] Could not acquire lock for reading, returning empty state")
+                logging.warning(
+                    "[Launcher] Could not acquire lock for reading, returning empty state"
+                )
                 return {"version": 1, "processes": {}}
             else:
                 raise IOError(f"Could not acquire lock for {path} within timeout")
@@ -457,7 +516,9 @@ def save_process_state(state) -> bool:
         # Use "a+" mode to create if needed, read+write, without truncating
         lock_file = open(lock_path, "a+")
         if not _acquire_file_lock(lock_file):
-            logging.error("[Launcher] Could not acquire lock for writing, state NOT saved")
+            logging.error(
+                "[Launcher] Could not acquire lock for writing, state NOT saved"
+            )
             return False
         try:
             temp = path + ".tmp"
@@ -580,7 +641,9 @@ def _read_inference_progress():
     guaranteed to read from the SAME .applio dir the launcher reads history and
     active-process state from (env > runtime_paths.json > ~/Applio).
     """
-    path = os.path.join(os.path.dirname(get_process_state_path()), "inference_progress.json")
+    path = os.path.join(
+        os.path.dirname(get_process_state_path()), "inference_progress.json"
+    )
     if not os.path.exists(path):
         return None
     try:
@@ -603,10 +666,13 @@ def _synthesize_inference_proc():
     if not inf or inf.get("status") not in ("running", "cancelling"):
         return None
     return {
-        "type": "inference", "status": inf["status"],
+        "type": "inference",
+        "status": inf["status"],
         "model_name": inf.get("model_name", ""),
-        "total": inf.get("total", 0), "processed": inf.get("processed", 0),
-        "converted": inf.get("converted", 0), "skipped": inf.get("skipped", 0),
+        "total": inf.get("total", 0),
+        "processed": inf.get("processed", 0),
+        "converted": inf.get("converted", 0),
+        "skipped": inf.get("skipped", 0),
         "current_file": inf.get("current_file", ""),
         "started_at": inf.get("started_at"),
         "output_folder": inf.get("output_folder"),
@@ -624,6 +690,7 @@ def _sweep_stale_inference_progress():
     if not inf or inf.get("status") != "running":
         return
     import time as _t, datetime as _dt
+
     started = inf.get("started_at") or _t.time()
     ended = _t.time()
     inf["status"] = "interrupted"
@@ -632,7 +699,9 @@ def _sweep_stale_inference_progress():
     inf["elapsed"] = ended - started
     inf["current_file"] = ""
     # Write the progress file atomically (0o600) — reuse the launcher's resolver.
-    prog_path = os.path.join(os.path.dirname(get_process_state_path()), "inference_progress.json")
+    prog_path = os.path.join(
+        os.path.dirname(get_process_state_path()), "inference_progress.json"
+    )
     try:
         os.makedirs(os.path.dirname(prog_path), exist_ok=True)
         tmp = prog_path + ".tmp"
@@ -656,17 +725,20 @@ def _sweep_stale_inference_progress():
                             hist = json.load(f) or hist
                     except json.JSONDecodeError:
                         pass
-                hist.setdefault("history", []).insert(0, {
-                    "type": "inference",
-                    "model_name": inf.get("model_name", ""),
-                    "started_at": _dt.datetime.fromtimestamp(started).isoformat(),
-                    "completed_at": _dt.datetime.fromtimestamp(ended).isoformat(),
-                    "status": "interrupted",
-                    "total": inf.get("total", 0),
-                    "converted": inf.get("converted", 0),
-                    "skipped": inf.get("skipped", 0),
-                    "process_id": "inference-%s" % started,
-                })
+                hist.setdefault("history", []).insert(
+                    0,
+                    {
+                        "type": "inference",
+                        "model_name": inf.get("model_name", ""),
+                        "started_at": _dt.datetime.fromtimestamp(started).isoformat(),
+                        "completed_at": _dt.datetime.fromtimestamp(ended).isoformat(),
+                        "status": "interrupted",
+                        "total": inf.get("total", 0),
+                        "converted": inf.get("converted", 0),
+                        "skipped": inf.get("skipped", 0),
+                        "process_id": "inference-%s" % started,
+                    },
+                )
                 hist["history"] = hist["history"][:HISTORY_MAX_ENTRIES]
                 tmp = hist_path + ".tmp"
                 fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -679,7 +751,11 @@ def _sweep_stale_inference_progress():
         logging.warning(f"[Launcher] inference history append failed: {e}")
     # Clear a stale cancel flag (best-effort).
     try:
-        os.remove(os.path.join(os.path.dirname(get_process_state_path()), "inference_cancel.flag"))
+        os.remove(
+            os.path.join(
+                os.path.dirname(get_process_state_path()), "inference_cancel.flag"
+            )
+        )
     except OSError:
         pass
 
@@ -700,10 +776,10 @@ def _get_history_lock_path() -> str:
 
 def load_process_history() -> dict:
     """Load process history from file with locking.
-    
+
     Returns:
         dict with 'version' and 'history' (list of entries)
-    
+
     Handles:
         - Missing file (returns empty history)
         - Corrupted JSON (returns empty history)
@@ -713,7 +789,7 @@ def load_process_history() -> dict:
     history_path = get_history_file_path()
     if not os.path.exists(history_path):
         return {"version": 1, "history": []}
-    
+
     lock_path = _get_history_lock_path()
     lock_file = None
     try:
@@ -724,38 +800,47 @@ def load_process_history() -> dict:
         try:
             with open(history_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             # Validate structure
             if not isinstance(data, dict):
-                logging.warning("[Launcher] History file has invalid root structure, resetting")
+                logging.warning(
+                    "[Launcher] History file has invalid root structure, resetting"
+                )
                 return {"version": 1, "history": []}
-            
+
             if "history" not in data:
                 data["history"] = []
             elif not isinstance(data["history"], list):
-                logging.warning("[Launcher] History 'history' key is not a list, resetting")
+                logging.warning(
+                    "[Launcher] History 'history' key is not a list, resetting"
+                )
                 data["history"] = []
-            
+
             # Validate and clean individual entries
             valid_history = []
             for i, entry in enumerate(data.get("history", [])):
                 if not isinstance(entry, dict):
-                    logging.debug(f"[Launcher] Skipping invalid history entry at index {i}")
+                    logging.debug(
+                        f"[Launcher] Skipping invalid history entry at index {i}"
+                    )
                     continue
                 # Require minimal fields
                 if entry.get("type") and entry.get("started_at"):
                     valid_history.append(entry)
                 else:
-                    logging.debug(f"[Launcher] Skipping incomplete history entry at index {i}")
-            
+                    logging.debug(
+                        f"[Launcher] Skipping incomplete history entry at index {i}"
+                    )
+
             data["history"] = valid_history
             return data
-            
+
         except json.JSONDecodeError as e:
             logging.warning(f"[Launcher] History file corrupted (JSON error): {e}")
             # Create backup of corrupted file for debugging
             try:
                 import shutil
+
                 backup_path = history_path + ".corrupted"
                 shutil.copy2(history_path, backup_path)
                 logging.info(f"[Launcher] Corrupted history backed up to {backup_path}")
@@ -780,24 +865,24 @@ def load_process_history() -> dict:
 
 def save_process_history(history: dict) -> bool:
     """Save process history to file with locking.
-    
+
     Returns:
         True if save succeeded, False otherwise.
-    
+
     Handles:
         - Directory creation errors
         - Lock acquisition failures
         - Write errors (atomic write via temp file)
     """
     history_path = get_history_file_path()
-    
+
     # Ensure directory exists
     try:
         os.makedirs(os.path.dirname(history_path), exist_ok=True)
     except OSError as e:
         logging.error(f"[Launcher] Could not create history directory: {e}")
         return False
-    
+
     lock_path = _get_history_lock_path()
     lock_file = None
     try:
@@ -836,42 +921,44 @@ def save_process_history(history: dict) -> bool:
 
 def add_to_history(entry: dict) -> bool:
     """Add a completed process to history (thread-safe).
-    
+
     Args:
         entry: dict with type, model_name, started_at, completed_at, status, etc.
-    
+
     Returns:
         True if added successfully.
-    
+
     Validates entry has required fields before adding.
     """
     # Validate required fields
-    required_fields = ['type', 'started_at', 'completed_at']
+    required_fields = ["type", "started_at", "completed_at"]
     for field in required_fields:
         if field not in entry:
             logging.warning(f"[Launcher] History entry missing required field: {field}")
             return False
-    
+
     with _history_lock:
         try:
             history = load_process_history()
-            
+
             # Generate unique process ID
             process_id = f"{entry.get('type', 'unknown')}-{entry.get('started_at', datetime.datetime.now().isoformat())}"
             entry["process_id"] = process_id
-            
+
             # Add to history
             history["history"].insert(0, entry)
-            
+
             # Enforce max entries
             if len(history["history"]) > HISTORY_MAX_ENTRIES:
                 history["history"] = history["history"][:HISTORY_MAX_ENTRIES]
-            
+
             success = save_process_history(history)
             if success:
-                logging.debug(f"[Launcher] Added to history: {entry.get('type')} - {entry.get('model_name', 'unknown')}")
+                logging.debug(
+                    f"[Launcher] Added to history: {entry.get('type')} - {entry.get('model_name', 'unknown')}"
+                )
             return success
-            
+
         except Exception as e:
             logging.error(f"[Launcher] Failed to add to history: {e}")
             return False
@@ -879,26 +966,27 @@ def add_to_history(entry: dict) -> bool:
 
 def cleanup_old_history() -> int:
     """Remove entries older than HISTORY_MAX_AGE_DAYS (thread-safe).
-    
+
     Returns:
         Number of entries removed.
     """
     with _history_lock:
         history = load_process_history()
         cutoff = datetime.datetime.now() - datetime.timedelta(days=HISTORY_MAX_AGE_DAYS)
-        
+
         original_count = len(history["history"])
         history["history"] = [
-            h for h in history["history"]
-            if h.get("completed_at") and 
-            datetime.datetime.fromisoformat(h["completed_at"]) > cutoff
+            h
+            for h in history["history"]
+            if h.get("completed_at")
+            and datetime.datetime.fromisoformat(h["completed_at"]) > cutoff
         ]
-        
+
         removed = original_count - len(history["history"])
         if removed > 0:
             save_process_history(history)
             logging.info(f"[Launcher] Cleaned up {removed} old history entries")
-        
+
         return removed
 
 
@@ -911,10 +999,10 @@ def get_history_file_path() -> str:
 
 def get_recent_processes(limit: int = 10) -> list:
     """Get recent completed processes from history (thread-safe).
-    
+
     Args:
         limit: Maximum number of entries to return.
-    
+
     Returns:
         List of history entries, most recent first.
     """
@@ -947,31 +1035,31 @@ def _parse_training_log_line(line):
     """
     # Full line carrying lowest_value (epoch > 1)
     match = re.match(
-        r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)\s*\|\s*lowest_value=([\d.]+)\s*\(epoch\s+(\d+)\s+and\s+step\s+(\d+)\)',
+        r".*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)\s*\|\s*lowest_value=([\d.]+)\s*\(epoch\s+(\d+)\s+and\s+step\s+(\d+)\)",
         line,
     )
     if match:
         return {
-            'epoch': int(match.group(1)),
-            'step': int(match.group(2)),
-            'training_speed': match.group(3),
-            'best_loss': float(match.group(4)),
-            'best_epoch': int(match.group(5)),
-            'best_step': int(match.group(6)),
+            "epoch": int(match.group(1)),
+            "step": int(match.group(2)),
+            "training_speed": match.group(3),
+            "best_loss": float(match.group(4)),
+            "best_epoch": int(match.group(5)),
+            "best_step": int(match.group(6)),
         }
     # Simpler line without lowest_value (epoch == 1, no evaluation yet)
     match = re.match(
-        r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)',
+        r".*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)",
         line,
     )
     if match:
         return {
-            'epoch': int(match.group(1)),
-            'step': int(match.group(2)),
-            'training_speed': match.group(3),
-            'best_loss': None,
-            'best_epoch': None,
-            'best_step': None,
+            "epoch": int(match.group(1)),
+            "step": int(match.group(2)),
+            "training_speed": match.group(3),
+            "best_loss": None,
+            "best_epoch": None,
+            "best_step": None,
         }
     return None
 
@@ -993,25 +1081,25 @@ class ProgressWindowController:
         self._last_file_pos = 0
         self._last_file_size = 0
         # Smart log display state
-        self._live_phase = None          # Current phase name
-        self._live_phase_start = None    # Timestamp when phase started
-        self._last_tqdm_time = None      # Timestamp of last tqdm activity
-        self._last_non_tqdm_line = ""    # For phase name detection
+        self._live_phase = None  # Current phase name
+        self._live_phase_start = None  # Timestamp when phase started
+        self._last_tqdm_time = None  # Timestamp of last tqdm activity
+        self._last_non_tqdm_line = ""  # For phase name detection
         # Epoch tracking for progress bar
-        self._total_epoch = process_info.get('total_epoch')
+        self._total_epoch = process_info.get("total_epoch")
         self._current_epoch = 0
         # Training status tracking (for training tasks only)
-        self._training_status = None          # Parsed training status dict
-        self._best_epoch = None               # Epoch with lowest loss
-        self._best_loss = None                # Lowest loss value
-        self._best_step = None                # Step at best epoch
-        self._current_step = 0                # Current training step
-        self._training_speed = None           # Time per epoch
+        self._training_status = None  # Parsed training status dict
+        self._best_epoch = None  # Epoch with lowest loss
+        self._best_loss = None  # Lowest loss value
+        self._best_step = None  # Step at best epoch
+        self._current_step = 0  # Current training step
+        self._training_speed = None  # Time per epoch
         self.window = None  # Initialize to None for safe cleanup
         # Thread safety and file tracking
         self._shutdown_event = threading.Event()  # Graceful shutdown signal
-        self._state_lock = threading.Lock()       # Protect shared state
-        self._file_inode = None                   # Track inode for rotation detection
+        self._state_lock = threading.Lock()  # Protect shared state
+        self._file_inode = None  # Track inode for rotation detection
 
         # Log file path
         self.log_file_path = process_info.get("log_file")
@@ -1029,10 +1117,12 @@ class ProgressWindowController:
         """Create the native window."""
         style = NSTitledWindowMask | NSClosableWindowMask
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(0, 0, 500, 660),  # Increased from 580 to 660 for training info panel
+            NSMakeRect(
+                0, 0, 500, 660
+            ),  # Increased from 580 to 660 for training info panel
             style,
             NSBackingStoreBuffered,
-            False
+            False,
         )
         self.window.setTitle_(f"Applio - {self.process_type.capitalize()}")
         self.window.center()
@@ -1041,18 +1131,17 @@ class ProgressWindowController:
         # Register for close notification
         notification_center = NSNotificationCenter.defaultCenter()
         self._observer = notification_center.addObserver_selector_name_object_(
-            self,
-            "windowWillClose:",
-            "NSWindowWillCloseNotification",
-            self.window
+            self, "windowWillClose:", "NSWindowWillCloseNotification", self.window
         )
 
         # Also observe app termination as safety net for timer cleanup
-        self._terminate_observer = notification_center.addObserver_selector_name_object_(
-            self,
-            "applicationWillTerminate:",
-            "NSApplicationWillTerminateNotification",
-            None
+        self._terminate_observer = (
+            notification_center.addObserver_selector_name_object_(
+                self,
+                "applicationWillTerminate:",
+                "NSApplicationWillTerminateNotification",
+                None,
+            )
         )
 
     def _create_ui(self):
@@ -1062,21 +1151,29 @@ class ProgressWindowController:
         y = 660 - padding  # Updated from 580 to match new window height
 
         # Set window accessibility
-        self.window.setAccessibilityLabel_(f"Applio {self.process_type.capitalize()} Progress")
-        self.window.setAccessibilityHelp_(f"Monitoring window for {self.process_type} process")
+        self.window.setAccessibilityLabel_(
+            f"Applio {self.process_type.capitalize()} Progress"
+        )
+        self.window.setAccessibilityHelp_(
+            f"Monitoring window for {self.process_type} process"
+        )
 
         # Process type label (bold, larger)
         self.type_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, y - 24, window_width - 2*padding, 24)
+            NSMakeRect(padding, y - 24, window_width - 2 * padding, 24)
         )
-        model_name = self.process_info.get('model_name', 'Unknown')
-        self.type_label.setStringValue_(f"{self.process_type.capitalize()}: {model_name}")
+        model_name = self.process_info.get("model_name", "Unknown")
+        self.type_label.setStringValue_(
+            f"{self.process_type.capitalize()}: {model_name}"
+        )
         self.type_label.setBezeled_(False)
         self.type_label.setDrawsBackground_(False)
         self.type_label.setEditable_(False)
         self.type_label.setFont_(NSFont.boldSystemFontOfSize_(16))
         # Accessibility
-        self.type_label.setAccessibilityLabel_(f"{self.process_type.capitalize()} process for model {model_name}")
+        self.type_label.setAccessibilityLabel_(
+            f"{self.process_type.capitalize()} process for model {model_name}"
+        )
         self.type_label.setAccessibilityIdentifier_("process_type_label")
         self.window.contentView().addSubview_(self.type_label)
 
@@ -1084,14 +1181,20 @@ class ProgressWindowController:
         badge_width = 80
         badge_height = 22
         self.status_badge = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(window_width - padding - badge_width, y - 22, badge_width, badge_height)
+            NSMakeRect(
+                window_width - padding - badge_width, y - 22, badge_width, badge_height
+            )
         )
         self.status_badge.setStringValue_("Running")
         self.status_badge.setBezeled_(False)
         self.status_badge.setDrawsBackground_(True)
-        self.status_badge.setBackgroundColor_(NSColor.systemGreenColor().colorWithAlphaComponent_(0.2))
+        self.status_badge.setBackgroundColor_(
+            NSColor.systemGreenColor().colorWithAlphaComponent_(0.2)
+        )
         self.status_badge.setEditable_(False)
-        self.status_badge.setFont_(NSFont.systemFontOfSize_weight_(11, NSFontWeightMedium))
+        self.status_badge.setFont_(
+            NSFont.systemFontOfSize_weight_(11, NSFontWeightMedium)
+        )
         self.status_badge.setTextColor_(NSColor.systemGreenColor())
         self.status_badge.setAlignment_(NSCenterTextAlignment)
         self.status_badge.setWantsLayer_(True)
@@ -1103,7 +1206,7 @@ class ProgressWindowController:
 
         # Status label
         self.status_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, y - 20, window_width - 2*padding, 20)
+            NSMakeRect(padding, y - 20, window_width - 2 * padding, 20)
         )
         self.status_label.setStringValue_("Status: Running")
         self.status_label.setBezeled_(False)
@@ -1111,14 +1214,16 @@ class ProgressWindowController:
         self.status_label.setEditable_(False)
         # Accessibility
         self.status_label.setAccessibilityLabel_("Process status")
-        self.status_label.setAccessibilityHelp_("Current status of the process: Running, Paused, Completed, or Terminated")
+        self.status_label.setAccessibilityHelp_(
+            "Current status of the process: Running, Paused, Completed, or Terminated"
+        )
         self.status_label.setAccessibilityIdentifier_("status_label")
         self.window.contentView().addSubview_(self.status_label)
         y -= 25
 
         # Elapsed time label
         self.time_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, y - 18, window_width - 2*padding, 18)
+            NSMakeRect(padding, y - 18, window_width - 2 * padding, 18)
         )
         self.time_label.setStringValue_("Elapsed: 00:00:00")
         self.time_label.setBezeled_(False)
@@ -1132,9 +1237,9 @@ class ProgressWindowController:
         y -= 25
 
         # Progress bar - use determinate mode if we have epoch info
-        total_epoch = self.process_info.get('total_epoch', 0)
+        total_epoch = self.process_info.get("total_epoch", 0)
         self.progress_bar = NSProgressIndicator.alloc().initWithFrame_(
-            NSMakeRect(padding, y - 20, window_width - 2*padding, 20)
+            NSMakeRect(padding, y - 20, window_width - 2 * padding, 20)
         )
         if total_epoch and total_epoch > 0:
             self.progress_bar.setIndeterminate_(False)
@@ -1150,9 +1255,13 @@ class ProgressWindowController:
         # Accessibility
         self.progress_bar.setAccessibilityLabel_("Progress indicator")
         if total_epoch and total_epoch > 0:
-            self.progress_bar.setAccessibilityHelp_(f"Training progress: 0 of {total_epoch} epochs")
+            self.progress_bar.setAccessibilityHelp_(
+                f"Training progress: 0 of {total_epoch} epochs"
+            )
         else:
-            self.progress_bar.setAccessibilityHelp_("Shows that the process is actively running")
+            self.progress_bar.setAccessibilityHelp_(
+                "Shows that the process is actively running"
+            )
         self.progress_bar.setAccessibilityIdentifier_("progress_bar")
         self.window.contentView().addSubview_(self.progress_bar)
         y -= 30
@@ -1164,7 +1273,12 @@ class ProgressWindowController:
 
         # Training panel container (hidden for non-training tasks)
         self.training_panel_box = NSBox.alloc().initWithFrame_(
-            NSMakeRect(padding - 5, y - TRAINING_PANEL_HEIGHT, window_width - 2*padding + 10, TRAINING_PANEL_HEIGHT)
+            NSMakeRect(
+                padding - 5,
+                y - TRAINING_PANEL_HEIGHT,
+                window_width - 2 * padding + 10,
+                TRAINING_PANEL_HEIGHT,
+            )
         )
         self.training_panel_box.setBoxType_(1)  # NSBoxCustom
         self.training_panel_box.setBorderType_(2)  # NSBezelBorder for subtle inset look
@@ -1176,29 +1290,37 @@ class ProgressWindowController:
         # Positioned at top of training panel (y - 28 from panel top)
         best_row_y = y - 28
         self.best_epoch_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, best_row_y, window_width - 2*padding, 28)
+            NSMakeRect(padding, best_row_y, window_width - 2 * padding, 28)
         )
         self.best_epoch_label.setStringValue_("Best Epoch: Waiting for training...")
         self.best_epoch_label.setBezeled_(False)
         self.best_epoch_label.setDrawsBackground_(False)
         self.best_epoch_label.setEditable_(False)
         self.best_epoch_label.setFont_(NSFont.boldSystemFontOfSize_(14))
-        self.best_epoch_label.setTextColor_(NSColor.systemGreenColor())  # Green for "best"
+        self.best_epoch_label.setTextColor_(
+            NSColor.systemGreenColor()
+        )  # Green for "best"
         self.best_epoch_label.setHidden_(not is_training)
         self.best_epoch_label.setAccessibilityLabel_("Best epoch indicator")
-        self.best_epoch_label.setAccessibilityHelp_("Shows the epoch with lowest loss - use this for inference")
+        self.best_epoch_label.setAccessibilityHelp_(
+            "Shows the epoch with lowest loss - use this for inference"
+        )
         self.window.contentView().addSubview_(self.best_epoch_label)
 
         # Current Epoch + Speed Row (middle of panel)
         current_row_y = y - 54
         self.current_epoch_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, current_row_y, window_width - 2*padding, 22)
+            NSMakeRect(padding, current_row_y, window_width - 2 * padding, 22)
         )
-        self.current_epoch_label.setStringValue_("Current: -- | Step: -- | Speed: --/epoch")
+        self.current_epoch_label.setStringValue_(
+            "Current: -- | Step: -- | Speed: --/epoch"
+        )
         self.current_epoch_label.setBezeled_(False)
         self.current_epoch_label.setDrawsBackground_(False)
         self.current_epoch_label.setEditable_(False)
-        self.current_epoch_label.setFont_(NSFont.systemFontOfSize_weight_(12, NSFontWeightMedium))
+        self.current_epoch_label.setFont_(
+            NSFont.systemFontOfSize_weight_(12, NSFontWeightMedium)
+        )
         self.current_epoch_label.setTextColor_(NSColor.labelColor())
         self.current_epoch_label.setHidden_(not is_training)
         self.current_epoch_label.setAccessibilityLabel_("Current training status")
@@ -1207,13 +1329,15 @@ class ProgressWindowController:
         # Best epoch details (step info) - bottom of panel
         details_y = y - 76
         self.best_details_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, details_y, window_width - 2*padding, 18)
+            NSMakeRect(padding, details_y, window_width - 2 * padding, 18)
         )
         self.best_details_label.setStringValue_("Loss: -- | Step: --")
         self.best_details_label.setBezeled_(False)
         self.best_details_label.setDrawsBackground_(False)
         self.best_details_label.setEditable_(False)
-        self.best_details_label.setFont_(NSFont.systemFontOfSize_weight_(10, NSFontWeightRegular))
+        self.best_details_label.setFont_(
+            NSFont.systemFontOfSize_weight_(10, NSFontWeightRegular)
+        )
         self.best_details_label.setTextColor_(NSColor.secondaryLabelColor())
         self.best_details_label.setHidden_(not is_training)
         self.window.contentView().addSubview_(self.best_details_label)
@@ -1231,7 +1355,9 @@ class ProgressWindowController:
         # Row 1: Phase icon + name + counter (24px)
         row1_height = 24
         self.phase_label = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, y - row1_height, window_width - 2*padding, row1_height)
+            NSMakeRect(
+                padding, y - row1_height, window_width - 2 * padding, row1_height
+            )
         )
         self.phase_label.setStringValue_("Waiting for progress...")
         self.phase_label.setBezeled_(False)
@@ -1245,9 +1371,13 @@ class ProgressWindowController:
         # Row 2: Visual progress bar (20px)
         row2_height = 20
         self.visual_progress = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(padding, y - row2_height, window_width - 2*padding - 50, row2_height)
+            NSMakeRect(
+                padding, y - row2_height, window_width - 2 * padding - 50, row2_height
+            )
         )
-        self.visual_progress.setStringValue_("░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
+        self.visual_progress.setStringValue_(
+            "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
+        )
         self.visual_progress.setBezeled_(False)
         self.visual_progress.setDrawsBackground_(False)
         self.visual_progress.setEditable_(False)
@@ -1271,7 +1401,7 @@ class ProgressWindowController:
 
         # Row 3: Stats grid (24px)
         row3_height = 24
-        stats_width = (window_width - 2*padding - 30) / 4
+        stats_width = (window_width - 2 * padding - 30) / 4
         stats_labels = ["Speed", "ETA", "Phase Time", "Items"]
         self.stats_values = []
 
@@ -1309,7 +1439,9 @@ class ProgressWindowController:
         # Status card background box (adds visual separation)
         # Note: NSBox doesn't support setFillColor in PyObjC, so we use a bordered style instead
         self.status_card_box = NSBox.alloc().initWithFrame_(
-            NSMakeRect(padding - 5, y, window_width - 2*padding + 10, STATUS_CARD_HEIGHT + 4)
+            NSMakeRect(
+                padding - 5, y, window_width - 2 * padding + 10, STATUS_CARD_HEIGHT + 4
+            )
         )
         self.status_card_box.setBoxType_(1)  # NSBoxCustom = 1
         self.status_card_box.setBorderType_(1)  # NSLineBorder = 1 for subtle border
@@ -1320,17 +1452,19 @@ class ProgressWindowController:
         # Log scroll view
         log_height = 216  # Reduced from 250 to make room for live zone
         self.log_scroll = NSScrollView.alloc().initWithFrame_(
-            NSMakeRect(padding, y - log_height, window_width - 2*padding, log_height)
+            NSMakeRect(padding, y - log_height, window_width - 2 * padding, log_height)
         )
         self.log_scroll.setHasVerticalScroller_(True)
         self.log_scroll.setBorderType_(NSBezelBorder)
         # Accessibility
         self.log_scroll.setAccessibilityLabel_("Log output")
-        self.log_scroll.setAccessibilityHelp_("Real-time log output from the training process")
+        self.log_scroll.setAccessibilityHelp_(
+            "Real-time log output from the training process"
+        )
         self.log_scroll.setAccessibilityIdentifier_("log_scroll_view")
 
         self.log_view = NSTextView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, window_width - 2*padding - 20, log_height)
+            NSMakeRect(0, 0, window_width - 2 * padding - 20, log_height)
         )
         self.log_view.setEditable_(False)
         self.log_view.setFont_(NSFont.fontWithName_size_("Menlo", 11))
@@ -1358,46 +1492,60 @@ class ProgressWindowController:
         self.terminate_btn.setAction_("terminateProcess:")
         # Accessibility
         self.terminate_btn.setAccessibilityLabel_("Terminate process")
-        self.terminate_btn.setAccessibilityHelp_("Stop the process immediately. The process will not complete its current task.")
+        self.terminate_btn.setAccessibilityHelp_(
+            "Stop the process immediately. The process will not complete its current task."
+        )
         self.terminate_btn.setAccessibilityIdentifier_("terminate_button")
         self.window.contentView().addSubview_(self.terminate_btn)
 
         # Pause/Resume button (center-left)
         self.pause_btn = NSButton.alloc().initWithFrame_(
-            NSMakeRect(padding + button_width + 10, button_y, button_width, button_height)
+            NSMakeRect(
+                padding + button_width + 10, button_y, button_width, button_height
+            )
         )
         self.pause_btn.setTitle_("Pause")
         self.pause_btn.setTarget_(self)
         self.pause_btn.setAction_("togglePause:")
         # Accessibility
         self.pause_btn.setAccessibilityLabel_("Pause or resume process")
-        self.pause_btn.setAccessibilityHelp_("Temporarily pause the process or resume a paused process")
+        self.pause_btn.setAccessibilityHelp_(
+            "Temporarily pause the process or resume a paused process"
+        )
         self.pause_btn.setAccessibilityIdentifier_("pause_button")
         self.window.contentView().addSubview_(self.pause_btn)
 
         # Open Logs button (center-right)
         self.logs_btn = NSButton.alloc().initWithFrame_(
-            NSMakeRect(padding + 2*(button_width + 10), button_y, button_width, button_height)
+            NSMakeRect(
+                padding + 2 * (button_width + 10), button_y, button_width, button_height
+            )
         )
         self.logs_btn.setTitle_("Open Logs")
         self.logs_btn.setTarget_(self)
         self.logs_btn.setAction_("openLogsFolder:")
         # Accessibility
         self.logs_btn.setAccessibilityLabel_("Open logs folder")
-        self.logs_btn.setAccessibilityHelp_("Open the folder containing log files in Finder")
+        self.logs_btn.setAccessibilityHelp_(
+            "Open the folder containing log files in Finder"
+        )
         self.logs_btn.setAccessibilityIdentifier_("open_logs_button")
         self.window.contentView().addSubview_(self.logs_btn)
 
         # Relaunch button (right)
         self.relaunch_btn = NSButton.alloc().initWithFrame_(
-            NSMakeRect(padding + 3*(button_width + 10), button_y, button_width, button_height)
+            NSMakeRect(
+                padding + 3 * (button_width + 10), button_y, button_width, button_height
+            )
         )
         self.relaunch_btn.setTitle_("Relaunch App")
         self.relaunch_btn.setTarget_(self)
         self.relaunch_btn.setAction_("relaunchApp:")
         # Accessibility
         self.relaunch_btn.setAccessibilityLabel_("Relaunch application")
-        self.relaunch_btn.setAccessibilityHelp_("Open a new instance of Applio while this process continues in the background")
+        self.relaunch_btn.setAccessibilityHelp_(
+            "Open a new instance of Applio while this process continues in the background"
+        )
         self.relaunch_btn.setAccessibilityIdentifier_("relaunch_button")
         self.window.contentView().addSubview_(self.relaunch_btn)
 
@@ -1438,8 +1586,8 @@ class ProgressWindowController:
                 with self._state_lock:
                     # Detect rotation (inode changed) or truncation (size < pos)
                     if self._file_inode is not None and (
-                        current_inode != self._file_inode or
-                        current_size < self._last_file_pos
+                        current_inode != self._file_inode
+                        or current_size < self._last_file_pos
                     ):
                         # File was rotated or truncated - reset position
                         self._last_file_pos = 0
@@ -1452,18 +1600,22 @@ class ProgressWindowController:
                         seek_position = self._last_file_pos
                         inode_to_verify = self._file_inode
 
-                    with open(self.log_file_path, "r", encoding="utf-8", errors="replace") as f:
+                    with open(
+                        self.log_file_path, "r", encoding="utf-8", errors="replace"
+                    ) as f:
                         if seek_position == 0 and current_size > 0:
                             # Read from end of file, limiting to ~50 lines
                             # Estimate ~200 bytes per line on average
-                            estimated_start = max(0, current_size - (MAX_INITIAL_LINES * 200))
+                            estimated_start = max(
+                                0, current_size - (MAX_INITIAL_LINES * 200)
+                            )
                             f.seek(estimated_start)
                             content = f.read()
                             # Skip partial first line (we started mid-file)
                             if estimated_start > 0 and content:
-                                first_newline = content.find('\n')
+                                first_newline = content.find("\n")
                                 if first_newline >= 0:
-                                    content = content[first_newline + 1:]
+                                    content = content[first_newline + 1 :]
                             lines = content.splitlines()
                         else:
                             # Normal incremental read
@@ -1505,7 +1657,13 @@ class ProgressWindowController:
                                     last_line = self._last_non_tqdm_line
                                 phase_name = self._detect_phase_name(last_line)
                                 try:
-                                    self._file_queue.put(("tqdm", {"data": tqdm_data, "phase": phase_name}), block=False)
+                                    self._file_queue.put(
+                                        (
+                                            "tqdm",
+                                            {"data": tqdm_data, "phase": phase_name},
+                                        ),
+                                        block=False,
+                                    )
                                 except queue.Full:
                                     pass  # Skip tqdm update if queue is full
                         else:
@@ -1519,7 +1677,10 @@ class ProgressWindowController:
                                 training_data = self._parse_training_status_line(line)
                                 if training_data:
                                     try:
-                                        self._file_queue.put(("training_status", training_data), block=False)
+                                        self._file_queue.put(
+                                            ("training_status", training_data),
+                                            block=False,
+                                        )
                                     except queue.Full:
                                         pass  # Skip training status if queue is full
                             # Queue log line for main thread
@@ -1528,9 +1689,13 @@ class ProgressWindowController:
                             except queue.Full:
                                 self._dropped_lines += 1
                                 if self._dropped_lines == 1:
-                                    logging.warning("[ProgressWindow] Queue full, dropping log lines (consumer lagging)")
+                                    logging.warning(
+                                        "[ProgressWindow] Queue full, dropping log lines (consumer lagging)"
+                                    )
             except OSError as e:
-                logging.warning(f"[ProgressWindow] File access error in poll worker: {e}")
+                logging.warning(
+                    f"[ProgressWindow] File access error in poll worker: {e}"
+                )
             except Exception as e:
                 logging.warning(f"[ProgressWindow] Error in file poll worker: {e}")
 
@@ -1539,7 +1704,7 @@ class ProgressWindowController:
         if not self._total_epoch:
             return
 
-        match = re.search(r'[Ee]poch[:\s]*(\d+)\s*/\s*(\d+)', line)
+        match = re.search(r"[Ee]poch[:\s]*(\d+)\s*/\s*(\d+)", line)
         if match:
             current = int(match.group(1))
             total = int(match.group(2))
@@ -1549,14 +1714,16 @@ class ProgressWindowController:
                     self._total_epoch = total
                 # Queue progress update for main thread
                 try:
-                    self._file_queue.put(("progress", {"current": current, "total": total}), block=False)
+                    self._file_queue.put(
+                        ("progress", {"current": current, "total": total}), block=False
+                    )
                 except queue.Full:
                     pass  # Skip progress update if queue is full
 
     def _is_tqdm_line(self, line):
         """Check if line is a tqdm progress bar update."""
         # Match patterns like: "  5%|▍         | 16/333 [00:18<04:36,  1.16it/s]"
-        return bool(re.match(r'^\s*\d+%\|.*\|\s*\d+/\d+\s*\[', line))
+        return bool(re.match(r"^\s*\d+%\|.*\|\s*\d+/\d+\s*\[", line))
 
     def _parse_tqdm_line(self, line):
         """Extract progress info from tqdm line.
@@ -1565,10 +1732,7 @@ class ProgressWindowController:
         or None if parsing fails.
         """
         # Pattern: "  5%|▍         | 16/333 [00:18<04:36,  1.16it/s]"
-        match = re.match(
-            r'^\s*(\d+)%\|.*\|\s*(\d+)/(\d+)\s*\[([^\]]+)\]',
-            line
-        )
+        match = re.match(r"^\s*(\d+)%\|.*\|\s*(\d+)/(\d+)\s*\[([^\]]+)\]", line)
         if not match:
             return None
 
@@ -1587,23 +1751,23 @@ class ProgressWindowController:
         rate_unit = None
 
         # Extract ETA (after <)
-        eta_match = re.search(r'<\s*([\d:]+)', bracket_content)
+        eta_match = re.search(r"<\s*([\d:]+)", bracket_content)
         if eta_match:
             eta = eta_match.group(1)
 
         # Extract rate (after comma or at end)
-        rate_match = re.search(r'([\d.]+)\s*(it/s|s/it)', bracket_content)
+        rate_match = re.search(r"([\d.]+)\s*(it/s|s/it)", bracket_content)
         if rate_match:
             rate = float(rate_match.group(1))
             rate_unit = rate_match.group(2)
 
         return {
-            'percent': percent,
-            'current': current,
-            'total': total,
-            'eta': eta,
-            'rate': rate,
-            'rate_unit': rate_unit
+            "percent": percent,
+            "current": current,
+            "total": total,
+            "eta": eta,
+            "rate": rate,
+            "rate_unit": rate_unit,
         }
 
     def _detect_phase_name(self, line):
@@ -1617,13 +1781,13 @@ class ProgressWindowController:
         """
 
         # Strip timestamp prefix if present (e.g., "[11:02:15] ")
-        stripped = re.sub(r'^\[\d{2}:\d{2}:\d{2}\]\s*', '', line)
+        stripped = re.sub(r"^\[\d{2}:\d{2}:\d{2}\]\s*", "", line)
 
         # Common phase patterns
         phase_patterns = [
-            r'[Ss]tarting\s+(\w+)',
-            r'^(\w+ing)\s+',  # "Preprocessing", "Extracting", "Training"
-            r'^(\w+)\s+started',
+            r"[Ss]tarting\s+(\w+)",
+            r"^(\w+ing)\s+",  # "Preprocessing", "Extracting", "Training"
+            r"^(\w+)\s+started",
         ]
 
         for pattern in phase_patterns:
@@ -1632,10 +1796,10 @@ class ProgressWindowController:
                 phase = match.group(1).capitalize()
                 # Normalize common variations
                 phase_map = {
-                    'Preprocess': 'Preprocessing',
-                    'Extract': 'Extracting',
-                    'Train': 'Training',
-                    'Feature': 'Feature extraction',
+                    "Preprocess": "Preprocessing",
+                    "Extract": "Extracting",
+                    "Train": "Training",
+                    "Feature": "Feature extraction",
                 }
                 return phase_map.get(phase, phase)
 
@@ -1660,30 +1824,30 @@ class ProgressWindowController:
             return
 
         # Update current epoch and step
-        self._current_epoch = training_data.get('epoch', 0)
-        self._current_step = training_data.get('step', 0)
-        self._training_speed = training_data.get('training_speed')
+        self._current_epoch = training_data.get("epoch", 0)
+        self._current_step = training_data.get("step", 0)
+        self._training_speed = training_data.get("training_speed")
 
         # Update best epoch info if available
-        if training_data.get('best_epoch') is not None:
-            self._best_epoch = training_data['best_epoch']
-            self._best_loss = training_data['best_loss']
-            self._best_step = training_data['best_step']
+        if training_data.get("best_epoch") is not None:
+            self._best_epoch = training_data["best_epoch"]
+            self._best_loss = training_data["best_loss"]
+            self._best_step = training_data["best_step"]
 
         # Update UI - Best Epoch (most prominent)
         if self._best_epoch is not None:
             self.best_epoch_label.setStringValue_(
                 f"Best: Epoch {self._best_epoch}  |  Loss {self._best_loss:.4f}"
             )
-            self.best_details_label.setStringValue_(
-                f"Step {self._best_step:,}"
-            )
+            self.best_details_label.setStringValue_(f"Step {self._best_step:,}")
         else:
             self.best_epoch_label.setStringValue_("Best Epoch: Training in progress...")
             self.best_details_label.setStringValue_("Loss: -- | Step: --")
 
         # Update Current Status
-        speed_str = f"{self._training_speed}/epoch" if self._training_speed else "--/epoch"
+        speed_str = (
+            f"{self._training_speed}/epoch" if self._training_speed else "--/epoch"
+        )
         self.current_epoch_label.setStringValue_(
             f"Current: Epoch {self._current_epoch}  |  Step {self._current_step:,}  |  Speed: {speed_str}"
         )
@@ -1703,26 +1867,30 @@ class ProgressWindowController:
             self._live_phase_start = datetime.datetime.now()
             # Log phase start
             total_label = "files" if "preprocess" in phase_name.lower() else "items"
-            self._add_log_line(f"{phase_name} started ({tqdm_data['total']} {total_label})")
+            self._add_log_line(
+                f"{phase_name} started ({tqdm_data['total']} {total_label})"
+            )
 
         # Build phase label with icon
         phase = self._live_phase or "Processing"
         phase_icons = {
-            'preprocessing': '📁',
-            'feature extraction': '🔬',
-            'training': '🎯',
-            'inference': '🎵',
-            'tts': '🗣️',
+            "preprocessing": "📁",
+            "feature extraction": "🔬",
+            "training": "🎯",
+            "inference": "🎵",
+            "tts": "🗣️",
         }
-        icon = phase_icons.get(phase.lower(), '⚙️')
-        current = tqdm_data['current']
-        total = tqdm_data['total']
+        icon = phase_icons.get(phase.lower(), "⚙️")
+        current = tqdm_data["current"]
+        total = tqdm_data["total"]
         total_label = "files" if "preprocess" in phase.lower() else "items"
 
-        self.phase_label.setStringValue_(f"{icon}  {phase.upper()}  •  {current} of {total} {total_label}")
+        self.phase_label.setStringValue_(
+            f"{icon}  {phase.upper()}  •  {current} of {total} {total_label}"
+        )
 
         # Update visual progress bar (50 chars = 100%)
-        percent = tqdm_data.get('percent', 0)
+        percent = tqdm_data.get("percent", 0)
         filled = int(percent / 2)  # 50 chars max
         empty = 50 - filled
         bar = "█" * filled + "░" * empty
@@ -1731,14 +1899,14 @@ class ProgressWindowController:
 
         # Update stats grid
         # Speed
-        if tqdm_data.get('rate'):
+        if tqdm_data.get("rate"):
             rate_str = f"{tqdm_data['rate']:.2f}{tqdm_data['rate_unit']}"
         else:
             rate_str = "--"
         self.stats_values[0].setStringValue_(rate_str)
 
         # ETA
-        eta_str = tqdm_data.get('eta', '--') or '--'
+        eta_str = tqdm_data.get("eta", "--") or "--"
         self.stats_values[1].setStringValue_(eta_str)
 
         # Phase Time
@@ -1783,8 +1951,10 @@ class ProgressWindowController:
             duration_str = f"{seconds}s"
 
         # Log completion
-        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-        self._add_log_line(f"[{timestamp}] {self._live_phase} complete ({duration_str})")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self._add_log_line(
+            f"[{timestamp}] {self._live_phase} complete ({duration_str})"
+        )
 
         # Clear phase tracking
         self._live_phase = None
@@ -1794,8 +1964,11 @@ class ProgressWindowController:
     def _start_timer(self):
         """Start a lightweight timer for UI updates from queue."""
         from AppKit import NSTimer
-        self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            TIMER_TICK_INTERVAL, self, "processQueueUpdates:", None, True
+
+        self.timer = (
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                TIMER_TICK_INTERVAL, self, "processQueueUpdates:", None, True
+            )
         )
 
     def processQueueUpdates_(self, timer):
@@ -1804,7 +1977,9 @@ class ProgressWindowController:
         elapsed = datetime.datetime.now() - self.start_time
         hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
         minutes, seconds = divmod(remainder, 60)
-        self.time_label.setStringValue_(f"Elapsed: {hours:02d}:{minutes:02d}:{seconds:02d}")
+        self.time_label.setStringValue_(
+            f"Elapsed: {hours:02d}:{minutes:02d}:{seconds:02d}"
+        )
 
         # Process all pending updates from queue
         updates_processed = 0
@@ -1835,11 +2010,15 @@ class ProgressWindowController:
                 continue
             except AttributeError as e:
                 # Code bugs (typos in attribute names) - re-raise to surface during development
-                logging.critical(f"[ProgressWindow] AttributeError (possible typo): {e}")
+                logging.critical(
+                    f"[ProgressWindow] AttributeError (possible typo): {e}"
+                )
                 raise
             except Exception as e:
                 # Unexpected errors - log and continue (don't break the entire UI)
-                logging.error(f"[ProgressWindow] Unexpected error processing queue: {e}")
+                logging.error(
+                    f"[ProgressWindow] Unexpected error processing queue: {e}"
+                )
                 continue
 
         # Check if process still running (with PID recycling protection)
@@ -1853,7 +2032,10 @@ class ProgressWindowController:
                     self.progress_bar.setDoubleValue_(self._total_epoch)
                 else:
                     self.progress_bar.stopAnimation_(None)
-                _announce_for_accessibility(self.status_label, f"{self.process_type.capitalize()} process completed")
+                _announce_for_accessibility(
+                    self.status_label,
+                    f"{self.process_type.capitalize()} process completed",
+                )
 
         # Check for live zone timeout (no tqdm for 2+ seconds)
         if self._last_tqdm_time and self._live_phase:
@@ -1864,7 +2046,9 @@ class ProgressWindowController:
                 if self._log_phase_completion():
                     # Reset Rich Status Card to waiting state
                     self.phase_label.setStringValue_("Waiting for progress...")
-                    self.visual_progress.setStringValue_("░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░")
+                    self.visual_progress.setStringValue_(
+                        "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
+                    )
                     self.progress_percent.setStringValue_("0%")
                     for val in self.stats_values:
                         val.setStringValue_("--")
@@ -1884,19 +2068,18 @@ class ProgressWindowController:
 
         # Add newline if not first line
         if current_length > 0 and not text_storage.string().endswith("\n"):
-            text_storage.replaceCharactersInRange_withString_(
-                (current_length, 0), "\n"
-            )
+            text_storage.replaceCharactersInRange_withString_((current_length, 0), "\n")
             current_length += 1
 
         # Append new line
-        text_storage.replaceCharactersInRange_withString_(
-            (current_length, 0), line
-        )
+        text_storage.replaceCharactersInRange_withString_((current_length, 0), line)
 
         # Periodically reset text storage to match deque content
         # This prevents unbounded growth and syncs with deque
-        if len(self.log_lines) >= MAX_LOG_LINES and len(self.log_lines) % MAX_LOG_LINES == 0:
+        if (
+            len(self.log_lines) >= MAX_LOG_LINES
+            and len(self.log_lines) % MAX_LOG_LINES == 0
+        ):
             text_storage.beginEditing()
             text_storage.deleteCharactersInRange_((0, text_storage.length()))
             text_storage.appendString_("\n".join(self.log_lines))
@@ -1904,14 +2087,13 @@ class ProgressWindowController:
 
         # Scroll to bottom only every N lines to reduce overhead
         if len(self.log_lines) % LOG_SCROLL_INTERVAL == 0:
-            self.log_view.scrollRangeToVisible_(
-                (text_storage.length(), 0)
-            )
+            self.log_view.scrollRangeToVisible_((text_storage.length(), 0))
 
     def show(self):
         """Show the window and start log tailing."""
         # Activate the application to ensure it receives events
         from AppKit import NSApplication, NSApplicationActivationPolicyRegular
+
         app = NSApplication.sharedApplication()
         app.activateIgnoringOtherApps_(True)
 
@@ -1926,7 +2108,9 @@ class ProgressWindowController:
                 self._last_file_pos = 0
                 self._last_file_size = 0
             except Exception as e:
-                logging.warning(f"[ProgressWindow] Error setting initial file position: {e}")
+                logging.warning(
+                    f"[ProgressWindow] Error setting initial file position: {e}"
+                )
 
     def terminateProcess_(self, sender):
         """Terminate the process."""
@@ -1940,9 +2124,14 @@ class ProgressWindowController:
             try:
                 psutil.Process(pid).terminate()
                 self.status_label.setStringValue_("Status: Terminated")
-                self._add_log_line(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process terminated by user")
+                self._add_log_line(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process terminated by user"
+                )
                 # Accessibility announcement
-                _announce_for_accessibility(self.status_label, f"{self.process_type.capitalize()} process terminated")
+                _announce_for_accessibility(
+                    self.status_label,
+                    f"{self.process_type.capitalize()} process terminated",
+                )
                 # Update button accessibility
                 self.terminate_btn.setEnabled_(False)
                 self.terminate_btn.setAccessibilityHelp_("Process has been terminated")
@@ -1965,17 +2154,27 @@ class ProgressWindowController:
                 self.pause_btn.setTitle_("Pause")
                 self.pause_btn.setAccessibilityLabel_("Pause process")
                 self.status_label.setStringValue_("Status: Running")
-                self._add_log_line(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process resumed")
+                self._add_log_line(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process resumed"
+                )
                 # Accessibility announcement
-                _announce_for_accessibility(self.status_label, f"{self.process_type.capitalize()} process resumed")
+                _announce_for_accessibility(
+                    self.status_label,
+                    f"{self.process_type.capitalize()} process resumed",
+                )
             else:
                 os.kill(pid, signal.SIGSTOP)
                 self.pause_btn.setTitle_("Resume")
                 self.pause_btn.setAccessibilityLabel_("Resume process")
                 self.status_label.setStringValue_("Status: Paused")
-                self._add_log_line(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process paused")
+                self._add_log_line(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process paused"
+                )
                 # Accessibility announcement
-                _announce_for_accessibility(self.status_label, f"{self.process_type.capitalize()} process paused")
+                _announce_for_accessibility(
+                    self.status_label,
+                    f"{self.process_type.capitalize()} process paused",
+                )
             self.paused = not self.paused
         except (ProcessLookupError, PermissionError, OSError) as e:
             logging.warning(f"[ProgressWindow] Could not toggle pause: {e}")
@@ -1985,7 +2184,9 @@ class ProgressWindowController:
         """Open logs folder in Finder."""
         model_name = self.process_info.get("model_name", "")
         if model_name:
-            data_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+            data_path = os.environ.get(
+                "APPLIO_DATA_PATH", os.path.expanduser("~/Applio")
+            )
             logs_folder = os.path.join(data_path, "logs", model_name)
             if os.path.exists(logs_folder):
                 subprocess.run(["open", logs_folder])
@@ -2003,17 +2204,18 @@ class ProgressWindowController:
         THIS process's own group and would kill us before the spawn lands.
         """
         release_single_instance_lock()
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             app_path = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
-            subprocess.Popen(['open', app_path])  # LaunchServices -> new session
+            subprocess.Popen(["open", app_path])  # LaunchServices -> new session
         else:
             subprocess.Popen(
-                [sys.executable, os.path.join(BASE_PATH, 'applio_launcher.py')],
+                [sys.executable, os.path.join(BASE_PATH, "applio_launcher.py")],
                 start_new_session=True,
             )
         # Gracefully terminate this instance (runs the ApplioAppDelegate cascade).
         try:
             from AppKit import NSApplication
+
             NSApplication.sharedApplication().terminate_(None)
         except Exception:
             sys.exit(0)
@@ -2029,7 +2231,7 @@ class ProgressWindowController:
     def _cleanup(self):
         """Clean up resources."""
         # Signal background thread to stop
-        if hasattr(self, '_shutdown_event'):
+        if hasattr(self, "_shutdown_event"):
             self._shutdown_event.set()
 
         if self.timer:
@@ -2038,8 +2240,10 @@ class ProgressWindowController:
         if self._observer:
             NSNotificationCenter.defaultCenter().removeObserver_(self._observer)
             self._observer = None
-        if hasattr(self, '_terminate_observer') and self._terminate_observer:
-            NSNotificationCenter.defaultCenter().removeObserver_(self._terminate_observer)
+        if hasattr(self, "_terminate_observer") and self._terminate_observer:
+            NSNotificationCenter.defaultCenter().removeObserver_(
+                self._terminate_observer
+            )
             self._terminate_observer = None
         # Reset smart log display state
         self._live_phase = None
@@ -2048,7 +2252,11 @@ class ProgressWindowController:
         self._last_non_tqdm_line = ""
 
         # Wait for background thread to finish (with timeout)
-        if hasattr(self, '_file_thread') and self._file_thread and self._file_thread.is_alive():
+        if (
+            hasattr(self, "_file_thread")
+            and self._file_thread
+            and self._file_thread.is_alive()
+        ):
             self._file_thread.join(timeout=1.0)
 
 
@@ -2106,7 +2314,11 @@ def _significant_improvements(points):
     for i in range(1, len(points)):
         prev = points[i - 1][1]
         cur = points[i][1]
-        if cur < prev and prev > 0.0 and (prev - cur) / prev >= LOSS_SIG_IMPROVEMENT_REL:
+        if (
+            cur < prev
+            and prev > 0.0
+            and (prev - cur) / prev >= LOSS_SIG_IMPROVEMENT_REL
+        ):
             sig.append(i)
     return sig
 
@@ -2136,7 +2348,7 @@ class LossChartView(NSView):
         self = objc.super(LossChartView, self).initWithFrame_(frame)
         if self is None:
             return None
-        self._points = []   # [(epoch, best_loss)]
+        self._points = []  # [(epoch, best_loss)]
         # Screen-space positions of each plotted point, recomputed in drawRect_.
         # Retained as a stable point-geometry cache the draw reuses (and that a
         # headless render check can inspect); empty until the first real draw /
@@ -2189,8 +2401,9 @@ class LossChartView(NSView):
                 "Training… waiting for evaluation data",
                 _chart_text_attr(11, color=NSColor.secondaryLabelColor()),
             )
-            ph.drawAtPoint_(((width - ph.size().width) / 2.0,
-                             (height - ph.size().height) / 2.0))
+            ph.drawAtPoint_(
+                ((width - ph.size().width) / 2.0, (height - ph.size().height) / 2.0)
+            )
             return
 
         epochs = [p[0] for p in points]
@@ -2215,6 +2428,7 @@ class LossChartView(NSView):
 
             def y_for(l):
                 return y_line
+
         else:
 
             def y_for(l):
@@ -2237,18 +2451,22 @@ class LossChartView(NSView):
                 # max at the top. The old max_l-(...) form drew the axis labels
                 # upside-down relative to the plotted points.
                 val = min_l + (i / 3.0) * (max_l - min_l)
-                t = NSAttributedString.alloc().initWithString_attributes_(f"{val:.3f}", label_attr)
+                t = NSAttributedString.alloc().initWithString_attributes_(
+                    f"{val:.3f}", label_attr
+                )
                 t.drawAtPoint_((2.0, gy - 5.0))
 
         # X-axis epoch legend (first + last epoch); compact for the small chart.
         x_axis_attr = _chart_text_attr(8)
         first_lbl = NSAttributedString.alloc().initWithString_attributes_(
-            "ep {}".format(min_e), x_axis_attr,
+            "ep {}".format(min_e),
+            x_axis_attr,
         )
         first_lbl.drawAtPoint_((plot_x, 1.0))
         if max_e > min_e:
             last_lbl = NSAttributedString.alloc().initWithString_attributes_(
-                "ep {}".format(max_e), x_axis_attr,
+                "ep {}".format(max_e),
+                x_axis_attr,
             )
             last_lbl.drawAtPoint_((plot_x + plot_w - last_lbl.size().width, 1.0))
 
@@ -2320,7 +2538,8 @@ class LossChartView(NSView):
             # a cluster of improvements reads cleanly (the marker always draws).
             if last_label_x is None or (sx - last_label_x) >= 26.0:
                 lbl = NSAttributedString.alloc().initWithString_attributes_(
-                    str(epoch), label_attr,
+                    str(epoch),
+                    label_attr,
                 )
                 lw = float(lbl.size().width)
                 lh = float(lbl.size().height)
@@ -2338,19 +2557,19 @@ class LossChartView(NSView):
 
 class ProcessDashboardController(NSObject):
     """Persistent dashboard window with idle/active/completed states.
-    
+
     This window is always accessible from the Window menu and shows:
     - Idle state: "No Active Processes" placeholder
     - Active state: Process list + detail panel with logs
     - Completed state: Process summary
-    
+
     Key design decisions:
     - Window never releases on close (setReleasedWhenClosed_(False))
     - Close button hides window instead of destroying
     - Uses weakref to prevent retain cycles in selectors
     - Single instance managed by ApplioLauncher
     """
-    
+
     def initWithLauncher_(self, launcher):
         """Initialize the dashboard controller (NSObject init pattern).
 
@@ -2364,7 +2583,7 @@ class ProcessDashboardController(NSObject):
             return None
         if not NATIVE_APIS_AVAILABLE:
             raise RuntimeError("Native APIs not available")
-        
+
         self._launcher = launcher
         self._current_state = "idle"  # idle, active, completed
         self._selected_process = None
@@ -2374,27 +2593,27 @@ class ProcessDashboardController(NSObject):
         # this session — only then do we surface it on a new job (single-process).
         # Stays False if the user never opens it (respect their choice).
         self._opened_this_session = False
-        
+
         # Window and UI elements (initialized in _create_window)
         self.window = None
         self._observer = None
         self._terminate_observer = None
         self._timer = None
-        
+
         # Process list data
         self._active_processes = []
         self._recent_processes = []
-        
+
         # UI element references
         self.placeholder_view = None
         self.idle_label = None
         self.idle_subtitle = None
-        
+
         # Sidebar UI elements (for active state)
         self.sidebar_scroll = None
         self.process_table = None
         self.active_header = None
-        
+
         # Detail panel UI elements (for selected process)
         self.detail_panel = None
         self.detail_name = None
@@ -2411,7 +2630,7 @@ class ProcessDashboardController(NSObject):
         self.reveal_btn = None
         self.open_btn = None
         self._current_proc = None  # resolved proc shown in the detail panel
-        
+
         # Create window
         try:
             self._create_window()
@@ -2430,82 +2649,97 @@ class ProcessDashboardController(NSObject):
             NSMakeRect(0, 0, DASHBOARD_WIDTH, DASHBOARD_HEIGHT),
             style,
             NSBackingStoreBuffered,
-            False
+            False,
         )
         self.window.setTitle_("Applio Dashboard")
         self.window.center()
         self.window.setReleasedWhenClosed_(False)  # CRITICAL: Never release
         self.window.setDelegate_(self)  # Enable windowShouldClose_ delegate
-        
+
         # Register for close notification to hide instead
         notification_center = NSNotificationCenter.defaultCenter()
         self._observer = notification_center.addObserver_selector_name_object_(
             self,
             "dashboardWindowWillClose:",
             "NSWindowWillCloseNotification",
-            self.window
+            self.window,
         )
-        
+
         # App termination observer
-        self._terminate_observer = notification_center.addObserver_selector_name_object_(
-            self,
-            "applicationWillTerminate:",
-            "NSApplicationWillTerminateNotification",
-            None
+        self._terminate_observer = (
+            notification_center.addObserver_selector_name_object_(
+                self,
+                "applicationWillTerminate:",
+                "NSApplicationWillTerminateNotification",
+                None,
+            )
         )
-        
+
         # Set accessibility
         self.window.setAccessibilityLabel_("Applio Dashboard")
-        self.window.setAccessibilityHelp_("Monitor active training and inference processes")
-    
+        self.window.setAccessibilityHelp_(
+            "Monitor active training and inference processes"
+        )
+
     def _create_sidebar(self):
         """Create the process list sidebar (initially hidden).
-        
+
         Shows active and recent processes in an NSTableView.
         """
         # Header height at top of sidebar
         header_height = 24
-        
+
         # Sidebar container (left side) - positioned below title bar with room for header
         # Account for title bar height (~28px) and header (24px) in the frame
-        sidebar_frame = NSMakeRect(0, 0, SIDEBAR_WIDTH, DASHBOARD_HEIGHT - 28 - header_height)
+        sidebar_frame = NSMakeRect(
+            0, 0, SIDEBAR_WIDTH, DASHBOARD_HEIGHT - 28 - header_height
+        )
         self.sidebar_scroll = NSScrollView.alloc().initWithFrame_(sidebar_frame)
         self.sidebar_scroll.setAutohidesScrollers_(True)
         self.sidebar_scroll.setBorderType_(0)  # No border
         self.sidebar_scroll.setHasVerticalScroller_(True)
         self.sidebar_scroll.setAccessibilityLabel_("Process list sidebar")
         self.sidebar_scroll.setAccessibilityHelp_("List of active and recent processes")
-        
+
         # Create table view
         self.process_table = NSTableView.alloc().init()
         self.process_table.setDataSource_(self)
         self.process_table.setDelegate_(self)
         self.process_table.setHeaderView_(None)  # No header
         self.process_table.setRowHeight_(36)
-        self.process_table.setSelectionHighlightStyle_(1)  # NSTableViewSelectionHighlightStyleSourceList
+        self.process_table.setSelectionHighlightStyle_(
+            1
+        )  # NSTableViewSelectionHighlightStyleSourceList
         self.process_table.setAccessibilityLabel_("Process list")
         self.process_table.setAllowsEmptySelection_(True)
         self.process_table.setAllowsMultipleSelection_(False)
-        
+
         # Create single column
         column = NSTableColumn.alloc().initWithIdentifier_("process")
         column.setWidth_(SIDEBAR_WIDTH - 20)
         column.setEditable_(False)
         self.process_table.addTableColumn_(column)
-        
+
         # Set as document view
         self.sidebar_scroll.setDocumentView_(self.process_table)
         self.window.contentView().addSubview_(self.sidebar_scroll)
-        
+
         # Initially hidden (shown when active)
         self.sidebar_scroll.setHidden_(True)
-        
+
         # Section header: "ACTIVE" - positioned at top, above sidebar
         self.active_header = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(8, DASHBOARD_HEIGHT - 28 - header_height, SIDEBAR_WIDTH - 16, header_height)
+            NSMakeRect(
+                8,
+                DASHBOARD_HEIGHT - 28 - header_height,
+                SIDEBAR_WIDTH - 16,
+                header_height,
+            )
         )
         self.active_header.setStringValue_("ACTIVE")
-        self.active_header.setFont_(NSFont.systemFontOfSize_weight_(11, NSFontWeightSemibold))
+        self.active_header.setFont_(
+            NSFont.systemFontOfSize_weight_(11, NSFontWeightSemibold)
+        )
         self.active_header.setTextColor_(NSColor.secondaryLabelColor())
         self.active_header.setBezeled_(False)
         self.active_header.setDrawsBackground_(False)
@@ -2513,16 +2747,16 @@ class ProcessDashboardController(NSObject):
         self.active_header.setAlignment_(NSCenterTextAlignment)
         self.window.contentView().addSubview_(self.active_header)
         self.active_header.setHidden_(True)
-    
+
     def _create_detail_panel(self):
         """Create the detail panel for selected process.
-        
+
         Shows process name, status, progress bar, log output, and ETA.
         Positioned on the right side, occupying remaining width after sidebar.
         """
         panel_x = SIDEBAR_WIDTH
         panel_width = DASHBOARD_WIDTH - SIDEBAR_WIDTH
-        
+
         # Detail panel container
         detail_frame = NSMakeRect(panel_x, 0, panel_width, DASHBOARD_HEIGHT - 28)
         self.detail_panel = NSBox.alloc().initWithFrame_(detail_frame)
@@ -2534,20 +2768,22 @@ class ProcessDashboardController(NSObject):
         self.detail_panel.setContentView_(NSView.alloc().init())
         self.detail_panel.setAccessibilityLabel_("Process detail panel")
         self.window.contentView().addSubview_(self.detail_panel)
-        
+
         # Process name label
         name_y = DASHBOARD_HEIGHT - 28 - 40
         self.detail_name = NSTextField.alloc().initWithFrame_(
             NSMakeRect(16, name_y, panel_width - 32, 24)
         )
-        self.detail_name.setFont_(NSFont.systemFontOfSize_weight_(18, NSFontWeightSemibold))
+        self.detail_name.setFont_(
+            NSFont.systemFontOfSize_weight_(18, NSFontWeightSemibold)
+        )
         self.detail_name.setBezeled_(False)
         self.detail_name.setDrawsBackground_(False)
         self.detail_name.setEditable_(False)
         self.detail_name.setStringValue_("Select a process")
         self.detail_name.setAccessibilityLabel_("Process name")
         self.detail_panel.contentView().addSubview_(self.detail_name)
-        
+
         # Status/phase label
         status_y = name_y - 30
         self.detail_status = NSTextField.alloc().initWithFrame_(
@@ -2561,7 +2797,7 @@ class ProcessDashboardController(NSObject):
         self.detail_status.setStringValue_("No process selected")
         self.detail_status.setAccessibilityLabel_("Process status")
         self.detail_panel.contentView().addSubview_(self.detail_status)
-        
+
         # Progress bar
         progress_y = status_y - 30
         self.detail_progress = NSProgressIndicator.alloc().initWithFrame_(
@@ -2574,7 +2810,7 @@ class ProcessDashboardController(NSObject):
         self.detail_progress.setDoubleValue_(0)
         self.detail_progress.setAccessibilityLabel_("Progress indicator")
         self.detail_panel.contentView().addSubview_(self.detail_progress)
-        
+
         # Progress text (percentage)
         progress_text_y = progress_y - 20
         self.detail_progress_text = NSTextField.alloc().initWithFrame_(
@@ -2591,7 +2827,9 @@ class ProcessDashboardController(NSObject):
 
         # --- Training metrics (parsed live from the run's training.log) ---
         # Best epoch + its loss (green headline - the number that matters for inference)
-        best_y = progress_text_y - 8 - 20  # 8px gap below progress text; label is 20px tall
+        best_y = (
+            progress_text_y - 8 - 20
+        )  # 8px gap below progress text; label is 20px tall
         self.detail_best_label = NSTextField.alloc().initWithFrame_(
             NSMakeRect(16, best_y, panel_width - 32, 20)
         )
@@ -2620,7 +2858,9 @@ class ProcessDashboardController(NSObject):
         self.detail_current_label.setDrawsBackground_(False)
         self.detail_current_label.setEditable_(False)
         self.detail_current_label.setStringValue_("--")
-        self.detail_current_label.setAccessibilityLabel_("Current epoch, step and training speed")
+        self.detail_current_label.setAccessibilityLabel_(
+            "Current epoch, step and training speed"
+        )
         self.detail_panel.contentView().addSubview_(self.detail_current_label)
 
         # --- Loss-vs-epoch chart (Feature 3) ---
@@ -2649,16 +2889,16 @@ class ProcessDashboardController(NSObject):
         self.detail_log_scroll.setBorderType_(NSBezelBorder)
         self.detail_log_scroll.setHasVerticalScroller_(True)
         self.detail_log_scroll.setAccessibilityLabel_("Log output")
-        
+
         self.detail_log_view = NSTextView.alloc().init()
         self.detail_log_view.setFont_(NSFont.fontWithName_size_("Menlo", 11))
         self.detail_log_view.setEditable_(False)
         self.detail_log_view.setString_("Select a process to view logs")
         self.detail_log_view.setAccessibilityLabel_("Log output")
-        
+
         self.detail_log_scroll.setDocumentView_(self.detail_log_view)
         self.detail_panel.contentView().addSubview_(self.detail_log_scroll)
-        
+
         # Estimated time remaining (sits between the log and the action bar)
         eta_y = 46
         self.detail_eta = NSTextField.alloc().initWithFrame_(
@@ -2684,16 +2924,23 @@ class ProcessDashboardController(NSObject):
         action_left = 16
         action_total_w = panel_width - 32
         actions = [
-            ("stop_btn",   "Stop",        "stopProcess:",       "Stop the process (SIGTERM)"),
-            ("pause_btn",  "Pause",       "togglePauseProcess:", "Pause or resume the process"),
-            ("reveal_btn", "Reveal Log",  "revealLog:",         "Reveal the log file in Finder"),
-            ("open_btn",   "Open Log",    "openLog:",           "Open the log file"),
+            ("stop_btn", "Stop", "stopProcess:", "Stop the process (SIGTERM)"),
+            (
+                "pause_btn",
+                "Pause",
+                "togglePauseProcess:",
+                "Pause or resume the process",
+            ),
+            ("reveal_btn", "Reveal Log", "revealLog:", "Reveal the log file in Finder"),
+            ("open_btn", "Open Log", "openLog:", "Open the log file"),
         ]
         n = len(actions)
         btn_w = (action_total_w - action_gap * (n - 1)) // n
         for i, (attr, title, action, help_text) in enumerate(actions):
             bx = action_left + i * (btn_w + action_gap)
-            btn = NSButton.alloc().initWithFrame_(NSMakeRect(bx, action_y, btn_w, action_h))
+            btn = NSButton.alloc().initWithFrame_(
+                NSMakeRect(bx, action_y, btn_w, action_h)
+            )
             btn.setTitle_(title)
             btn.setBezelStyle_(1)  # NSRoundedBezelStyle
             btn.setTarget_(self)
@@ -2705,10 +2952,10 @@ class ProcessDashboardController(NSObject):
 
         # Initially hidden
         self.detail_panel.setHidden_(True)
-    
+
     def _update_detail_panel(self):
         """Update detail panel with selected process info.
-        
+
         Handles edge cases:
         - Process ends mid-viewing (selected process no longer in active list)
         - Log file deleted while viewing
@@ -2717,10 +2964,10 @@ class ProcessDashboardController(NSObject):
         # Safety check: ensure window still exists
         if not self.window:
             return
-        
+
         # Hide detail panel if no process selected
         if not self._selected_process:
-            if hasattr(self, 'detail_panel') and self.detail_panel:
+            if hasattr(self, "detail_panel") and self.detail_panel:
                 self.detail_panel.setHidden_(True)
             # In idle, bring the placeholder back so the area isn't blank after
             # the user deselects a history row.
@@ -2731,13 +2978,13 @@ class ProcessDashboardController(NSObject):
             ):
                 self.placeholder_view.setHidden_(False)
             return
-        
+
         proc = self._selected_process
-        
+
         # Ensure detail panel exists
-        if not hasattr(self, 'detail_panel') or not self.detail_panel:
+        if not hasattr(self, "detail_panel") or not self.detail_panel:
             return
-        
+
         # Check if selected process is still valid (may have ended)
         # Look up fresh process info from state
         proc_type = proc.get("type", "Unknown")
@@ -2747,18 +2994,22 @@ class ProcessDashboardController(NSObject):
             if p.get("type") == proc_type:
                 fresh_info = p
                 break
-        
+
         # If process ended mid-viewing, check if we have history info
         if not fresh_info:
             # Process no longer active - check if we should show "completed" status
             recent = get_recent_processes(limit=5)
             for r in recent:
-                if r.get("type") == proc_type and r.get("model_name") == proc.get("model_name"):
+                if r.get("type") == proc_type and r.get("model_name") == proc.get(
+                    "model_name"
+                ):
                     # Found in history - show completion info
                     fresh_info = r
-                    logging.info(f"[Dashboard] Process {proc_type} ended mid-viewing, showing from history")
+                    logging.info(
+                        f"[Dashboard] Process {proc_type} ended mid-viewing, showing from history"
+                    )
                     break
-        
+
         # Use fresh info if available, otherwise fall back to original
         if fresh_info:
             proc = fresh_info
@@ -2796,25 +3047,27 @@ class ProcessDashboardController(NSObject):
             # placeholder so the two never overlap.
             if hasattr(self, "placeholder_view") and self.placeholder_view:
                 self.placeholder_view.setHidden_(True)
-            
+
             # Update name (with null check)
             model_name = proc.get("model_name", "")
-            if hasattr(self, 'detail_name') and self.detail_name:
+            if hasattr(self, "detail_name") and self.detail_name:
                 if model_name:
-                    self.detail_name.setStringValue_(f"{proc_type.capitalize()}: {model_name}")
+                    self.detail_name.setStringValue_(
+                        f"{proc_type.capitalize()}: {model_name}"
+                    )
                 else:
                     self.detail_name.setStringValue_(proc_type.capitalize())
-            
+
             # Update status (with null check)
             status = proc.get("status", "running")
             phase = proc.get("phase", "")
-            if hasattr(self, 'detail_status') and self.detail_status:
+            if hasattr(self, "detail_status") and self.detail_status:
                 if phase:
                     status_text = f"{status.title()} - {phase}"
                 else:
                     status_text = status.title()
                 self.detail_status.setStringValue_(status_text)
-            
+
             # --- Real training metrics, parsed live from the run's training.log ---
             # training.log holds epoch/step/loss/speed per epoch. The legacy
             # proc "progress"/"eta" fields were never written mid-run, so we
@@ -2824,15 +3077,19 @@ class ProcessDashboardController(NSObject):
             metrics = self._parse_training_metrics(proc)
             total_epoch = proc.get("total_epoch")
             try:
-                total_epoch = int(total_epoch) if total_epoch not in (None, "") else None
+                total_epoch = (
+                    int(total_epoch) if total_epoch not in (None, "") else None
+                )
             except (ValueError, TypeError):
                 total_epoch = None
 
             # Progress bar -> epoch-fraction (current_epoch / total_epoch)
-            if hasattr(self, 'detail_progress') and self.detail_progress:
+            if hasattr(self, "detail_progress") and self.detail_progress:
                 cur_ep = metrics.get("epoch") if metrics else None
                 if cur_ep and total_epoch and total_epoch > 0:
-                    frac = min(1.0, cur_ep / total_epoch)  # clamp at 100% if epoch overshoots
+                    frac = min(
+                        1.0, cur_ep / total_epoch
+                    )  # clamp at 100% if epoch overshoots
                     self.detail_progress.stopAnimation_(None)
                     self.detail_progress.setIndeterminate_(False)
                     self.detail_progress.setDoubleValue_(frac * 100.0)
@@ -2851,11 +3108,11 @@ class ProcessDashboardController(NSObject):
                     self.detail_progress.setIndeterminate_(False)
                     self.detail_progress.setDoubleValue_(0.0)
                     pct_txt = "--"
-                if hasattr(self, 'detail_progress_text') and self.detail_progress_text:
+                if hasattr(self, "detail_progress_text") and self.detail_progress_text:
                     self.detail_progress_text.setStringValue_(pct_txt)
 
             # Best epoch + loss headline (green) - the inference-relevant number
-            if hasattr(self, 'detail_best_label') and self.detail_best_label:
+            if hasattr(self, "detail_best_label") and self.detail_best_label:
                 if metrics and metrics.get("best_epoch") is not None:
                     self.detail_best_label.setStringValue_(
                         f"Best: Epoch {metrics['best_epoch']}  |  Loss {metrics['best_loss']:.3f}"
@@ -2872,7 +3129,7 @@ class ProcessDashboardController(NSObject):
                     self.detail_best_label.setHidden_(True)
 
             # Current epoch/total, step, speed (per epoch)
-            if hasattr(self, 'detail_current_label') and self.detail_current_label:
+            if hasattr(self, "detail_current_label") and self.detail_current_label:
                 if metrics:
                     cur_ep = metrics.get("epoch")
                     ep_part = (
@@ -2899,14 +3156,14 @@ class ProcessDashboardController(NSObject):
                     self.detail_current_label.setHidden_(True)
 
             # ETA -> derived: (total_epoch - current_epoch) * seconds_per_epoch
-            if hasattr(self, 'detail_eta') and self.detail_eta:
+            if hasattr(self, "detail_eta") and self.detail_eta:
                 eta_str = self._derive_eta(metrics, total_epoch)
                 self.detail_eta.setStringValue_(f"Estimated time: {eta_str}")
 
             # Loss-vs-epoch chart (Feature 3). Historical processes plot from
             # the snapshot; active ones from the live log. set_points handles
             # the <2-points placeholder, so this never throws.
-            if hasattr(self, 'detail_chart') and self.detail_chart:
+            if hasattr(self, "detail_chart") and self.detail_chart:
                 try:
                     self.detail_chart.set_points(self._collect_epoch_points(proc))
                 except Exception as e:
@@ -2920,66 +3177,64 @@ class ProcessDashboardController(NSObject):
 
             # Update log (last 20 lines) - handle file deletion
             self._update_log_display(proc)
-            
+
         except Exception as e:
             logging.warning(f"[Dashboard] Error updating detail panel: {e}")
-    
+
     def _update_log_display(self, proc: dict):
         """Update log display with error handling for missing/deleted files.
-        
+
         Args:
             proc: Process info dict with log_path or log_file key
         """
-        if not hasattr(self, 'detail_log_view') or not self.detail_log_view:
+        if not hasattr(self, "detail_log_view") or not self.detail_log_view:
             return
-        
+
         log_path = proc.get("log_path") or proc.get("log_file")
-        
+
         # Handle missing log path
         if not log_path:
             self.detail_log_view.setString_("No log file path available")
             return
-        
+
         # Handle deleted log file
         if not os.path.exists(log_path):
             self.detail_log_view.setString_(f"Log file no longer exists:\n{log_path}")
             logging.debug(f"[Dashboard] Log file deleted: {log_path}")
             return
-        
+
         # Handle unreadable log file
         if not os.access(log_path, os.R_OK):
             self.detail_log_view.setString_(f"Log file not readable:\n{log_path}")
             logging.warning(f"[Dashboard] Log file not readable: {log_path}")
             return
-        
+
         try:
             # Read with size limit to prevent memory issues
             max_size = 1024 * 1024  # 1MB max
             file_size = os.path.getsize(log_path)
-            
+
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
                 if file_size > max_size:
                     # Read only last portion of large files
                     f.seek(file_size - max_size)
                     content = f.read()
                     # Skip partial first line
-                    first_newline = content.find('\n')
+                    first_newline = content.find("\n")
                     if first_newline >= 0:
-                        content = content[first_newline + 1:]
+                        content = content[first_newline + 1 :]
                 else:
                     content = f.read()
-                
+
                 lines = content.splitlines()
                 last_lines = lines[-20:] if len(lines) > 20 else lines
                 log_text = "\n".join(last_lines)
                 self.detail_log_view.setString_(log_text)
-                
+
                 # Scroll to show latest content (with null check)
-                if hasattr(self, 'detail_log_view') and self.detail_log_view:
+                if hasattr(self, "detail_log_view") and self.detail_log_view:
                     text_length = len(log_text)
-                    self.detail_log_view.scrollRangeToVisible_(
-                        NSRange(text_length, 0)
-                    )
+                    self.detail_log_view.scrollRangeToVisible_(NSRange(text_length, 0))
         except PermissionError as e:
             logging.warning(f"[Dashboard] Permission denied reading log: {e}")
             self.detail_log_view.setString_("Permission denied reading log file")
@@ -3003,6 +3258,7 @@ class ProcessDashboardController(NSObject):
         compute_inference_stats uses ended_at.
         """
         from applio_inference_stats import compute_inference_stats
+
         try:
             self.detail_panel.setHidden_(False)
             if hasattr(self, "placeholder_view") and self.placeholder_view:
@@ -3010,9 +3266,12 @@ class ProcessDashboardController(NSObject):
             model_name = proc.get("model_name", "")
             if hasattr(self, "detail_name") and self.detail_name:
                 self.detail_name.setStringValue_(
-                    f"Inference: {model_name}" if model_name else "Inference")
+                    f"Inference: {model_name}" if model_name else "Inference"
+                )
             status = proc.get("status", "running")
-            label = {"running": "Running", "cancelling": "Stopping…"}.get(status, status.title())
+            label = {"running": "Running", "cancelling": "Stopping…"}.get(
+                status, status.title()
+            )
             if hasattr(self, "detail_status") and self.detail_status:
                 self.detail_status.setStringValue_(label)
             # Normalize a history entry for compute_inference_stats: history
@@ -3020,8 +3279,11 @@ class ProcessDashboardController(NSObject):
             # processed/ended_at. Work on a copy so the stored entry is untouched.
             proc = dict(proc)
             if not proc.get("processed"):
-                proc["processed"] = (proc.get("converted", 0) or 0) + (proc.get("skipped", 0) or 0)
+                proc["processed"] = (proc.get("converted", 0) or 0) + (
+                    proc.get("skipped", 0) or 0
+                )
             import datetime as _inf_dt
+
             _sa = proc.get("started_at")
             if isinstance(_sa, str):
                 try:
@@ -3032,7 +3294,9 @@ class ProcessDashboardController(NSObject):
                 _ca = proc.get("completed_at")
                 if isinstance(_ca, str):
                     try:
-                        proc["ended_at"] = _inf_dt.datetime.fromisoformat(_ca).timestamp()
+                        proc["ended_at"] = _inf_dt.datetime.fromisoformat(
+                            _ca
+                        ).timestamp()
                     except ValueError:
                         pass
             stats = compute_inference_stats(proc, now=time.time())
@@ -3046,25 +3310,29 @@ class ProcessDashboardController(NSObject):
                 self.detail_progress.setDoubleValue_(stats["pct"])
             if hasattr(self, "detail_progress_text") and self.detail_progress_text:
                 self.detail_progress_text.setStringValue_(
-                    f"{processed}/{total} files ({stats['pct']}%)")
+                    f"{processed}/{total} files ({stats['pct']}%)"
+                )
             if hasattr(self, "detail_current_label") and self.detail_current_label:
                 cur = proc.get("current_file", "")
                 self.detail_current_label.setStringValue_(
-                    f"Converted {converted}  |  Skipped {skipped}" +
-                    (f"  |  File: {cur}" if cur else ""))
+                    f"Converted {converted}  |  Skipped {skipped}"
+                    + (f"  |  File: {cur}" if cur else "")
+                )
                 self.detail_current_label.setHidden_(False)
             if hasattr(self, "detail_best_label") and self.detail_best_label:
                 self.detail_best_label.setStringValue_(
-                    f"Speed {stats['speed']} files/min")
+                    f"Speed {stats['speed']} files/min"
+                )
                 self.detail_best_label.setHidden_(False)
             if hasattr(self, "detail_eta") and self.detail_eta:
                 self.detail_eta.setStringValue_(f"Estimated time: {stats['eta']}s")
             if hasattr(self, "detail_chart") and self.detail_chart:
-                self.detail_chart.setHidden_(True)   # no loss curve for inference
+                self.detail_chart.setHidden_(True)  # no loss curve for inference
             if hasattr(self, "detail_log_view") and self.detail_log_view:
                 self.detail_log_view.setString_(
                     f"Status: {label}\n{converted} converted, {skipped} skipped of {total}.\n"
-                    f"Speed {stats['speed']} files/min, elapsed {stats['elapsed']}s.")
+                    f"Speed {stats['speed']} files/min, elapsed {stats['elapsed']}s."
+                )
             self._update_action_bar(proc)
         except Exception as e:
             logging.warning(f"[Dashboard] inference detail render failed: {e}")
@@ -3173,7 +3441,9 @@ class ProcessDashboardController(NSObject):
                     self.stop_btn.setEnabled_(False)
                 logging.info("[Dashboard] Wrote inference cancel flag")
             except OSError as e:
-                logging.warning(f"[Dashboard] Could not write inference cancel flag: {e}")
+                logging.warning(
+                    f"[Dashboard] Could not write inference cancel flag: {e}"
+                )
             return
         pid = self._current_pid(proc)
         if not pid:
@@ -3184,7 +3454,9 @@ class ProcessDashboardController(NSObject):
             return
         try:
             psutil.Process(pid).terminate()
-            logging.info(f"[Dashboard] Sent terminate to pid {pid} ({proc.get('type', '?')})")
+            logging.info(
+                f"[Dashboard] Sent terminate to pid {pid} ({proc.get('type', '?')})"
+            )
             if hasattr(self, "stop_btn") and self.stop_btn:
                 self.stop_btn.setEnabled_(False)
             if hasattr(self, "pause_btn") and self.pause_btn:
@@ -3264,9 +3536,11 @@ class ProcessDashboardController(NSObject):
         if proc.get("best_epoch") is not None and proc.get("best_loss") is not None:
             try:
                 return {
-                    "epoch": int(proc.get("final_epoch"))
-                    if proc.get("final_epoch") is not None
-                    else None,
+                    "epoch": (
+                        int(proc.get("final_epoch"))
+                        if proc.get("final_epoch") is not None
+                        else None
+                    ),
                     "step": None,
                     "training_speed": None,
                     "best_epoch": int(proc.get("best_epoch")),
@@ -3293,7 +3567,7 @@ class ProcessDashboardController(NSObject):
                     content = f.read()
                     nl = content.find("\n")
                     if nl >= 0:
-                        content = content[nl + 1:]
+                        content = content[nl + 1 :]
                 else:
                     content = f.read()
             for line in reversed(content.splitlines()):
@@ -3407,11 +3681,11 @@ class ProcessDashboardController(NSObject):
     # =================================================================
     # NSTableViewDataSource Protocol
     # =================================================================
-    
+
     def numberOfRowsInTableView_(self, tableView):
         """Return number of rows (active + recent)."""
         return len(self._active_processes) + len(self._recent_processes)
-    
+
     def tableView_objectValueForTableColumn_row_(self, tableView, column, row):
         """Return cell content for given row."""
         if row < len(self._active_processes):
@@ -3431,11 +3705,11 @@ class ProcessDashboardController(NSObject):
                 model_name = proc.get("model_name", "")
                 return f"✓ {proc_type}: {model_name}"
         return ""
-    
+
     # =================================================================
     # NSTableViewDelegate Protocol
     # =================================================================
-    
+
     def tableViewSelectionDidChange_(self, notification):
         """Handle row selection."""
         row = self.process_table.selectedRow()
@@ -3443,7 +3717,7 @@ class ProcessDashboardController(NSObject):
             self._selected_process = None
             self._update_detail_panel()
             return
-        
+
         if row < len(self._active_processes):
             proc = self._active_processes[row]
             self._selected_process = proc
@@ -3454,13 +3728,13 @@ class ProcessDashboardController(NSObject):
                 proc = self._recent_processes[idx]
                 self._selected_process = proc
                 logging.info(f"[Dashboard] Selected recent process: {proc.get('type')}")
-        
+
         # Update detail panel with selected process info
         self._update_detail_panel()
-    
+
     def refresh_process_list(self):
         """Refresh the process list from current state.
-        
+
         Handles errors gracefully - on error, keeps existing data.
         """
         try:
@@ -3471,22 +3745,22 @@ class ProcessDashboardController(NSObject):
         _inf_proc = _synthesize_inference_proc()
         if _inf_proc:
             self._active_processes.append(_inf_proc)
-        
+
         try:
             self._recent_processes = get_recent_processes(limit=5)
         except Exception as e:
             logging.warning(f"[Dashboard] Could not refresh recent processes: {e}")
             # Keep existing data on error
-        
-        if hasattr(self, 'process_table') and self.process_table:
+
+        if hasattr(self, "process_table") and self.process_table:
             try:
                 self.process_table.reloadData()
             except Exception as e:
                 logging.warning(f"[Dashboard] Could not reload table: {e}")
-    
+
     def _create_idle_ui(self):
         """Create the idle state UI (placeholder).
-        
+
         This shows when no processes are active.
         """
         # Placeholder lives in the DETAIL-panel area (right of the sidebar) so
@@ -3514,7 +3788,7 @@ class ProcessDashboardController(NSObject):
         )
         self.placeholder_view.setAccessibilityLabel_("Idle state container")
         self.window.contentView().addSubview_(self.placeholder_view)
-        
+
         # Idle message label
         label_y = content_height - 50
         self.idle_label = NSTextField.alloc().initWithFrame_(
@@ -3529,13 +3803,15 @@ class ProcessDashboardController(NSObject):
         self.idle_label.setAlignment_(NSCenterTextAlignment)
         self.idle_label.setAccessibilityLabel_("No active processes message")
         self.placeholder_view.addSubview_(self.idle_label)
-        
+
         # Subtitle label
         subtitle_y = label_y - 50
         self.idle_subtitle = NSTextField.alloc().initWithFrame_(
             NSMakeRect(20, subtitle_y, content_width - 40, 40)
         )
-        self.idle_subtitle.setStringValue_("Start training or inference from the main window\nto monitor progress here.")
+        self.idle_subtitle.setStringValue_(
+            "Start training or inference from the main window\nto monitor progress here."
+        )
         self.idle_subtitle.setBezeled_(False)
         self.idle_subtitle.setDrawsBackground_(False)
         self.idle_subtitle.setEditable_(False)
@@ -3544,7 +3820,7 @@ class ProcessDashboardController(NSObject):
         self.idle_subtitle.setAlignment_(NSCenterTextAlignment)
         self.idle_subtitle.setAccessibilityLabel_("Instructions for starting processes")
         self.placeholder_view.addSubview_(self.idle_subtitle)
-        
+
         # Open Main Window button
         button_width = 160
         button_height = 28
@@ -3558,82 +3834,85 @@ class ProcessDashboardController(NSObject):
         self.open_main_window_btn.setTarget_(self)
         self.open_main_window_btn.setAction_("openMainWindow:")
         self.open_main_window_btn.setAccessibilityLabel_("Open main window button")
-        self.open_main_window_btn.setAccessibilityHelp_("Open the main Applio window to start training or inference")
+        self.open_main_window_btn.setAccessibilityHelp_(
+            "Open the main Applio window to start training or inference"
+        )
         self.placeholder_view.addSubview_(self.open_main_window_btn)
-        
+
         # Placeholder is initially visible
         self.placeholder_view.setHidden_(False)
-    
+
     # =================================================================
     # Update Coordinator (Single Timer Pattern)
     # =================================================================
-    
+
     def _start_update_timer(self):
         """Start the single coordinated update timer.
-        
+
         Uses the faster DETAIL_UPDATE_INTERVAL for detail panel updates,
         and throttles sidebar refreshes to SIDEBAR_UPDATE_INTERVAL.
-        
+
         Logs timer start for debugging.
         """
         # Stop any existing timer first (prevents duplicates from rapid show/hide)
         if self._timer:
             self._stop_update_timer()
-        
+
         # Guard against starting during shutdown
         if self._shutdown_event.is_set():
             logging.debug("[Dashboard] Not starting timer - shutdown in progress")
             return
-        
+
         # Create timer with coordinator callback
         # Use DETAIL_UPDATE_INTERVAL (faster) as base, throttle sidebar in callback
         from AppKit import NSTimer
-        self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            DETAIL_UPDATE_INTERVAL,
-            self,
-            "coordinatedUpdate:",
-            None,
-            True
+
+        self._timer = (
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                DETAIL_UPDATE_INTERVAL, self, "coordinatedUpdate:", None, True
+            )
         )
-        logging.debug(f"[Dashboard] Update timer started (interval: {DETAIL_UPDATE_INTERVAL}s)")
-    
+        logging.debug(
+            f"[Dashboard] Update timer started (interval: {DETAIL_UPDATE_INTERVAL}s)"
+        )
+
     def coordinatedUpdate_(self, timer):
         """Single coordinated update method called by timer.
-        
+
         This method dispatches all periodic updates from a single timer,
         preventing timer collisions and ensuring consistent state.
         Sidebar updates are throttled to SIDEBAR_UPDATE_INTERVAL.
-        
+
         Safety: All UI updates check for existence before operating.
         """
         # Guard against updates after shutdown
         if self._shutdown_event.is_set():
             return
-        
+
         # Guard against missing window (shouldn't happen, but defensive)
         if not self.window:
             return
-        
+
         # Throttle sidebar updates using counter
-        if not hasattr(self, '_update_counter'):
+        if not hasattr(self, "_update_counter"):
             self._update_counter = 0
         self._update_counter += 1
-        
+
         try:
             # Always update detail panel if visible and process selected
             # Multiple safety checks before UI operations
             should_update_detail = (
-                self._selected_process is not None and
-                hasattr(self, 'detail_panel') and 
-                self.detail_panel is not None and
-                not self.detail_panel.isHidden() and
-                hasattr(self, 'window') and
-                self.window is not None
+                self._selected_process is not None
+                and hasattr(self, "detail_panel")
+                and self.detail_panel is not None
+                and not self.detail_panel.isHidden()
+                and hasattr(self, "window")
+                and self.window is not None
             )
-            
+
             if should_update_detail:
                 self._update_detail_panel()
-            
+
             # Throttled sidebar refresh (every Nth call)
             # With DETAIL_UPDATE_INTERVAL=1.0 and SIDEBAR_UPDATE_INTERVAL=3.0,
             # refresh every 3rd call (every 3 seconds)
@@ -3645,18 +3924,18 @@ class ProcessDashboardController(NSObject):
                     # auto-select it so its detail panel populates (issue 3).
                     # No-op when the user already has a selection.
                     self._auto_select_first_active()
-                    
+
         except Exception as e:
             # Log but don't crash - timer will continue
             logging.warning(f"[Dashboard] Update error (non-fatal): {e}")
-    
+
     def _stop_update_timer(self):
         """Stop the update timer."""
         if self._timer:
             self._timer.invalidate()
             self._timer = None
             logging.debug("[Dashboard] Update timer stopped")
-    
+
     def openMainWindow_(self, sender):
         """Handle 'Open Main Window' button click — surface the in-process window."""
         launcher = self._launcher
@@ -3666,25 +3945,26 @@ class ProcessDashboardController(NSObject):
             try:
                 AppHelper.callAfter(launcher._main_window.show)
                 from AppKit import NSApp
+
                 NSApp.activateIgnoringOtherApps_(True)
             except Exception as e:
                 logging.warning(f"[Dashboard] Open Main Window failed: {e}")
-    
+
     def show(self):
         """Show or bring the dashboard window to front.
-        
+
         Restarts the update timer if in active state.
         Handles multiple rapid show/hide cycles gracefully.
         """
         if not self.window:
             logging.warning("[Dashboard] show() called but window is None")
             return
-        
+
         # Check for rapid show/hide - if window is already visible, just bring to front
         if self.window.isVisible():
             self.window.makeKeyAndOrderFront_(None)
             return
-        
+
         logging.info(f"[Dashboard] Showing window (state: {self._current_state})")
         self.window.makeKeyAndOrderFront_(None)
 
@@ -3714,59 +3994,60 @@ class ProcessDashboardController(NSObject):
         try:
             self.window.orderFrontRegardless()
             from AppKit import NSApp
+
             NSApp.activateIgnoringOtherApps_(True)
         except Exception as e:
             logging.warning(f"[Dashboard] auto-show surface failed: {e}")
-    
+
     def hide(self):
         """Hide the dashboard window without destroying.
-        
+
         Stops the update timer to save resources.
         """
         if not self.window:
             logging.warning("[Dashboard] hide() called but window is None")
             return
-        
+
         logging.info("[Dashboard] Hiding window")
         self.window.orderOut_(None)
-        
+
         # Stop timer when hidden (no need to update)
         self._stop_update_timer()
-    
+
     def dashboardWindowWillClose_(self, notification):
         """Handle window close - hide instead of destroy."""
         # This is called when user clicks the close button
         # We intercept and hide instead
         self._stop_update_timer()
         self.hide()
-    
+
     def windowShouldClose_(self, sender):
         """Delegate method - intercept close to hide instead."""
         self._stop_update_timer()
         self.hide()
         return False  # Prevent actual close
-    
+
     def applicationWillTerminate_(self, notification):
         """Clean up on app termination."""
         logging.info("[Dashboard] Application terminating, cleaning up")
         self._cleanup()
-    
+
     def _cleanup(self):
         """Clean up resources.
-        
+
         Safe to call multiple times. All operations are idempotent.
         """
         # Set shutdown flag first to stop any pending operations
         self._shutdown_event.set()
-        
+
         logging.debug("[Dashboard] Starting cleanup")
-        
+
         # Stop timer (uses consistent method)
         try:
             self._stop_update_timer()
         except Exception as e:
             logging.warning(f"[Dashboard] Error stopping timer during cleanup: {e}")
-        
+
         # Remove observers with error handling
         try:
             if self._observer:
@@ -3774,21 +4055,23 @@ class ProcessDashboardController(NSObject):
                 self._observer = None
         except Exception as e:
             logging.warning(f"[Dashboard] Error removing window observer: {e}")
-        
+
         try:
             if self._terminate_observer:
-                NSNotificationCenter.defaultCenter().removeObserver_(self._terminate_observer)
+                NSNotificationCenter.defaultCenter().removeObserver_(
+                    self._terminate_observer
+                )
                 self._terminate_observer = None
         except Exception as e:
             logging.warning(f"[Dashboard] Error removing terminate observer: {e}")
-        
+
         # Clear references to help GC
         self._selected_process = None
         self._active_processes = []
         self._recent_processes = []
-        
+
         logging.debug("[Dashboard] Cleanup complete")
-    
+
     def _apply_idle_display(self):
         """Render the idle layout: history sidebar (left) + 'no active' placeholder
         (right).
@@ -3801,7 +4084,9 @@ class ProcessDashboardController(NSObject):
         try:
             self._recent_processes = get_recent_processes(limit=5)
         except Exception as e:
-            logging.warning(f"[Dashboard] Could not load recent processes for idle: {e}")
+            logging.warning(
+                f"[Dashboard] Could not load recent processes for idle: {e}"
+            )
             self._recent_processes = []
         if hasattr(self, "process_table") and self.process_table:
             try:
@@ -3830,20 +4115,20 @@ class ProcessDashboardController(NSObject):
         old_state = self._current_state
         self._current_state = "idle"
         self._selected_process = None
-        
+
         logging.info(f"[Dashboard] State transition: {old_state} -> idle")
-        
+
         # Update window title (with null check)
         if self.window:
             self.window.setTitle_("Applio Dashboard")
-        
+
         # Stop timer in idle state (no updates needed)
         self._stop_update_timer()
 
         # Render idle layout (history sidebar + placeholder). History MUST stay
         # reachable in idle so past runs are selectable.
         self._apply_idle_display()
-    
+
     def _auto_select_first_active(self):
         """Auto-select the first active process when nothing is selected.
 
@@ -3864,8 +4149,10 @@ class ProcessDashboardController(NSObject):
         if hasattr(self, "process_table") and self.process_table:
             try:
                 from AppKit import NSIndexSet
+
                 self.process_table.selectRowIndexes_byExtendingSelection_(
-                    NSIndexSet.indexSetWithIndex_(0), False,
+                    NSIndexSet.indexSetWithIndex_(0),
+                    False,
                 )
             except Exception as e:
                 logging.debug(f"[Dashboard] auto-select highlight failed: {e}")
@@ -3877,61 +4164,65 @@ class ProcessDashboardController(NSObject):
 
     def transition_to_active(self, processes: list):
         """Transition dashboard to active state.
-        
+
         Args:
             processes: List of active process dicts
-        
+
         Logs the transition and validates input.
         """
         old_state = self._current_state
         self._current_state = "active"
-        
+
         # Validate input
         if not processes:
-            logging.warning("[Dashboard] transition_to_active called with empty list, going idle")
+            logging.warning(
+                "[Dashboard] transition_to_active called with empty list, going idle"
+            )
             self.transition_to_idle()
             return
-        
+
         self._active_processes = processes
-        
+
         # Load recent processes with error handling
         try:
             self._recent_processes = get_recent_processes(limit=5)
         except Exception as e:
             logging.warning(f"[Dashboard] Could not load recent processes: {e}")
             self._recent_processes = []
-        
+
         self._selected_process = None  # Clear selection on transition
-        
-        logging.info(f"[Dashboard] State transition: {old_state} -> active ({len(processes)} processes)")
-        
+
+        logging.info(
+            f"[Dashboard] State transition: {old_state} -> active ({len(processes)} processes)"
+        )
+
         # Update window title (with null check)
         if self.window:
             self.window.setTitle_(f"Applio Dashboard ({len(processes)} active)")
-        
+
         # Hide placeholder, show sidebar (all with null checks)
-        if hasattr(self, 'placeholder_view') and self.placeholder_view:
+        if hasattr(self, "placeholder_view") and self.placeholder_view:
             self.placeholder_view.setHidden_(True)
-        
-        if hasattr(self, 'sidebar_scroll') and self.sidebar_scroll:
+
+        if hasattr(self, "sidebar_scroll") and self.sidebar_scroll:
             self.sidebar_scroll.setHidden_(False)
-            if hasattr(self, 'process_table') and self.process_table:
+            if hasattr(self, "process_table") and self.process_table:
                 self.process_table.reloadData()
-        
-        if hasattr(self, 'active_header') and self.active_header:
+
+        if hasattr(self, "active_header") and self.active_header:
             self.active_header.setStringValue_("ACTIVE")
             self.active_header.setHidden_(False)
 
         # Detail panel hidden initially — auto-select fills it immediately so
         # the user sees metrics/graph without a manual click (issue 3).
-        if hasattr(self, 'detail_panel') and self.detail_panel:
+        if hasattr(self, "detail_panel") and self.detail_panel:
             self.detail_panel.setHidden_(True)
 
         # Start update timer for active monitoring
         self._start_update_timer()
 
         self._auto_select_first_active()
-    
+
     def update_process_list(self):
         """Refresh the process list and update dashboard state.
 
@@ -3980,7 +4271,7 @@ class ProcessDashboardController(NSObject):
         ):
             logging.info("[Dashboard] idle->active transition: auto-showing")
             self._surface_window()
-    
+
     def get_state(self) -> str:
         """Get current dashboard state."""
         return self._current_state
@@ -3990,9 +4281,11 @@ class ProcessDashboardController(NSObject):
 # 5.6. Menu Action Handler (NSObject Proxy)
 # =================================================================
 
+
 def _mods_to_mask(mods):
     """Translate menu_spec mod tokens to a PyObjC key-equivalent modifier mask."""
     from AppKit import NSCommandKeyMask, NSShiftKeyMask, NSAlternateKeyMask
+
     mask = 0
     if "cmd" in mods:
         mask |= NSCommandKeyMask
@@ -4003,7 +4296,16 @@ def _mods_to_mask(mods):
     return mask
 
 
-def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out, key_to_tag=None, is_top_level=False):
+def _fill_ns_menu(
+    spec_menu,
+    ns_menu,
+    target,
+    dispatch,
+    tag_counter,
+    dynamic_out,
+    key_to_tag=None,
+    is_top_level=False,
+):
     """Fill the passed-in `ns_menu` with items from a list of menu_spec.MenuItem.
 
     Recursion: submenus are built by calling _fill_ns_menu on a fresh NSMenu
@@ -4019,14 +4321,25 @@ def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out
     - dynamic items are recorded in dynamic_out[key] = (ns_item, hint)
     """
     from AppKit import NSMenuItem
+
     for mi in spec_menu:
         if mi.separator:
             ns_menu.addItem_(NSMenuItem.separatorItem())
             continue
         if mi.submenu:
             from AppKit import NSMenu
+
             sub = NSMenu.alloc().init()
-            _fill_ns_menu(mi.submenu, sub, target, dispatch, tag_counter, dynamic_out, key_to_tag, is_top_level=False)
+            _fill_ns_menu(
+                mi.submenu,
+                sub,
+                target,
+                dispatch,
+                tag_counter,
+                dynamic_out,
+                key_to_tag,
+                is_top_level=False,
+            )
             if is_top_level:
                 # Top-level main-menu item: the menu BAR shows the submenu's title;
                 # the item itself is left untitled (and MENU[0] must stay untitled so
@@ -4037,7 +4350,9 @@ def _fill_ns_menu(spec_menu, ns_menu, target, dispatch, tag_counter, dynamic_out
             else:
                 # Nested submenu (e.g. "Reveal in Finder" inside File): Cocoa shows
                 # the ITEM's title, not the submenu's, so set it explicitly.
-                parent_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(mi.title, "", "")
+                parent_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    mi.title, "", ""
+                )
             parent_item.setSubmenu_(sub)
             ns_menu.addItem_(parent_item)
             continue
@@ -4082,19 +4397,19 @@ def _find_item_by_tag(ns_menu, tag):
 
 class MenuActionHandler(NSObject):
     """NSObject proxy to handle menu item actions.
-    
+
     Required because ApplioLauncher is a plain Python class and cannot
     correctly respond to respondsToSelector: when used as an NSMenuItem target.
-    
+
     Uses weakref to prevent retain cycles with ApplioLauncher.
     """
-    
+
     def initWithLauncher_(self, launcher):
         """Initialize with weak reference to launcher.
-        
+
         Args:
             launcher: ApplioLauncher instance (stored as weak reference)
-        
+
         Returns:
             self (standard Objective-C init pattern)
         """
@@ -4110,7 +4425,7 @@ class MenuActionHandler(NSObject):
         Returns:
             ApplioLauncher instance or None if deallocated
         """
-        if hasattr(self, '_launcher_ref'):
+        if hasattr(self, "_launcher_ref"):
             return self._launcher_ref()
         return None
 
@@ -4127,6 +4442,7 @@ class MenuActionHandler(NSObject):
 # =================================================================
 # 5.7. NSApplication Delegate (app lifecycle: reopen / quit / activation)
 # =================================================================
+
 
 class ApplioAppDelegate(NSObject):
     """NSApplicationDelegate implementing the macOS app-lifecycle contracts a
@@ -4149,7 +4465,7 @@ class ApplioAppDelegate(NSObject):
         return self
 
     def _get_launcher(self):
-        if hasattr(self, '_launcher_ref'):
+        if hasattr(self, "_launcher_ref"):
             return self._launcher_ref()
         return None
 
@@ -4176,6 +4492,7 @@ class ApplioAppDelegate(NSObject):
                     logging.warning(f"[AppDelegate] reopen show failed: {e}")
             try:
                 from AppKit import NSApp
+
                 NSApp.activateIgnoringOtherApps_(True)
             except Exception:
                 pass
@@ -4211,6 +4528,7 @@ class ApplioAppDelegate(NSObject):
                 NSAlertStyleWarning,
                 NSAlertFirstButtonReturn,
             )
+
             try:
                 info = ", ".join(
                     f"{p.get('type', '?')}:{p.get('model_name', '?')}"
@@ -4259,6 +4577,7 @@ class ApplioAppDelegate(NSObject):
 # 6. Main Launcher Class
 # =================================================================
 
+
 class ApplioLauncher:
     """Main launcher: runs the in-process pywebview/Gradio GUI and native menu."""
 
@@ -4268,8 +4587,12 @@ class ApplioLauncher:
         self._dashboard_controller = None  # Persistent dashboard window
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
-        self._menu_handler = None  # NSObject proxy for menu actions (initialized in _setup_menu)
-        self._app_delegate = None  # NSApplicationDelegate (reopen/terminate), attached in _setup_menu
+        self._menu_handler = (
+            None  # NSObject proxy for menu actions (initialized in _setup_menu)
+        )
+        self._app_delegate = (
+            None  # NSApplicationDelegate (reopen/terminate), attached in _setup_menu
+        )
         self._applio_app = None  # In-process GUI (ApplioApp) from start_gui
         self._main_window = None  # pywebview window handle
         self._quit_confirmed = False  # Legacy flag (unused; kept for safety)
@@ -4280,6 +4603,7 @@ class ApplioLauncher:
         # The main window is in-process, so we surface it on the main thread.
         try:
             from Foundation import NSDistributedNotificationCenter
+
             self._dist_center = NSDistributedNotificationCenter.defaultCenter()
             self._dist_center.addObserver_selector_name_object_suspensionBehavior_(
                 self,
@@ -4288,7 +4612,9 @@ class ApplioLauncher:
                 None,
                 4,  # NSNotificationSuspensionBehaviorDeliverImmediately
             )
-            logging.info("[Launcher] single-instance bring_to_front observer registered")
+            logging.info(
+                "[Launcher] single-instance bring_to_front observer registered"
+            )
         except ImportError:
             logging.warning("[Launcher] NSDistributedNotificationCenter not available")
             self._dist_center = None
@@ -4302,11 +4628,14 @@ class ApplioLauncher:
         # not `open -n` or direct binary invocation). If another instance holds
         # the lock, signal it to surface its window and exit.
         if not acquire_single_instance_lock():
-            logging.warning("[Launcher] Another instance is already running; signaling it and exiting.")
+            logging.warning(
+                "[Launcher] Another instance is already running; signaling it and exiting."
+            )
             # The 1st instance's window is in-process. Post a distributed
             # notification; it surfaces its own main window via bringToFront_.
             try:
                 from Foundation import NSDistributedNotificationCenter
+
                 NSDistributedNotificationCenter.defaultCenter().postNotificationName_object_(
                     IPC_BRING_TO_FRONT_NAME, None
                 )
@@ -4351,6 +4680,7 @@ class ApplioLauncher:
         # our native NSMenu; _reassert_menu_and_delegate re-seats the delegate +
         # menu after webview clobbers them on window creation).
         import macos_wrapper, webview
+
         self._applio_app = macos_wrapper.start_gui(launcher=self)
         self._main_window = getattr(self._applio_app, "window", None)
         logging.info("[Launcher] Starting webview event loop")
@@ -4384,6 +4714,7 @@ class ApplioLauncher:
             if getattr(self, "_main_window", None):
                 from PyObjCTools import AppHelper
                 from AppKit import NSApp
+
                 AppHelper.callAfter(self._main_window.show)
                 NSApp.activateIgnoringOtherApps_(True)
                 logging.info("[Launcher] bring_to_front: surfacing main window")
@@ -4455,12 +4786,12 @@ class ApplioLauncher:
         self._terminating = True
         if _LAUNCHER_PGID is None:
             return
-        
+
         try:
             # Step 1: SIGTERM to entire process group
             logging.info(f"[Launcher] Sending SIGTERM to PGID {_LAUNCHER_PGID}")
             os.killpg(_LAUNCHER_PGID, signal.SIGTERM)
-            
+
             # Step 2: Wait for graceful shutdown
             deadline = time.time() + timeout
             while time.time() < deadline:
@@ -4472,19 +4803,21 @@ class ApplioLauncher:
                             os.killpg(_LAUNCHER_PGID, 0)  # Check if group exists
                             time.sleep(0.1)
                         except ProcessLookupError:
-                            logging.info("[Launcher] All children terminated gracefully")
+                            logging.info(
+                                "[Launcher] All children terminated gracefully"
+                            )
                             return
                 except ChildProcessError:
                     logging.info("[Launcher] All children terminated gracefully")
                     return
-            
+
             # Step 3: Escalate to SIGKILL
             logging.warning("[Launcher] Graceful shutdown timeout, sending SIGKILL")
             try:
                 os.killpg(_LAUNCHER_PGID, signal.SIGKILL)
             except ProcessLookupError:
                 pass  # Already terminated
-            
+
         except ProcessLookupError:
             logging.info("[Launcher] No child processes to terminate")
 
@@ -4533,15 +4866,23 @@ class ApplioLauncher:
         import itertools
         from AppKit import NSMenu
 
-        self._dynamic_items = {}   # action_key -> (NSMenuItem, hint); mutated by the 2 s timer
-        self._key_to_tag = {}      # action_key -> NSMenuItem tag; lets the timer find items
+        self._dynamic_items = (
+            {}
+        )  # action_key -> (NSMenuItem, hint); mutated by the 2 s timer
+        self._key_to_tag = {}  # action_key -> NSMenuItem tag; lets the timer find items
         tag_counter = itertools.count(1)
         dispatch = self._build_launcher_dispatch()
 
         main_menu = NSMenu.alloc().init()
         _fill_ns_menu(
-            menu_spec.MENU, main_menu, self._menu_handler, dispatch,
-            tag_counter, self._dynamic_items, self._key_to_tag, is_top_level=True,
+            menu_spec.MENU,
+            main_menu,
+            self._menu_handler,
+            dispatch,
+            tag_counter,
+            self._dynamic_items,
+            self._key_to_tag,
+            is_top_level=True,
         )
         return main_menu
 
@@ -4566,11 +4907,14 @@ class ApplioLauncher:
         def _do():
             try:
                 from AppKit import NSApp
+
                 if self._app_delegate is not None:
                     NSApp.setDelegate_(self._app_delegate)
                 NSApp.setMainMenu_(self._build_native_menu())
                 self._update_menu_state()  # apply dynamic state now (else ~2 s till next timer tick)
-                logging.info("[Launcher] Re-asserted delegate + native menu after webview.start")
+                logging.info(
+                    "[Launcher] Re-asserted delegate + native menu after webview.start"
+                )
             except Exception:
                 # callAfter prints uncaught exceptions to stderr, NOT the app log — capture so the
                 # spike gate ("did the re-assert stick?") is diagnosable from applio_launcher.log.
@@ -4578,18 +4922,16 @@ class ApplioLauncher:
 
         AppHelper.callAfter(_do)
 
-
     def _start_menu_update_timer(self):
         """Start timer to periodically update menu state."""
         if not NATIVE_APIS_AVAILABLE:
             return
         from AppKit import NSTimer
-        self._menu_update_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            2.0,  # Update every 2 seconds
-            self,
-            "menuUpdateTimerFired:",
-            None,
-            True
+
+        self._menu_update_timer = (
+            NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                2.0, self, "menuUpdateTimerFired:", None, True  # Update every 2 seconds
+            )
         )
 
     def menuUpdateTimerFired_(self, timer):
@@ -4606,22 +4948,24 @@ class ApplioLauncher:
 
     def _check_show_progress_monitor_signal(self):
         """Check if wrapper requested to show Progress Monitor via IPC.
-        
+
         Returns True if signal was detected and handled, False otherwise.
         Resets the signal flag after detection to prevent repeated triggers.
         """
         import json
         import fcntl
-        
+
         config_locations = [
-            os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
+            os.path.expanduser(
+                "~/Library/Application Support/Applio/runtime_paths.json"
+            ),
             os.path.expanduser("~/.applio/runtime_paths.json"),
         ]
 
         for config_path in config_locations:
             if not os.path.exists(config_path):
                 continue
-                
+
             try:
                 with open(config_path, "r") as f:
                     fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # Shared lock for reading
@@ -4631,20 +4975,24 @@ class ApplioLauncher:
                 # Check if show_progress_monitor signal is set
                 if config.get("show_progress_monitor") is True:
                     logging.info("[Launcher] Detected show_progress_monitor IPC signal")
-                    
+
                     # Reset the signal flag
                     config["show_progress_monitor"] = False
                     temp_path = config_path + ".tmp"
                     with open(temp_path, "w") as f:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock for writing
+                        fcntl.flock(
+                            f.fileno(), fcntl.LOCK_EX
+                        )  # Exclusive lock for writing
                         json.dump(config, f, indent=2)
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                     os.rename(temp_path, config_path)
-                    
+
                     return True
-                    
+
             except Exception as e:
-                logging.warning(f"[Launcher] Failed to check show_progress_monitor signal: {e}")
+                logging.warning(
+                    f"[Launcher] Failed to check show_progress_monitor signal: {e}"
+                )
 
         return False
 
@@ -4707,6 +5055,7 @@ class ApplioLauncher:
         if target_tag is None:
             return None
         from AppKit import NSApp
+
         main = NSApp.mainMenu()
         return _find_item_by_tag(main, target_tag)
 
@@ -4727,10 +5076,14 @@ class ApplioLauncher:
             return
         try:
             from AppKit import NSTimer
+
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                10.0, self, "launchUpdateCheckFire:", None, False)
+                10.0, self, "launchUpdateCheckFire:", None, False
+            )
         except Exception as e:
-            logging.warning(f"[Launcher] launch-time update check scheduling failed: {e}")
+            logging.warning(
+                f"[Launcher] launch-time update check scheduling failed: {e}"
+            )
 
     def launchUpdateCheckFire_(self, timer):
         """One-shot NSTimer callback: run the deferred launch-time update check."""
@@ -4760,15 +5113,22 @@ class ApplioLauncher:
         d["app.check_updates"] = lambda: self.checkUpdates_(None)
         d["file.set_data_location"] = lambda: self.setDataLocation_(None)
         d["process.open_dashboard"] = lambda: self.showProgressMonitor_(None)
-        d["process.open_logs"] = self._open_training_logs     # already zero-arg
+        d["process.open_logs"] = self._open_training_logs  # already zero-arg
         d["window.show_main"] = lambda: self.showMainWindow_(None)
-        d["help.guide"] = self._open_guide                     # already zero-arg
+        d["help.guide"] = self._open_guide  # already zero-arg
         d["help.docs"] = lambda: self._open_url("https://docs.applio.org")
-        d["help.report_issue"] = lambda: self._open_url("https://github.com/froggeric/applio-macOS-native-app/issues")
+        d["help.report_issue"] = lambda: self._open_url(
+            "https://github.com/froggeric/applio-macOS-native-app/issues"
+        )
         d["help.discord"] = lambda: self._open_url("https://discord.gg/IAHispano")
-        for key in ("file.reveal_logs", "file.reveal_datasets", "file.reveal_pretraineds",
-                    "file.reveal_inference", "file.reveal_root"):
-            d[key] = (lambda k=key: self._reveal(k))
+        for key in (
+            "file.reveal_logs",
+            "file.reveal_datasets",
+            "file.reveal_pretraineds",
+            "file.reveal_inference",
+            "file.reveal_root",
+        ):
+            d[key] = lambda k=key: self._reveal(k)
         return d
 
     def _resolve_data_dir(self):
@@ -4777,8 +5137,12 @@ class ApplioLauncher:
         env = os.environ.get("APPLIO_DATA_PATH")
         if env:
             return env
-        for cfg in (os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
-                    os.path.expanduser("~/.applio/runtime_paths.json")):
+        for cfg in (
+            os.path.expanduser(
+                "~/Library/Application Support/Applio/runtime_paths.json"
+            ),
+            os.path.expanduser("~/.applio/runtime_paths.json"),
+        ):
             if os.path.exists(cfg):
                 try:
                     with open(cfg, "r") as f:
@@ -4791,15 +5155,23 @@ class ApplioLauncher:
 
     def _first_run_done(self):
         """True once the wrapper has written runtime_paths.json (first-run complete)."""
-        for cfg in (os.path.expanduser("~/Library/Application Support/Applio/runtime_paths.json"),
-                    os.path.expanduser("~/.applio/runtime_paths.json")):
+        for cfg in (
+            os.path.expanduser(
+                "~/Library/Application Support/Applio/runtime_paths.json"
+            ),
+            os.path.expanduser("~/.applio/runtime_paths.json"),
+        ):
             if os.path.exists(cfg):
                 return True
         return False
 
     def _reveal(self, action_key):
         sub = menu_spec.REVEAL_PATHS.get(action_key, "")
-        path = os.path.join(self._resolve_data_dir(), sub) if sub else self._resolve_data_dir()
+        path = (
+            os.path.join(self._resolve_data_dir(), sub)
+            if sub
+            else self._resolve_data_dir()
+        )
         try:
             os.makedirs(path, exist_ok=True)
             subprocess.Popen(["open", path])
@@ -4845,6 +5217,7 @@ class ApplioLauncher:
             return
         try:
             from PyObjCTools import AppHelper
+
             AppHelper.callAfter(self._show_about_alert)
         except Exception as e:
             logging.error(f"[Launcher] showAbout defer failed: {e}")
@@ -4854,6 +5227,7 @@ class ApplioLauncher:
         logging.info("[Launcher] _show_about_alert running")
         try:
             from AppKit import NSAlert, NSAlertStyleInformational, NSApp
+
             # Single source of truth: applio_update_check.VERSION reads
             # Contents/Resources/build_info.json -> "3.6.3.5" (multi-root search).
             version = _update_check().VERSION
@@ -4889,6 +5263,7 @@ class ApplioLauncher:
 
         if not self._first_run_done():
             from AppKit import NSAlert, NSAlertStyleInformational
+
             alert = NSAlert.alloc().init()
             alert.setMessageText_("Choose a Data Location First")
             alert.setInformativeText_(
@@ -4907,11 +5282,15 @@ class ApplioLauncher:
         panel.setCanChooseFiles_(False)
         panel.setCanChooseDirectories_(True)
         panel.setAllowsMultipleSelection_(False)
-        panel.setMessage_("Select a folder to store Applio data (models, training, logs):")
+        panel.setMessage_(
+            "Select a folder to store Applio data (models, training, logs):"
+        )
         panel.setPrompt_("Choose")
 
         # Get current data path as starting point
-        current_path = os.environ.get("APPLIO_DATA_PATH", os.path.expanduser("~/Applio"))
+        current_path = os.environ.get(
+            "APPLIO_DATA_PATH", os.path.expanduser("~/Applio")
+        )
         panel.setDirectoryURL_(NSURL.fileURLWithPath_(current_path))
 
         # Show panel
@@ -4925,11 +5304,13 @@ class ApplioLauncher:
 
                 # Save preference via NSUserDefaults
                 from Foundation import NSUserDefaults
+
                 defaults = NSUserDefaults.standardUserDefaults()
                 defaults.setObject_forKey_(new_path, "dataPath")
 
                 # Notify user they need to restart
                 from AppKit import NSAlert, NSAlertStyleWarning
+
                 alert = NSAlert.alloc().init()
                 alert.setMessageText_("Restart Required")
                 alert.setInformativeText_(
@@ -4942,16 +5323,16 @@ class ApplioLauncher:
 
     def showProgressMonitor_(self, sender):
         """Show the progress monitor dashboard.
-        
+
         Always shows the dashboard, even in idle state.
         The dashboard transitions between idle/active states automatically.
         """
         logging.info("[Launcher] Progress Monitor menu item selected")
-        
+
         # Create dashboard on first use
         if not self._dashboard_controller:
             self._create_dashboard()
-        
+
         # Show the dashboard
         if self._dashboard_controller:
             # Update process list before showing
@@ -4967,22 +5348,27 @@ class ApplioLauncher:
             try:
                 AppHelper.callAfter(self._main_window.show)
                 from AppKit import NSApp
+
                 NSApp.activateIgnoringOtherApps_(True)
             except Exception as e:
                 logging.warning(f"[Launcher] Show Main Window failed: {e}")
 
     def _create_dashboard(self):
         """Create the ProcessDashboardController instance.
-        
+
         Called lazily when Progress Monitor is first accessed.
         """
         if not NATIVE_APIS_AVAILABLE:
-            logging.warning("[Launcher] Cannot create dashboard - native APIs unavailable")
+            logging.warning(
+                "[Launcher] Cannot create dashboard - native APIs unavailable"
+            )
             return
-        
+
         try:
             logging.info("[Launcher] Creating ProcessDashboardController")
-            self._dashboard_controller = ProcessDashboardController.alloc().initWithLauncher_(self)
+            self._dashboard_controller = (
+                ProcessDashboardController.alloc().initWithLauncher_(self)
+            )
             logging.info("[Launcher] ProcessDashboardController created successfully")
         except Exception as e:
             logging.error(f"[Launcher] Failed to create dashboard: {e}")
@@ -4990,12 +5376,16 @@ class ApplioLauncher:
 
     def _show_progress_window_for_processes(self, processes):
         """Show progress window for the first active process."""
-        logging.info(f"[Launcher] _show_progress_window_for_processes called with {len(processes)} processes")
+        logging.info(
+            f"[Launcher] _show_progress_window_for_processes called with {len(processes)} processes"
+        )
 
         # Warn if multiple processes active (only showing first)
         if len(processes) > 1:
-            process_types = [p['type'] for p in processes]
-            logging.warning(f"[Launcher] {len(processes)} processes active ({process_types}), only showing first ({processes[0]['type']})")
+            process_types = [p["type"] for p in processes]
+            logging.warning(
+                f"[Launcher] {len(processes)} processes active ({process_types}), only showing first ({processes[0]['type']})"
+            )
 
         if not processes:
             logging.info("[Launcher] No processes to show, returning early")
@@ -5010,10 +5400,11 @@ class ApplioLauncher:
             self.progress_window = None
 
         proc = processes[0]
-        logging.info(f"[Launcher] Creating ProgressWindowController for {proc['type']}: {proc.get('model_name', 'Unknown')}")
+        logging.info(
+            f"[Launcher] Creating ProgressWindowController for {proc['type']}: {proc.get('model_name', 'Unknown')}"
+        )
         self.progress_window = ProgressWindowController(
-            proc["type"],
-            {k: v for k, v in proc.items() if k != "type"}
+            proc["type"], {k: v for k, v in proc.items() if k != "type"}
         )
         logging.info("[Launcher] Calling progress_window.show()")
         self.progress_window.show()
@@ -5027,7 +5418,7 @@ class ApplioLauncher:
                 self._dist_center.removeObserver_(self)
             except Exception:
                 pass
-        
+
         # Stop menu update timer
         if self._menu_update_timer:
             self._menu_update_timer.invalidate()

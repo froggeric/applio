@@ -23,8 +23,7 @@ uses it.
 import os
 import re
 
-
-STOP_INFER_REPLACEMENT = '''def stop_infer():
+STOP_INFER_REPLACEMENT = """def stop_infer():
     # Cooperative cancellation (3.6.3.7): write the cancel flag; the patched
     # convert_audio_batch loop checks it per file and exits cleanly. Does NOT
     # kill a PID (single-process: the PID is the whole app). Best-effort; silent
@@ -37,7 +36,7 @@ STOP_INFER_REPLACEMENT = '''def stop_infer():
         open(cancel_flag, "w").close()
     except OSError:
         pass
-'''
+"""
 
 
 def patch_restart_py(base_path: str) -> bool:

@@ -25,5 +25,9 @@ def compute_inference_stats(record, now):
     remaining = max(0, total - processed)
     eta = (remaining * avg) if converted else 0.0
     speed = (converted / (elapsed / 60.0)) if (elapsed > 0 and converted) else 0.0
-    return {"pct": round(pct, 1), "elapsed": round(elapsed, 1),
-            "eta": round(eta, 1), "speed": round(speed, 1)}
+    return {
+        "pct": round(pct, 1),
+        "elapsed": round(elapsed, 1),
+        "eta": round(eta, 1),
+        "speed": round(speed, 1),
+    }

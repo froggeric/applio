@@ -20,7 +20,9 @@ def patch_extract_py(base_path: str) -> bool:
     extract_py_path = os.path.join(base_path, "extract.py")
 
     if not os.path.exists(extract_py_path):
-        print(f"[patch_extract_error_logging] extract.py not found at {extract_py_path}")
+        print(
+            f"[patch_extract_error_logging] extract.py not found at {extract_py_path}"
+        )
         return False
 
     with open(extract_py_path, "r", encoding="utf-8") as f:
@@ -42,12 +44,12 @@ def patch_extract_py(base_path: str) -> bool:
     #
     # Patched: Add file-based logging before the print
 
-    old_pattern = r'''        except Exception as error:
+    old_pattern = r"""        except Exception as error:
             print\(
                 f"An error occurred extracting file \{inp_path\} on \{self\.device\}: \{error\}"
-            \)'''
+            \)"""
 
-    new_code = '''        except Exception as error:
+    new_code = """        except Exception as error:
             # Log to file for debugging (persists across multiprocessing spawn)
             import datetime
             error_log_path = os.path.expanduser("~/Library/Logs/Applio/extraction_errors.log")
@@ -59,7 +61,7 @@ def patch_extract_py(base_path: str) -> bool:
                 pass  # Can't log if logging fails
             print(
                 f"An error occurred extracting file {inp_path} on {self.device}: {error}"
-            )'''
+            )"""
 
     if re.search(old_pattern, content):
         content = re.sub(old_pattern, new_code, content)
@@ -80,6 +82,7 @@ def patch_extract_py(base_path: str) -> bool:
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_extract_py(base_path)
     sys.exit(0 if success else 1)

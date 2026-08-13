@@ -88,7 +88,7 @@ def _get_frozen_base_path(*path_parts):
 '''
 
         # Insert helper function after the imports (before first class)
-        class_match = re.search(r'\nclass \w+:', content)
+        class_match = re.search(r"\nclass \w+:", content)
         if class_match:
             insert_pos = class_match.start()
             content = content[:insert_pos] + "\n" + helper_func + content[insert_pos:]
@@ -106,6 +106,7 @@ def _get_frozen_base_path(*path_parts):
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_f0_py(base_path)
     sys.exit(0 if success else 1)

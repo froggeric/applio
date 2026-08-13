@@ -138,36 +138,39 @@ def extract_voice_name(model_path: str, meta: dict) -> str:
     title = meta.get("title", "")
     if title:
         # Strip parenthetical context: (Israeli Singer), (Ukrainian Singer), etc.
-        name = re.sub(r'\s*\([^)]*\)\s*', ' ', title).strip()
+        name = re.sub(r"\s*\([^)]*\)\s*", " ", title).strip()
         # Strip common suffixes like [RVC V2], [450 Epochs], etc.
-        name = re.sub(r'\s*\[.*?\]\s*', ' ', name).strip()
+        name = re.sub(r"\s*\[.*?\]\s*", " ", name).strip()
         # Strip trailing " - RVC v2 ..." suffixes
-        name = re.sub(r'\s*-\s*RVC\s*v?\d+.*$', '', name, flags=re.IGNORECASE).strip()
+        name = re.sub(r"\s*-\s*RVC\s*v?\d+.*$", "", name, flags=re.IGNORECASE).strip()
         # Clean up extra whitespace
-        name = re.sub(r'\s{2,}', ' ', name).strip()
+        name = re.sub(r"\s{2,}", " ", name).strip()
         if name:
             return name
 
     # 2. Parent folder name (e.g. "Hanan Ben Ari - Weights")
     folder = os.path.basename(os.path.dirname(os.path.abspath(model_path)))
     # Strip common suffixes: -Weights, -Weights-2, _v2, etc.
-    name = re.sub(r'[-_]\s*(Weights?|Weights?-\d+|RVC|v\d+)\s*$', '', folder, flags=re.IGNORECASE).strip()
+    name = re.sub(
+        r"[-_]\s*(Weights?|Weights?-\d+|RVC|v\d+)\s*$", "", folder, flags=re.IGNORECASE
+    ).strip()
     if name and name != folder:
         return name
 
     # 3. Filename stem without extension
     stem = os.path.splitext(os.path.basename(model_path))[0]
     # Strip common patterns: added_IVF*_Flat_nprobe_1_*_v2
-    name = re.sub(r'^added_IVF\d+_Flat_nprobe_\d+_', '', stem).strip()
-    name = re.sub(r'_v\d+$', '', name).strip()
+    name = re.sub(r"^added_IVF\d+_Flat_nprobe_\d+_", "", stem).strip()
+    name = re.sub(r"_v\d+$", "", name).strip()
     if name:
         return name
 
     return folder or "unknown"
 
 
-def derive_merge_name(path_a: str, path_b: str, ratio: float,
-                      meta_a: dict, meta_b: dict) -> str:
+def derive_merge_name(
+    path_a: str, path_b: str, ratio: float, meta_a: dict, meta_b: dict
+) -> str:
     """
     Auto-generate a merged model name from source models.
 
@@ -184,12 +187,19 @@ def derive_merge_name(path_a: str, path_b: str, ratio: float,
         return f"{name_a} + {name_b} ({ratio:.2f})"
 
 
-def write_merge_metadata(output_dir: str, name: str,
-                         path_a: str, path_b: str, ratio: float,
-                         meta_a: dict, meta_b: dict,
-                         use_weighted: bool, random_seed: int,
-                         model_result: dict = None,
-                         index_result: dict = None) -> None:
+def write_merge_metadata(
+    output_dir: str,
+    name: str,
+    path_a: str,
+    path_b: str,
+    ratio: float,
+    meta_a: dict,
+    meta_b: dict,
+    use_weighted: bool,
+    random_seed: int,
+    model_result: dict = None,
+    index_result: dict = None,
+) -> None:
     """
     Write a metadata.json describing the merge into output_dir.
 
@@ -238,8 +248,16 @@ def _build_source_entry(model_path: str, meta: dict) -> dict:
         entry["md5"] = _md5_file(model_path)
     if meta:
         # Pull useful fields from weights.gg / Applio metadata
-        for key in ["title", "author", "description", "tags", "url",
-                     "id", "uploadedAt", "type"]:
+        for key in [
+            "title",
+            "author",
+            "description",
+            "tags",
+            "url",
+            "id",
+            "uploadedAt",
+            "type",
+        ]:
             if key in meta:
                 entry[key] = meta[key]
         if "torchMetadata" in meta:
@@ -394,7 +412,8 @@ def merge_models(
                 print(f"    {key}: truncated to {min_shape0} speakers")
             else:
                 merged_weights[key] = (
-                    ratio * weights_a[key].float() + (1 - ratio) * weights_b[key].float()
+                    ratio * weights_a[key].float()
+                    + (1 - ratio) * weights_b[key].float()
                 ).half()
 
         # Build output checkpoint
@@ -405,7 +424,9 @@ def merge_models(
         output_ckpt["f0"] = f0_a
         output_ckpt["version"] = version_a
         output_ckpt["vocoder"] = vocoder_a
-        output_ckpt["info"] = f"Merged from {os.path.basename(path_a)} and {os.path.basename(path_b)} with ratio {ratio:.2f}"
+        output_ckpt["info"] = (
+            f"Merged from {os.path.basename(path_a)} and {os.path.basename(path_b)} with ratio {ratio:.2f}"
+        )
 
         # Preserve optional metadata
         for key in ["embedder_model", "model_name", "author", "speakers_id"]:
@@ -578,7 +599,9 @@ def merge_indexes(
 
         # Weighted mode validation
         if use_weighted and not (0.01 <= ratio <= 0.99):
-            print(f"\n  Error: --ratio must be between 0.01 and 0.99 for weighted mode (got {ratio})")
+            print(
+                f"\n  Error: --ratio must be between 0.01 and 0.99 for weighted mode (got {ratio})"
+            )
             return False
 
         # Dry-run preview (after loading to get ntotal counts)
@@ -587,7 +610,9 @@ def merge_indexes(
                 dominant = "A" if ratio > 0.5 else "B"
                 print(f"\n  [DRY RUN] Weighted concatenation preview:")
                 print(f"    Ratio: {ratio} (dominant: {dominant})")
-                print(f"    Index A: {idx_a.ntotal:,} vectors, Index B: {idx_b.ntotal:,} vectors")
+                print(
+                    f"    Index A: {idx_a.ntotal:,} vectors, Index B: {idx_b.ntotal:,} vectors"
+                )
                 # Preview replication count
                 if ratio > 0.5:
                     multiplier = (ratio * idx_b.ntotal) / ((1 - ratio) * idx_a.ntotal)
@@ -670,7 +695,9 @@ def merge_indexes(
             if all_vecs.shape[0] > 100000:
                 progress = min(100, int((i + batch_size) / all_vecs.shape[0] * 100))
                 count = min(i + batch_size, all_vecs.shape[0])
-                print(f"    Adding vectors: {count:,} / {all_vecs.shape[0]:,} ({progress}%)")
+                print(
+                    f"    Adding vectors: {count:,} / {all_vecs.shape[0]:,} ({progress}%)"
+                )
 
         print(f"  Added {merged_idx.ntotal:,} vectors to merged index")
 
@@ -736,7 +763,7 @@ Examples:
         "--name",
         type=str,
         default=None,
-        help='Name for the merged model (default: auto-derived from source model names/metadata)',
+        help="Name for the merged model (default: auto-derived from source model names/metadata)",
     )
     output_group.add_argument(
         "--output-dir",
@@ -830,7 +857,9 @@ Examples:
     meta_a = load_model_metadata(ref_a)
     meta_b = load_model_metadata(ref_b)
 
-    merge_name = args.name or derive_merge_name(ref_a, ref_b, args.ratio, meta_a, meta_b)
+    merge_name = args.name or derive_merge_name(
+        ref_a, ref_b, args.ratio, meta_a, meta_b
+    )
 
     # Resolve output paths
     if args.output:
@@ -889,13 +918,18 @@ Examples:
             # PyTorch's memory allocator conflicts with faiss.train().
             # Run index merge in a subprocess with a clean environment.
             import subprocess as sp
+
             child_env = os.environ.copy()
             child_env["RESING_SKIP_TORCH"] = "1"
             cmd = [
-                sys.executable, __file__,
-                "--index-a", args.index_a,
-                "--index-b", args.index_b,
-                "--index-output", index_output,
+                sys.executable,
+                __file__,
+                "--index-a",
+                args.index_a,
+                "--index-b",
+                args.index_b,
+                "--index-output",
+                index_output,
             ]
             if args.dry_run:
                 cmd.append("--dry-run")
@@ -923,8 +957,13 @@ Examples:
         else:
             print(f"\n  Merge name: {merge_name}")
             if not merge_indexes(
-                args.index_a, args.index_b, index_output, args.dry_run,
-                use_weighted=args.use_weighted, ratio=args.ratio, random_seed=args.random_seed,
+                args.index_a,
+                args.index_b,
+                index_output,
+                args.dry_run,
+                use_weighted=args.use_weighted,
+                ratio=args.ratio,
+                random_seed=args.random_seed,
             ):
                 success = False
             elif not args.dry_run and faiss is not None:
@@ -945,9 +984,13 @@ Examples:
         meta_dir = model_output_dir or os.path.dirname(os.path.abspath(index_output))
         if os.path.isdir(meta_dir):
             write_merge_metadata(
-                meta_dir, merge_name,
-                ref_a, ref_b, args.ratio,
-                meta_a, meta_b,
+                meta_dir,
+                merge_name,
+                ref_a,
+                ref_b,
+                args.ratio,
+                meta_a,
+                meta_b,
                 use_weighted=args.use_weighted,
                 random_seed=args.random_seed,
                 model_result=model_result,

@@ -23,12 +23,11 @@ opens os.path.join(base_path, "infer.py")).
 import os
 import re
 
-
 _HELPERS_MARKER = "# === Inference Progress Tracking (injected by patch) ==="
 _BATCH_MARKER = "_infer_cancel_requested()"
 
 
-INFER_PROGRESS_HELPERS = r'''
+INFER_PROGRESS_HELPERS = r"""
 # === Inference Progress Tracking (injected by patch) ===
 import json as _infer_json
 import time as _infer_time
@@ -107,18 +106,18 @@ def _infer_add_to_history(entry):
     except OSError:
         pass
 # === End Inference Progress Tracking ===
-'''
+"""
 
 
 # Anchor regex: spans the method BODY only (the def + docstring L345-360 are preserved).
 INFER_BATCH_ANCHOR = re.compile(
-    r'        pid = os\.getpid\(\)\n        try:.*?'
+    r"        pid = os\.getpid\(\)\n        try:.*?"
     r'os\.remove\(os\.path\.join\(now_dir, "assets", "infer_pid\.txt"\)\)\n',
     re.DOTALL,
 )
 
 
-INFER_BATCH_REPLACEMENT = r'''        # Inference progress tracking (3.6.3.7): cooperative cancel + progress file.
+INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): cooperative cancel + progress file.
         # Replaces the PID-file mechanism (frozen-CWD write was broken; and in
         # single-process os.getpid() == the whole app, so PID-kill quit the app).
         existing = _read_infer_progress()
@@ -251,7 +250,7 @@ INFER_BATCH_REPLACEMENT = r'''        # Inference progress tracking (3.6.3.7): c
                 _infer_os.remove(_infer_cancel_path())
             except OSError:
                 pass
-'''
+"""
 
 
 def patch_infer_py(base_path: str) -> bool:
@@ -302,7 +301,9 @@ def patch_infer_py(base_path: str) -> bool:
             INFER_BATCH_REPLACEMENT, content, count=1
         )
         if n == 0:
-            print("[infer.py inference-progress] Could not find convert_audio_batch anchor")
+            print(
+                "[infer.py inference-progress] Could not find convert_audio_batch anchor"
+            )
             return False
         content = new_content
         changed = True

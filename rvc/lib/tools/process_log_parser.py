@@ -12,21 +12,18 @@ from typing import Optional, Dict, Any
 
 def is_tqdm_line(line: str) -> bool:
     """Check if line is a tqdm progress bar update."""
-    return bool(re.match(r'^\s*\d+%\|.*\|\s*\d+/\d+\s*\[', line))
+    return bool(re.match(r"^\s*\d+%\|.*\|\s*\d+/\d+\s*\[", line))
 
 
 def parse_tqdm_line(line: str) -> Optional[Dict[str, Any]]:
     """Extract progress info from tqdm line.
-    
+
     Returns dict with: percent, current, total, eta, rate, rate_unit
     or None if parsing fails.
-    
+
     Pattern: "  5%|▍         | 16/333 [00:18<04:36,  1.16it/s]"
     """
-    match = re.match(
-        r'^\s*(\d+)%\|.*\|\s*(\d+)/(\d+)\s*\[([^\]]+)\]',
-        line
-    )
+    match = re.match(r"^\s*(\d+)%\|.*\|\s*(\d+)/(\d+)\s*\[([^\]]+)\]", line)
     if not match:
         return None
 
@@ -45,29 +42,29 @@ def parse_tqdm_line(line: str) -> Optional[Dict[str, Any]]:
     rate_unit = None
 
     # Extract ETA (after <)
-    eta_match = re.search(r'<\s*([\d:]+)', bracket_content)
+    eta_match = re.search(r"<\s*([\d:]+)", bracket_content)
     if eta_match:
         eta = eta_match.group(1)
 
     # Extract rate (after comma or at end)
-    rate_match = re.search(r'([\d.]+)\s*(it/s|s/it)', bracket_content)
+    rate_match = re.search(r"([\d.]+)\s*(it/s|s/it)", bracket_content)
     if rate_match:
         rate = float(rate_match.group(1))
         rate_unit = rate_match.group(2)
 
     return {
-        'percent': percent,
-        'current': current,
-        'total': total,
-        'eta': eta,
-        'rate': rate,
-        'rate_unit': rate_unit
+        "percent": percent,
+        "current": current,
+        "total": total,
+        "eta": eta,
+        "rate": rate,
+        "rate_unit": rate_unit,
     }
 
 
 def detect_phase_name(line: str) -> Optional[str]:
     """Extract phase name from a log line.
-    
+
     Looks for patterns like:
     - "Starting preprocessing..."
     - "[11:02:15] Starting preprocessing..."
@@ -75,13 +72,13 @@ def detect_phase_name(line: str) -> Optional[str]:
     - "Extracting features..."
     """
     # Strip timestamp prefix if present (e.g., "[11:02:15] ")
-    stripped = re.sub(r'^\[\d{2}:\d{2}:\d{2}\]\s*', '', line)
+    stripped = re.sub(r"^\[\d{2}:\d{2}:\d{2}\]\s*", "", line)
 
     # Common phase patterns
     phase_patterns = [
-        r'[Ss]tarting\s+(\w+)',
-        r'^(\w+ing)\s+',  # "Preprocessing", "Extracting", "Training"
-        r'^(\w+)\s+started',
+        r"[Ss]tarting\s+(\w+)",
+        r"^(\w+ing)\s+",  # "Preprocessing", "Extracting", "Training"
+        r"^(\w+)\s+started",
     ]
 
     for pattern in phase_patterns:
@@ -90,10 +87,10 @@ def detect_phase_name(line: str) -> Optional[str]:
             phase = match.group(1).capitalize()
             # Normalize common variations
             phase_map = {
-                'Preprocess': 'Preprocessing',
-                'Extract': 'Extracting',
-                'Train': 'Training',
-                'Feature': 'Feature extraction',
+                "Preprocess": "Preprocessing",
+                "Extract": "Extracting",
+                "Train": "Training",
+                "Feature": "Feature extraction",
             }
             return phase_map.get(phase, phase)
 
@@ -102,41 +99,41 @@ def detect_phase_name(line: str) -> Optional[str]:
 
 def parse_training_status_line(line: str) -> Optional[Dict[str, Any]]:
     """Parse training status line with epoch/step/loss info.
-    
+
     Parses lines like:
     "Frederic v6 KLM5-44k | epoch=115 | step=11385 | time=23:13:10 | training_speed=0:15:25 | lowest_value=2.876 (epoch 76 and step 7455)"
-    
+
     Returns dict with: epoch, step, training_speed, best_epoch, best_loss, best_step
     or None if not a training status line.
     """
     # Match training status line pattern with lowest_value
     match = re.match(
-        r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)\s*\|\s*lowest_value=([\d.]+)\s*\(epoch\s+(\d+)\s+and\s+step\s+(\d+)\)',
-        line
+        r".*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)\s*\|\s*lowest_value=([\d.]+)\s*\(epoch\s+(\d+)\s+and\s+step\s+(\d+)\)",
+        line,
     )
     if match:
         return {
-            'epoch': int(match.group(1)),
-            'step': int(match.group(2)),
-            'training_speed': match.group(3),
-            'best_loss': float(match.group(4)),
-            'best_epoch': int(match.group(5)),
-            'best_step': int(match.group(6)),
+            "epoch": int(match.group(1)),
+            "step": int(match.group(2)),
+            "training_speed": match.group(3),
+            "best_loss": float(match.group(4)),
+            "best_epoch": int(match.group(5)),
+            "best_step": int(match.group(6)),
         }
 
     # Simpler pattern without lowest_value (early training)
     match = re.match(
-        r'.*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)',
-        line
+        r".*\|\s*epoch=(\d+)\s*\|\s*step=(\d+)\s*\|\s*time=[\d:]+\s*\|\s*training_speed=([\d:]+)",
+        line,
     )
     if match:
         return {
-            'epoch': int(match.group(1)),
-            'step': int(match.group(2)),
-            'training_speed': match.group(3),
-            'best_loss': None,
-            'best_epoch': None,
-            'best_step': None,
+            "epoch": int(match.group(1)),
+            "step": int(match.group(2)),
+            "training_speed": match.group(3),
+            "best_loss": None,
+            "best_epoch": None,
+            "best_step": None,
         }
 
     return None
@@ -144,16 +141,16 @@ def parse_training_status_line(line: str) -> Optional[Dict[str, Any]]:
 
 def parse_epoch_progress(line: str) -> Optional[Dict[str, int]]:
     """Parse epoch progress from log line.
-    
+
     Looks for patterns like "Epoch: 5/100" or "epoch 5 of 100"
-    
+
     Returns dict with: current, total
     or None if not found.
     """
-    match = re.search(r'[Ee]poch[:\s]*(\d+)\s*/\s*(\d+)', line)
+    match = re.search(r"[Ee]poch[:\s]*(\d+)\s*/\s*(\d+)", line)
     if match:
         current = int(match.group(1))
         total = int(match.group(2))
         if total > 0 and current <= total:
-            return {'current': current, 'total': total}
+            return {"current": current, "total": total}
     return None

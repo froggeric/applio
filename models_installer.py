@@ -16,12 +16,12 @@ import sys
 import argparse
 import logging
 import shutil
-from pathlib import Path
 
 # macOS native APIs (conditional)
 try:
     from Foundation import NSUserDefaults, NSURL
     from AppKit import NSOpenPanel, NSModalResponseOK
+
     NATIVE_APIS_AVAILABLE = True
 except ImportError:
     NATIVE_APIS_AVAILABLE = False
@@ -53,7 +53,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-    ]
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 # =================================================================
 # Preferences Manager
 # =================================================================
+
 
 class PreferencesManager:
     """Manages user preferences using macOS NSUserDefaults.
@@ -71,7 +72,9 @@ class PreferencesManager:
     def __init__(self):
         if NATIVE_APIS_AVAILABLE:
             # Use the main app's preferences domain (not the installer's own domain)
-            self.defaults = NSUserDefaults.alloc().initWithSuiteName_(PREFERENCES_DOMAIN)
+            self.defaults = NSUserDefaults.alloc().initWithSuiteName_(
+                PREFERENCES_DOMAIN
+            )
         else:
             self.defaults = None
 
@@ -104,6 +107,7 @@ class PreferencesManager:
 # =================================================================
 # Directory Selection Dialog
 # =================================================================
+
 
 def select_data_folder(default_path: str = None) -> str | None:
     """
@@ -143,6 +147,7 @@ def select_data_folder(default_path: str = None) -> str | None:
 # Directory Structure
 # =================================================================
 
+
 def create_directory_structure(base_path: str):
     """
     Create required directory structure in user's data location.
@@ -170,14 +175,15 @@ def create_directory_structure(base_path: str):
 # Model Copy Functions
 # =================================================================
 
+
 def get_bundled_models_dir() -> str | None:
     """Get the path to bundled models in the installer app."""
     # When running as a PyInstaller bundle, models are in Contents/Resources/rvc/models
     # When running from source, check relative to current file
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # Running as PyInstaller bundle - models are in Contents/Resources/
         # sys._MEIPASS points to the Resources directory
-        if hasattr(sys, '_MEIPASS'):
+        if hasattr(sys, "_MEIPASS"):
             models_dir = os.path.join(sys._MEIPASS, "rvc", "models")
             if os.path.exists(models_dir):
                 return models_dir
@@ -227,17 +233,21 @@ def copy_models_to_destination(data_path: str) -> bool:
     # Walk the entire models directory and copy files
     for root, dirs, files in os.walk(bundled_models):
         # Skip hidden directories (like .DS_Store parent)
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
 
         for filename in files:
             # Skip hidden files
-            if filename.startswith('.'):
+            if filename.startswith("."):
                 continue
 
             # Calculate relative path from bundled_models
             rel_dir = os.path.relpath(root, bundled_models)
             src_path = os.path.join(root, filename)
-            dest_path = os.path.join(dest_models, rel_dir, filename) if rel_dir != '.' else os.path.join(dest_models, filename)
+            dest_path = (
+                os.path.join(dest_models, rel_dir, filename)
+                if rel_dir != "."
+                else os.path.join(dest_models, filename)
+            )
 
             # Skip if destination already exists
             if os.path.exists(dest_path):
@@ -253,9 +263,13 @@ def copy_models_to_destination(data_path: str) -> bool:
 
             # Log every 10 files or for large files
             if total_copied % 10 == 0 or file_size > 100 * 1024 * 1024:
-                logger.info(f"  Copied {total_copied} files so far ({total_size / 1024 / 1024:.1f} MB)...")
+                logger.info(
+                    f"  Copied {total_copied} files so far ({total_size / 1024 / 1024:.1f} MB)..."
+                )
 
-    logger.info(f"Total copied: {total_copied} files ({total_size / 1024 / 1024:.1f} MB)")
+    logger.info(
+        f"Total copied: {total_copied} files ({total_size / 1024 / 1024:.1f} MB)"
+    )
     if total_skipped > 0:
         logger.info(f"Total skipped (already exist): {total_skipped} files")
     return True
@@ -264,6 +278,7 @@ def copy_models_to_destination(data_path: str) -> bool:
 # =================================================================
 # Main Install Function
 # =================================================================
+
 
 def install_models(data_path: str, cli_mode: bool = False) -> bool:
     """
@@ -312,6 +327,7 @@ def install_models(data_path: str, cli_mode: bool = False) -> bool:
 # Main Entry Point
 # =================================================================
 
+
 def confirm_location(data_path: str) -> bool:
     """
     Show confirmation dialog for installation location.
@@ -329,7 +345,9 @@ def confirm_location(data_path: str) -> bool:
 
     alert = NSAlert.alloc().init()
     alert.setMessageText_("Install Applio Models")
-    alert.setInformativeText_(f"Models will be installed to:\n\n{data_path}\n\nClick 'Select Different Location' to choose another folder, or 'Install Here' to proceed.")
+    alert.setInformativeText_(
+        f"Models will be installed to:\n\n{data_path}\n\nClick 'Select Different Location' to choose another folder, or 'Install Here' to proceed."
+    )
     alert.addButtonWithTitle_("Install Here")
     alert.addButtonWithTitle_("Select Different Location")
     alert.addButtonWithTitle_("Cancel")

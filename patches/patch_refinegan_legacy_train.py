@@ -14,7 +14,6 @@ and requires loading with compatible implementations.
 
 import os
 
-
 _IDEMPOTENCY_MARKER = "# RefineGAN-Legacy detection added"
 
 
@@ -83,7 +82,7 @@ def _detect_refinegan_legacy(pretrain_path: str) -> bool:
 
     # Now patch the pretrained G loading section to detect and handle legacy architecture
     # Find the pretrained G loading block and modify it
-    old_pretrain_g_block = '''        if pretrainG not in ("", "None"):
+    old_pretrain_g_block = """        if pretrainG not in ("", "None"):
             if rank == 0:
                 print(f"Loaded pretrained (G) '{pretrainG}'")
             try:
@@ -100,9 +99,9 @@ def _detect_refinegan_legacy(pretrain_path: str) -> bool:
                     "The parameters of the pretrain model such as the sample rate or architecture do not match the selected model."
                 )
                 print(e)
-                sys.exit(1)'''
+                sys.exit(1)"""
 
-    new_pretrain_g_block = '''        if pretrainG not in ("", "None"):
+    new_pretrain_g_block = """        if pretrainG not in ("", "None"):
             if rank == 0:
                 print(f"Loaded pretrained (G) '{pretrainG}'")
             try:
@@ -173,7 +172,7 @@ def _detect_refinegan_legacy(pretrain_path: str) -> bool:
                     "The parameters of the pretrain model such as the sample rate or architecture do not match the selected model."
                 )
                 print(e)
-                sys.exit(1)'''
+                sys.exit(1)"""
 
     if old_pretrain_g_block in content:
         content = content.replace(old_pretrain_g_block, new_pretrain_g_block)
@@ -190,6 +189,7 @@ def _detect_refinegan_legacy(pretrain_path: str) -> bool:
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 2:
         print("Usage: python patch_refinegan_legacy_train.py <base_path>")
         sys.exit(1)

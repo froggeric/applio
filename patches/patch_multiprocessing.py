@@ -28,6 +28,7 @@ from pathlib import Path
 
 class PatchResult:
     """Result of a patch operation."""
+
     def __init__(self, name: str, success: bool, message: str, changed: bool = False):
         self.name = name
         self.success = success
@@ -36,7 +37,11 @@ class PatchResult:
 
     def __str__(self):
         status = "✓" if self.success else "✗"
-        change = " (modified)" if self.changed else " (already patched)" if self.success else ""
+        change = (
+            " (modified)"
+            if self.changed
+            else " (already patched)" if self.success else ""
+        )
         return f"  {status} {self.name}: {self.message}{change}"
 
 
@@ -54,15 +59,15 @@ def patch_set_start_method(content: str) -> tuple[str, PatchResult]:
     name = "multiprocessing set_start_method"
 
     old_pattern = 'mp.set_start_method("spawn", force=True)'
-    new_pattern = '''try:
+    new_pattern = """try:
     mp.set_start_method("spawn", force=True)
 except RuntimeError:
-    pass  # Context already set'''
+    pass  # Context already set"""
 
     # Check if already patched
-    if 'except RuntimeError:' in content and 'Context already set' in content:
+    if "except RuntimeError:" in content and "Context already set" in content:
         # Verify it's in the right context (near set_start_method)
-        if 'mp.set_start_method' in content:
+        if "mp.set_start_method" in content:
             return content, PatchResult(name, True, "Already patched", changed=False)
 
     # Check if the pattern exists
@@ -71,7 +76,9 @@ except RuntimeError:
 
     # Apply patch
     new_content = content.replace(old_pattern, new_pattern)
-    return new_content, PatchResult(name, True, "Wrapped set_start_method in try/except", changed=True)
+    return new_content, PatchResult(
+        name, True, "Wrapped set_start_method in try/except", changed=True
+    )
 
 
 def patch_file(file_path: Path, dry_run: bool = False) -> bool:
@@ -91,7 +98,7 @@ def patch_file(file_path: Path, dry_run: bool = False) -> bool:
 
     # Read file
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding="utf-8")
     except Exception as e:
         print(f"✗ Error reading file: {e}")
         return False
@@ -130,7 +137,7 @@ def patch_file(file_path: Path, dry_run: bool = False) -> bool:
         return True
 
     try:
-        file_path.write_text(content, encoding='utf-8')
+        file_path.write_text(content, encoding="utf-8")
         print("✓ File patched successfully")
         return True
     except Exception as e:
@@ -146,12 +153,12 @@ def main():
         "file",
         nargs="?",
         default="rvc/train/extract/extract.py",
-        help="Path to extract.py (default: rvc/train/extract/extract.py)"
+        help="Path to extract.py (default: rvc/train/extract/extract.py)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be changed without modifying the file"
+        help="Show what would be changed without modifying the file",
     )
 
     args = parser.parse_args()

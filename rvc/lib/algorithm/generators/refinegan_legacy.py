@@ -295,16 +295,18 @@ class RefineGANLegacyGenerator(nn.Module):
             # Index 0 is a placeholder (LeakyReLU activation applied in forward)
             # This matches checkpoint structure: downsample_blocks[i].1.convs1
             self.downsample_blocks.append(
-                nn.ModuleList([
-                    nn.Identity(),  # Placeholder at index 0 (no params)
-                    ResBlockLegacy(
-                        in_channels=channels,
-                        out_channels=new_channels,
-                        kernel_size=7,
-                        dilation=(1, 3, 5),
-                        leaky_relu_slope=leaky_relu_slope,
-                    ),
-                ])
+                nn.ModuleList(
+                    [
+                        nn.Identity(),  # Placeholder at index 0 (no params)
+                        ResBlockLegacy(
+                            in_channels=channels,
+                            out_channels=new_channels,
+                            kernel_size=7,
+                            dilation=(1, 3, 5),
+                            leaky_relu_slope=leaky_relu_slope,
+                        ),
+                    ]
+                )
             )
             channels = new_channels
 
@@ -350,9 +352,7 @@ class RefineGANLegacyGenerator(nn.Module):
             channels = new_channels
 
         # Legacy: conv_post with bias=True (current has bias=False)
-        self.conv_post = weight_norm(
-            nn.Conv1d(channels, 1, 7, 1, padding=3, bias=True)
-        )
+        self.conv_post = weight_norm(nn.Conv1d(channels, 1, 7, 1, padding=3, bias=True))
         self.conv_post.apply(init_weights)
 
     def forward(self, mel: torch.Tensor, f0: torch.Tensor, g: torch.Tensor = None):

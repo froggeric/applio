@@ -31,17 +31,19 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
     # The `(?:result = )?` makes the assignment optional for robustness.
     # Matches: ]
     #         [result = ] subprocess.run(command)
-    pattern = r'(\s+\]\s*\n)(\s+)((?:result = )?subprocess\.run\(command\))'
+    pattern = r"(\s+\]\s*\n)(\s+)((?:result = )?subprocess\.run\(command\))"
 
     if not re.search(pattern, content):
-        print("[patch_preflight_validation] Pattern not found - code may have been modified")
+        print(
+            "[patch_preflight_validation] Pattern not found - code may have been modified"
+        )
         return content, False
 
     # Insert validation before subprocess.run
     # \1 = ]\n
     # \2 = indentation before subprocess.run
     # \3 = subprocess.run(command)
-    validation_code = r'''\1\2# Pre-flight: validate dataset path exists
+    validation_code = r"""\1\2# Pre-flight: validate dataset path exists
 \2if not os.path.exists(dataset_path):
 \2    abs_path = os.path.abspath(dataset_path)
 \2    if os.path.exists(abs_path):
@@ -49,7 +51,7 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \2    else:
 \2        return f"Error: Dataset path does not exist: {dataset_path}. Use an absolute path to your dataset folder."
 
-\2\3'''
+\2\3"""
 
     new_content = re.sub(pattern, validation_code, content, count=1)
     return new_content, True
@@ -101,6 +103,7 @@ def patch_core_py(base_path: str) -> bool:
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_core_py(base_path)
     sys.exit(0 if success else 1)

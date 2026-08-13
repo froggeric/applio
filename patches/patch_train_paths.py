@@ -12,7 +12,6 @@ Applied at build time by build_macos.py.
 """
 
 import os
-import re
 
 
 def patch_train_py(base_path: str) -> bool:
@@ -112,6 +111,7 @@ current_dir = _get_applio_logs_path()'''
 
 if __name__ == "__main__":
     import sys
+
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_train_py(base_path)
     sys.exit(0 if success else 1)
