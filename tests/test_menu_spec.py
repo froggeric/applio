@@ -58,7 +58,38 @@ def test_edit_menu_present():
 
     for k in keys:
         assert k in STANDARD_SELECTOR_KEYS, f"{k} needs a responder-chain selector"
-        assert STANDARD_SELECTOR_KEYS[k].endswith(":"), f"{k} selector must be an action"
+        assert STANDARD_SELECTOR_KEYS[k].endswith(
+            ":"
+        ), f"{k} selector must be an action"
+
+
+def test_frequent_action_shortcuts():
+    by_key = {leaf.key: leaf for leaf in iter_leaves(MENU)}
+    expected = {
+        "process.open_logs": ("l", ("cmd",)),
+        "file.set_data_location": ("d", ("cmd", "shift")),
+        "window.show_main": ("0", ("cmd",)),
+        "file.reveal_root": ("r", ("cmd", "shift")),
+    }
+    for key, (sc, mods) in expected.items():
+        leaf = by_key[key]
+        assert (leaf.shortcut, leaf.mods) == (
+            sc,
+            mods,
+        ), f"{key}: {leaf.shortcut} {leaf.mods}"
+    edit = next(t for t in MENU if t.title == "Edit")
+    edit_expected = {
+        "edit.undo": ("z", ("cmd",)),
+        "edit.redo": ("z", ("cmd", "shift")),
+        "edit.cut": ("x", ("cmd",)),
+        "edit.copy": ("c", ("cmd",)),
+        "edit.paste": ("v", ("cmd",)),
+        "edit.select_all": ("a", ("cmd",)),
+    }
+    for leaf in iter_leaves(edit.submenu):
+        assert (leaf.shortcut, leaf.mods) == edit_expected[
+            leaf.key
+        ], f"{leaf.key}: {leaf.shortcut} {leaf.mods}"
 
 
 def test_keys_are_known():

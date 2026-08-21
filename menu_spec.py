@@ -170,7 +170,12 @@ MENU = [
     MenuItem(
         title="File",
         submenu=[
-            MenuItem(key="file.set_data_location", title="Set Data Location…"),
+            MenuItem(
+                key="file.set_data_location",
+                title="Set Data Location…",
+                shortcut="d",
+                mods=("cmd", "shift"),
+            ),
             MenuItem(separator=True),
             MenuItem(
                 title="Reveal in Finder",
@@ -196,7 +201,12 @@ MENU = [
                         dynamic="exists:assets/audios",
                     ),
                     MenuItem(separator=True),
-                    MenuItem(key="file.reveal_root", title="Root Data Folder"),
+                    MenuItem(
+                        key="file.reveal_root",
+                        title="Root Data Folder",
+                        shortcut="r",
+                        mods=("cmd", "shift"),
+                    ),
                 ],
             ),
         ],
@@ -214,7 +224,12 @@ MENU = [
                 shortcut="p",
                 mods=("cmd", "shift"),
             ),
-            MenuItem(key="process.open_logs", title="Open Debug Logs…"),
+            MenuItem(
+                key="process.open_logs",
+                title="Open Debug Logs…",
+                shortcut="l",
+                mods=("cmd",),
+            ),
         ],
     ),
     MenuItem(
@@ -225,7 +240,12 @@ MENU = [
             ),
             MenuItem(key="window.zoom", title="Zoom"),
             MenuItem(separator=True),
-            MenuItem(key="window.show_main", title="Show Main Window"),
+            MenuItem(
+                key="window.show_main",
+                title="Show Main Window",
+                shortcut="0",
+                mods=("cmd",),
+            ),
             MenuItem(key="window.bring_all_to_front", title="Bring All to Front"),
         ],
     ),
