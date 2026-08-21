@@ -14,10 +14,11 @@ from menu_spec import (
     WRAPPER_ACTION_KEYS,
     DISPLAY_KEYS,
     TAXONOMY,
+    EDIT_KEYS,
     iter_leaves,
 )
 
-EXPECTED_TOP_LEVEL = ["Applio", "File", "Process", "Window", "Help"]
+EXPECTED_TOP_LEVEL = ["Applio", "Edit", "File", "Process", "Window", "Help"]
 
 
 def _titles_top_level():
@@ -37,11 +38,27 @@ def test_top_level_order():
     assert titles == EXPECTED_TOP_LEVEL, f"top-level order wrong: {titles}"
 
 
-def test_no_settings_no_edit():
+def test_no_settings_menu():
     for leaf in iter_leaves(MENU):
         assert leaf.key != "app.settings", "app.settings must not exist"
-    titles = [t.title for t in MENU]
-    assert "Edit" not in titles, "no Edit menu"
+
+
+def test_edit_menu_present():
+    edit = next(t for t in MENU if t.title == "Edit")
+    keys = [leaf.key for leaf in iter_leaves(edit.submenu)]
+    assert keys == [
+        "edit.undo",
+        "edit.redo",
+        "edit.cut",
+        "edit.copy",
+        "edit.paste",
+        "edit.select_all",
+    ], keys
+    from menu_spec import STANDARD_SELECTOR_KEYS
+
+    for k in keys:
+        assert k in STANDARD_SELECTOR_KEYS, f"{k} needs a responder-chain selector"
+        assert STANDARD_SELECTOR_KEYS[k].endswith(":"), f"{k} selector must be an action"
 
 
 def test_keys_are_known():
@@ -71,8 +88,8 @@ def test_action_key_contracts():
         "window.bring_all_to_front",
     }
     assert (
-        WRAPPER_ACTION_KEYS == LAUNCHER_ACTION_KEYS - injected
-    ), "wrapper contract mismatch"
+        WRAPPER_ACTION_KEYS == LAUNCHER_ACTION_KEYS - injected - EDIT_KEYS
+    ), "wrapper contract mismatch (Edit items are launcher-only)"
     assert injected <= LAUNCHER_ACTION_KEYS, "injected keys must be in launcher set"
 
 

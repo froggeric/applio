@@ -59,14 +59,26 @@ WINDOW_KEYS = {
     "window.bring_all_to_front",
 }
 HELP_KEYS = {"help.guide", "help.docs", "help.report_issue", "help.discord"}
-TAXONOMY = APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS
+# Edit menu: clipboard via the AppKit responder chain (WKContentView implements
+# cut:/copy:/paste:/selectAll:). Launcher-only — pywebview's static renderer
+# cannot bind selectors, and its stripped WKWebView context menu (cocoa.py
+# willOpenMenu_withEvent_ → removeAllItems) leaves no other clipboard path.
+EDIT_KEYS = {
+    "edit.undo",
+    "edit.redo",
+    "edit.cut",
+    "edit.copy",
+    "edit.paste",
+    "edit.select_all",
+}
+TAXONOMY = APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS | EDIT_KEYS
 
 # Display-only items (no dispatch; rendered disabled, mutated by the launcher timer).
 DISPLAY_KEYS = {"process.status"}
 
 # Keys the launcher renderer must wire dispatch for.
 LAUNCHER_ACTION_KEYS = (
-    APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS
+    APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS | EDIT_KEYS
 ) - set()
 # Standalone wrapper handles everything EXCEPT the four app-menu items pywebview injects
 # (About / Hide / Hide Others / Quit). Verified: webview/platforms/cocoa.py _add_app_menu
@@ -79,6 +91,7 @@ WRAPPER_ACTION_KEYS = LAUNCHER_ACTION_KEYS - {
     "app.quit",
     "window.zoom",
     "window.bring_all_to_front",
+    *EDIT_KEYS,  # selector-based: cannot be rendered by the static pywebview menu
 }
 
 # Reveal targets (relative to the resolved data dir).
@@ -100,6 +113,12 @@ STANDARD_SELECTOR_KEYS = {
     "window.minimize": "performMiniaturize:",
     "window.zoom": "performZoom:",
     "window.bring_all_to_front": "arrangeInFront:",
+    "edit.undo": "undo:",
+    "edit.redo": "redo:",
+    "edit.cut": "cut:",
+    "edit.copy": "copy:",
+    "edit.paste": "paste:",
+    "edit.select_all": "selectAll:",
 }
 
 # ---- THE menu --------------------------------------------------------------
@@ -122,6 +141,31 @@ MENU = [
             MenuItem(separator=True),
             MenuItem(key="app.quit", title="Quit Applio", shortcut="q", mods=("cmd",)),
         ]
+    ),
+    MenuItem(
+        title="Edit",
+        submenu=[
+            MenuItem(key="edit.undo", title="Undo", shortcut="z", mods=("cmd",)),
+            MenuItem(
+                key="edit.redo",
+                title="Redo",
+                shortcut="z",
+                mods=(
+                    "cmd",
+                    "shift",
+                ),
+            ),
+            MenuItem(separator=True),
+            MenuItem(key="edit.cut", title="Cut", shortcut="x", mods=("cmd",)),
+            MenuItem(key="edit.copy", title="Copy", shortcut="c", mods=("cmd",)),
+            MenuItem(key="edit.paste", title="Paste", shortcut="v", mods=("cmd",)),
+            MenuItem(
+                key="edit.select_all",
+                title="Select All",
+                shortcut="a",
+                mods=("cmd",),
+            ),
+        ],
     ),
     MenuItem(
         title="File",

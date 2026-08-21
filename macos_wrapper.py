@@ -1025,7 +1025,10 @@ def render_pywebview():
         if idx == 0:
             out.append(Menu(PYWEBVIEW_APP_KEY, build(top.submenu, is_app_payload=True)))
         else:
-            out.append(Menu(top.title, build(top.submenu)))
+            children = build(top.submenu)
+            if not children:
+                continue  # e.g. Edit: selector-only items this renderer cannot bind
+            out.append(Menu(top.title, children))
     return out
 
 
