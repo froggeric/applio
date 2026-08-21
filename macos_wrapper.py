@@ -565,6 +565,22 @@ def select_data_folder(default_path: str = None) -> str | None:
     return None
 
 
+def confirm_data_location(default_location, message, info):
+    """First-run safety net: [Use Default] (Return) / [Choose Again…].
+
+    Returns True when the user chose the default, False to re-run the picker.
+    """
+    from AppKit import NSAlert, NSApp, NSAlertFirstButtonReturn
+
+    NSApp.activateIgnoringOtherApps_(True)
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_(message)
+    alert.setInformativeText_(info)
+    alert.addButtonWithTitle_("Use Default")
+    alert.addButtonWithTitle_("Choose Again…")
+    return alert.runModal() == NSAlertFirstButtonReturn
+
+
 def create_data_structure(base_path: str):
     """
     Create required directory structure in user's data location.
@@ -1798,12 +1814,22 @@ def start_gui(launcher=None):
         default_location = os.path.expanduser("~/Applio")
         DATA_PATH = select_data_folder(default_location)
 
-        if not DATA_PATH:
-            # User cancelled - use default
-            DATA_PATH = default_location
-            logging.info(f"User cancelled folder selection, using default: {DATA_PATH}")
+        while not DATA_PATH:
+            # User cancelled - confirm the fallback instead of silently defaulting
+            use_default = confirm_data_location(
+                default_location,
+                "No data location was chosen.",
+                "Applio stores models, datasets and training results in the data "
+                f"location. Use the default ({default_location}) or choose again?",
+            )
+            if use_default:
+                DATA_PATH = default_location
+                logging.info(f"User confirmed default data location: {DATA_PATH}")
+            else:
+                DATA_PATH = select_data_folder(default_location)
 
         # Validate path is writable
+        path_error = None
         try:
             os.makedirs(DATA_PATH, exist_ok=True)
             test_file = os.path.join(DATA_PATH, ".write_test")
@@ -1811,9 +1837,40 @@ def start_gui(launcher=None):
                 f.write("test")
             os.remove(test_file)
         except (IOError, OSError) as e:
-            logging.error(f"Selected path not writable: {DATA_PATH}, error: {e}")
-            DATA_PATH = default_location
-            os.makedirs(DATA_PATH, exist_ok=True)
+            path_error = str(e)
+
+        while path_error is not None:
+            use_default = confirm_data_location(
+                default_location,
+                "The selected location is not writable.",
+                f"Error: {path_error}\nUse the default location "
+                f"({default_location}) or choose again?",
+            )
+            if use_default:
+                path_error = None
+                DATA_PATH = default_location
+                try:
+                    os.makedirs(DATA_PATH, exist_ok=True)
+                except (IOError, OSError) as e:
+                    # Default itself unwritable (~/Applio) — hard stop with the
+                    # error rather than an unhandled crash at startup.
+                    logging.error(f"Default data location unwritable: {e}")
+                    raise
+            else:
+                DATA_PATH = select_data_folder(default_location)
+                if not DATA_PATH:
+                    # Cancelled the re-pick: keep the previous error and
+                    # re-offer the alert (os.makedirs(None) would raise TypeError).
+                    continue
+                path_error = None
+                try:
+                    os.makedirs(DATA_PATH, exist_ok=True)
+                    test_file = os.path.join(DATA_PATH, ".write_test")
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                except (IOError, OSError) as e:
+                    path_error = str(e)
 
         # Save preference
         _prefs.set_data_path(DATA_PATH)
