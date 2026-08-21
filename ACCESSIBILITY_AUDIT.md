@@ -672,6 +672,14 @@ All 15 plan tasks + final whole-branch review + fix wave complete. Cert-free bui
 7. **Braille** (if available): repeat 1 + 4; note churn/panning problems.
 
 ### Routed to the Phase 2 plan (final-review triage + observations)
+
+### Phase 3 additions born during Phase 2 execution (2026-08-21, feat/a11y-phase2 final review)
+- Patcher anchor-miss exit-code hardening: the build loop tolerates exit 1 as "already patched", so a post-sync anchor miss never fails the build — 3 new patchers now inherit that silence; give miss a distinct exit code and fail the build on it.
+- `assets/applio_a11y.js` healRecordToggles stamps aria-pressed on ANY Start/Stop-labeled button — scope it to the realtime record toggle's container (the engine Start/Stop pair at realtime.py:941-942 are momentary, not toggles).
+- applio_i18n: system-locale candidate list misses upstream's prefix-glob semantics for non-xx_XX locales; add an isinstance(dict) guard for corrupt language JSONs.
+- applio_progress_api._collect_words duplicates the launcher's _a11y_terminal_words mapping (two sync points for word_key) — unify behind one shared helper.
+- Native-string i18n remaining English clusters: loading.html stages, dashboard status strings, About alert, dynamic process.status titles (applio_i18n plumbing is in place; wrap + translate via overrides file).
+
 - Announcements arg-order alignment; badge excluding paused jobs; same-type:name key collision (needs pid in snapshot); live-status tuple vs TERMINAL_STATUSES complement; LayoutChanged re-post on async navigation; "cancelling" as a sidebar row state; AX `{phase}` vs `{phase.upper()}`; patch_upload scan bound.
 - History-write race (stale terminal word possible in a millisecond window) and the per-heartbeat history-JSON read (compute lazily on disappearance).
 - The web-side work: `/api/progress` + injected JS live region, `js_api` FileBridge + Browse buttons, Accessibility settings submenu, native-string i18n, persistent "Last result" region, upstream Applio/gradio PRs.
