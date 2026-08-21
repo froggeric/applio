@@ -172,10 +172,33 @@
         #copyright-line {
             display: inline-block;
         }
+
+        /* Screen-reader-only (visually hidden) live region target */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
     </style>
 </head>
 
 <body>
+    <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="container">
         <div class="logo-container">
             <div class="logo-text">APPLIO</div>
@@ -183,7 +206,8 @@
 
         <div class="progress-wrapper">
             <div class="progress-container">
-                <div class="progress-bar" id="progress-bar"></div>
+                <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuemin="0"
+                    aria-valuemax="100" aria-valuenow="0" aria-label="Startup progress"></div>
             </div>
         </div>
 
@@ -210,6 +234,14 @@
         let lastHeading = "";
         let lastSubHeading = "";
         let lastDetail = "";
+        var lastAnnouncedStage = "";
+        function announceStage(heading, sub) {
+            var text = heading + (sub ? ". " + sub : "");
+            if (text && text !== lastAnnouncedStage) {
+                lastAnnouncedStage = text;
+                document.getElementById("sr-status").textContent = text;
+            }
+        }
 
         async function pollStatus() {
             try {
@@ -219,6 +251,8 @@
                 // 1. Progress Update
                 const displayProgress = Math.max(2, data.progress);
                 progressBar.style.width = displayProgress + '%';
+                progressBar.setAttribute("aria-valuenow", String(displayProgress));
+                progressBar.setAttribute("aria-valuetext", data.heading + " — " + displayProgress + "%");
 
                 // 2. Headings & Titles (Dynamic from Backend)
                 if (data.heading !== lastHeading) {
@@ -228,6 +262,7 @@
                         mainStatus.style.opacity = 1;
                     }, 200);
                     lastHeading = data.heading;
+                    announceStage(data.heading, data.sub_heading);
                 }
 
                 if (data.sub_heading !== lastSubHeading) {
@@ -237,6 +272,7 @@
                         statusText.style.opacity = 1;
                     }, 200);
                     lastSubHeading = data.sub_heading;
+                    announceStage(data.heading, data.sub_heading);
                 }
 
                 // 3. Technical Details

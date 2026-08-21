@@ -1327,6 +1327,8 @@ class ApplioApp:
                                     == "Initializing environment..."
                                 ):
                                     self.sub_heading = "Configuring Runtime..."
+
+                        self._sync_title_to_heading()
             except Exception as e:
                 logging.error(f"Log observer error: {e}")
                 time.sleep(1)
@@ -1423,8 +1425,16 @@ class ApplioApp:
                 logging.info("Transitioning to main UI...")
                 self.window.load_url(f"http://{self.server_host}:{self.server_port}")
                 self._post_layout_changed()
+                self._set_window_title("Applio")
         else:
             logging.error("Backend timeout period exceeded.")
+            self._set_window_title("Applio — Startup Error")
+            try:
+                from PyObjCTools import AppHelper
+
+                AppHelper.callAfter(self._alert_startup_timeout)
+            except Exception:
+                pass
             if self.window:
                 self.window.load_html(
                     "<h1>Startup Error</h1><p>The server failed to respond in time.</p>"
@@ -1456,6 +1466,51 @@ class ApplioApp:
             NSAccessibilityPostNotification(
                 wv, NSAccessibilityLayoutChangedNotification
             )
+        except Exception:
+            pass
+
+    def _set_window_title(self, title):
+        """pywebview Window.set_title (verified at webview/window.py:314).
+
+        Thread-safe from tail_logs' daemon thread: the cocoa backend marshals
+        via AppHelper.callAfter (cocoa.py:761-762). set_title is wrapped in
+        @_shown_call, so before the window is shown it blocks up to 20 s then
+        raises — the getattr guard + except covers the early race (threads
+        start at L1441-1449, self.window is created at L452).
+        """
+        try:
+            if getattr(self, "window", None):
+                self.window.set_title(title)
+        except Exception:
+            logging.debug("[A11y] set_title failed", exc_info=True)
+
+    def _sync_title_to_heading(self):
+        """Set the window title to the current heading, deduped.
+
+        ONE call site (end of tail_logs' per-line dispatch) instead of one
+        per branch: the LOGIC MAPPING block at L1238-1329 has ~12 assignment
+        branches — hooking each would churn. Title is heading-only (never the
+        download percent: percent lines arrive many times per second).
+        """
+        if self.heading != getattr(self, "_last_title_heading", None):
+            self._last_title_heading = self.heading
+            self._set_window_title(f"Applio — {self.heading}")
+
+    def _alert_startup_timeout(self):
+        """Main-thread NSAlert for the boot-timeout path (was a silent <h1>)."""
+        try:
+            from AppKit import NSAlert, NSApp
+
+            NSApp.activateIgnoringOtherApps_(True)
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Applio failed to start")
+            alert.setInformativeText_(
+                "The backend did not become ready in time. The log file explains "
+                "why: once the window loads, use Process → Open Debug Logs…, or "
+                "open ~/Library/Logs/Applio/ manually."
+            )
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
         except Exception:
             pass
 
