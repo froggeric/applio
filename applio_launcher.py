@@ -5099,6 +5099,9 @@ class ApplioLauncher:
         type:name so two jobs sharing a model name (e.g. preprocess vs
         training) are tracked independently. Paused is derived per-proc via
         psutil because active_processes.json keeps SIGSTOPped jobs "running".
+        The in-app batch's "cancelling" maps onto the policy's terminal
+        "cancelled" (see the inference block below for why a bare passthrough
+        would stay silent).
         """
         snap = {}
         for proc in get_active_processes():
@@ -5119,10 +5122,23 @@ class ApplioLauncher:
         inf = _synthesize_inference_proc()
         if inf:
             name = (inf.get("model_name") or "").strip() or "batch"
+            # Real status passthrough. Synthesize yields "running"/"cancelling"
+            # only; "cancelling" maps onto the policy's terminal "cancelled"
+            # (an existing TERMINAL_STATUSES member — no vocabulary widening)
+            # so a user-stopped batch announces a CANCELLATION with a critical
+            # dock bounce. A bare "cancelling" passthrough matches no policy
+            # branch, and the key then vanishes via the policy's running-gated
+            # disappear branch → total silence; normalizing to "running" would
+            # announce "finished" (the bug this fixes). Unknown → "running".
+            status = inf.get("status")
+            if status == "cancelling":
+                status = "cancelled"
+            elif status != "running":
+                status = "running"
             snap[f"inference:{name}"] = {
                 "type": "batch inference",
                 "name": name,
-                "status": "running",
+                "status": status,
             }
         return snap
 
