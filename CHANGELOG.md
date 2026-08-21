@@ -8,10 +8,10 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 ### Added
 
 - **Accessibility, Phase 1 (native wrapper foundation).** Voice support across the native app:
-  - **Announced job lifecycle + dock badge.** VoiceOver speaks when a training, preprocessing,
-    feature-extraction, or batch-inference job starts, finishes, errors, or is cancelled
-    (`[A11y]` lines in `~/Library/Logs/Applio/applio_launcher.log`), the dock badge shows the
-    number of active jobs, and finished jobs request dock attention.
+  - **Announced job lifecycle + dock badge.** Posts VoiceOver announcements (with `[A11y]`
+    lines in `~/Library/Logs/Applio/applio_launcher.log`) when a training, preprocessing,
+    feature-extraction, or batch-inference job starts, finishes, errors, or is cancelled;
+    the dock badge shows the active-job count and finished jobs request dock attention.
   - **Edit menu + keyboard shortcuts.** Edit → Cut/Copy/Paste/Select All (⌘X/⌘C/⌘V/⌘A) reaches
     text fields inside the web UI through the responder chain; ⌘L opens the Logs folder, ⇧⌘D
     sets the data location, ⌘0 refocuses the main window, ⇧⌘R reveals the data folder in Finder.
