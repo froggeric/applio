@@ -32,6 +32,12 @@ STOP_INFER_REPLACEMENT = """def stop_infer():
     data_path = _si_os.environ.get("APPLIO_DATA_PATH") or _si_os.expanduser("~/Applio")
     cancel_flag = _si_os.path.join(data_path, ".applio", "inference_cancel.flag")
     try:
+        import gradio as gr
+
+        gr.Info("Stopping batch conversion - finishing current file…")
+    except Exception:
+        pass
+    try:
         _si_os.makedirs(_si_os.path.dirname(cancel_flag), exist_ok=True)
         open(cancel_flag, "w").close()
     except OSError:

@@ -853,6 +853,18 @@ def pre_build_patch():
             "restart.py - cooperative inference cancel",
             "dir",
         ),
+        (
+            "patches/patch_stop_feedback.py",
+            "tabs/settings/sections/restart.py",
+            "restart.py - announced Stop Training feedback",
+            "dir",
+        ),
+        (
+            "patches/patch_stop_feedback.py",
+            "tabs/inference/inference.py",
+            "inference.py - announced audio-upload feedback",
+            "dir",
+        ),
     ]
 
     # Validate patch order matches dependencies
