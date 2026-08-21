@@ -141,7 +141,7 @@ and the overrides block (currently lines 53-61) with:
                 continue
 ```
 
-and replace the system-locale candidate logic in `_resolve_from_config` (currently lines 73-82, the `sys_locale = ...` block) with:
+and replace the system-locale candidate logic in `_resolve_from_config` (currently lines 73-82, the `sys_locale = ...` block — keep the `break` at line 83 and the surrounding `try/except (OSError, ValueError)` untouched) with:
 
 ```python
                 sys_locale = (_locale.getdefaultlocale()[0] or "").replace("-", "_")
@@ -167,6 +167,8 @@ and replace the system-locale candidate logic in `_resolve_from_config` (current
                         return matching[0]
 ```
 
+(`sorted()` departs from upstream's raw `Path.glob` order on purpose: glob order is filesystem-dependent, and deterministic resolution keeps the new test stable. Note for the test: `_mod._locale.getdefaultlocale = lambda: (...)` rebinds the attribute on the shared `locale` MODULE (applio_i18n did `import locale as _locale`), so it affects every module during the test — acceptable in these serial script-style suites because the `finally:` restores it before any other code reads it.)
+
 - [ ] **Step 4: Run to verify pass** — `All applio_i18n tests passed (8).`
 
 - [ ] **Step 5: Commit** — `git add applio_i18n.py tests/test_applio_i18n.py && git commit -m "fix(i18n): upstream-accurate locale prefix-glob + corrupt-JSON guards"`
@@ -181,17 +183,22 @@ and replace the system-locale candidate logic in `_resolve_from_config` (current
 - Modify: `assets/applio_a11y.js:103-110` (`healRecordToggles`; call sites at 167 and 308 unchanged)
 - Test: `tests/test_a11y_js_invariants.py` (NEW — source-invariant tests for the JS payload; no browser harness exists in-repo)
 
+**Scope selector — verified against the installed gradio 6.20.0 bundle:** the scope is the ancestor **`.gr-accordion`** (the existing live-verified `ACCORDION_BLOCK`), NOT `.form`/`gradio-column`:
+- `gradio-column` does not exist — the only custom element gradio 6.20.0 registers is `gradio-app` (`index-9Ev7iYt6.js`: `customElements.define("gradio-app", …)`); a Column renders a plain `<div class="column …">` (`Index.svelte_svelte_type_style_lang-Cf19ZTCK.js`: `` u(l,1,`column ${i??""}`,"svelte-siq5d6",…) ``).
+- `.form` IS real (`BaseForm-CtCLD5Mv.js` renders `class="form svelte-…"`) but is the wrapper of FormComponents (Textbox/Dropdown/Radio). `gr.Button` is `Button(Component)`, NOT a FormComponent (`components/button.py:20`), so the Browse button has no `.form` of its own, and the record toggle is NOT inside the path field's Column anyway — `tabs/realtime/realtime.py:1091-1111` puts `record_audio_path` inside `with gr.Column():` and the `record_audio = gr.Button(i18n("Start"))` toggle as a SIBLING of that Column, both children of the `gr.Accordion("Record Audio (Optional)")`. The smallest ancestor containing BOTH the anchor and the toggle is the accordion.
+- The engine `start_button`/`stop_button` pair (`realtime.py:940-942`) sits at the top of `with gr.Blocks() as ui:` — outside every accordion — so an accordion scope can never reach it.
+
 **Acceptance Criteria:**
-- [ ] `healRecordToggles` resolves `#browse-record_audio_path`, scopes to its container (`.form` first, `gradio-column` fallback), and only stamps buttons inside that scope.
+- [ ] `healRecordToggles` resolves `#browse-record_audio_path`, scopes to `anchor.closest(ACCORDION_BLOCK)` (`.gr-accordion`), and only stamps buttons inside that scope.
 - [ ] The function no longer calls document-wide `querySelectorAll("button")`.
-- [ ] When the anchor is absent (page without the realtime tab mounted), the function is a no-op.
-- [ ] New suite passes: `All a11y JS invariant tests passed (2).`
+- [ ] When the anchor (or its accordion) is absent (page without the realtime tab mounted), the function is a no-op.
+- [ ] New suite passes: `All a11y JS invariant tests passed (1).` (Task 4 adds a second test.)
 
 **Verify:** `venv_macos/bin/python tests/test_a11y_js_invariants.py` → `All a11y JS invariant tests passed (2).`
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_a11y_js_invariants.py`:
+- [ ] **Step 1: Write the failing test** — create `tests/test_a11y_js_invariants.py` (Task-2 state: ONE test; Task 4 appends the second):
 
 ```python
 # tests/test_a11y_js_invariants.py
@@ -227,39 +234,38 @@ def test_heal_record_toggles_scoped_to_browse_anchor():
     assert "closest" in body and "querySelectorAll" in body, (
         "healRecordToggles must scope via closest() then query within"
     )
-
-
-def test_failed_tail_wiring_present():
-    # Task 4 extends this; guards the persistResult enrichment contract.
-    with open(JS, encoding="utf8") as fh:
-        src = fh.read()
-    assert "failedTail" in src, "failedTail helper must exist (log-tail surfacing)"
+    assert "ACCORDION_BLOCK" in body, (
+        "scope must be the live-verified .gr-accordion container"
+    )
 
 
 def run_all():
     test_heal_record_toggles_scoped_to_browse_anchor()
-    test_failed_tail_wiring_present()
-    print("All a11y JS invariant tests passed (2).")
+    print("All a11y JS invariant tests passed (1).")
 
 
 if __name__ == "__main__":
     run_all()
 ```
 
-- [ ] **Step 2: Run to verify failure** — the scoping assertion fails (current function scans `document.querySelectorAll("button")`); the `failedTail` assertion also fails (Task 4 hasn't run). NOTE: implement Task 2's production change AND leave `test_failed_tail_wiring_present` failing? NO — adjust: for Task 2, ship the file with ONLY `test_heal_record_toggles_scoped_to_browse_anchor` in `run_all()` and the count `(1)`; Task 4 adds the second test and bumps the count. (The snippet above shows the END state after Task 4; Task 2 lands it with one test.)
+- [ ] **Step 2: Run to verify failure** — the scoping assertions fail (current function scans `document.querySelectorAll("button")` and has no anchor/`closest`/`ACCORDION_BLOCK` usage).
 
 - [ ] **Step 3: Implement** — replace `healRecordToggles` in `assets/applio_a11y.js` (lines 103-110) with:
 
 ```javascript
   function healRecordToggles() {
-    // Scoped to the realtime "Record Audio" section: the fork-injected
-    // Browse button for record_audio_path is the only stable fork-controlled
-    // DOM anchor in it (the record toggle itself has no elem_id). The engine
-    // Start/Stop pair elsewhere in the tab is momentary, NOT a toggle, and
-    // must not receive aria-pressed.
+    // Scoped to the realtime "Record Audio (Optional)" accordion: the
+    // fork-injected Browse button for record_audio_path is the only stable
+    // fork-controlled DOM anchor in it (the record toggle itself has no
+    // elem_id), and the toggle is a SIBLING of the path field's column, so
+    // the accordion is the smallest correct scope (verified against gradio
+    // 6.20.0: Column renders div.column, Button has no .form wrapper, and
+    // gradio-column does not exist). The engine Start/Stop pair at the top
+    // of the tab is momentary, NOT a toggle, lives outside every accordion,
+    // and must not receive aria-pressed.
     var anchor = document.querySelector("#browse-record_audio_path");
     if (!anchor) { return; }
-    var scope = anchor.closest(".form") || anchor.closest("gradio-column");
+    var scope = anchor.closest(ACCORDION_BLOCK);
     if (!scope) { return; }
     scope.querySelectorAll("button").forEach(function (btn) {
       var t = (btn.textContent || "").trim().toLowerCase();
@@ -350,11 +356,16 @@ def _collect_words(launcher):
     return terminal_words_from_history(entries)
 ```
 
-In `applio_launcher.py`, replace `_a11y_terminal_words`'s duplicated loop (lines 5406-5427) with delegation (keep the existing method name, try/except, and logging):
+In `applio_launcher.py`, replace `_a11y_terminal_words`'s duplicated loop (lines 5406-5427) with delegation — keep the method (it is `self`-bound, called as `self._a11y_terminal_words()` at line 5451), keep its existing docstring (adjust the last sentence to point at the shared helper), and keep the bare `get_recent_processes(limit=20)` call: it resolves to the MODULE-LEVEL function defined at `applio_launcher.py:1001` (`def get_recent_processes(limit: int = 10)`), which is exactly how the current code calls it:
 
 ```python
     def _a11y_terminal_words(self):
-        """Terminal word map for announcements (shared with the web payload)."""
+        """Map snapshot keys -> stored history status for jobs that vanished.
+
+        (keep the existing docstring body; the mapping itself now lives in
+        applio_progress_api.terminal_words_from_history — History is
+        newest-first, so the most recent entry for a key wins.)
+        """
         try:
             from applio_progress_api import terminal_words_from_history
 
@@ -445,7 +456,16 @@ def test_payload_carries_errors_key():
     )  # default empty list
 ```
 
-Register in `run_all()`, bump count to `(11)`. Activate `test_failed_tail_wiring_present` in `tests/test_a11y_js_invariants.py`'s `run_all()` (count `(2)`).
+Register in `run_all()`, bump count to `(11)`. In `tests/test_a11y_js_invariants.py` (created by Task 2 with a single test), ADD the second test and register it (count → `(2)`):
+
+```python
+def test_failed_tail_wiring_present():
+    # Guards the persistResult enrichment contract (Task 4).
+    with open(JS, encoding="utf8") as fh:
+        src = fh.read()
+    assert "failedTail" in src, "failedTail helper must exist (log-tail surfacing)"
+    assert 'a[1] + " — " + a[2]' in src, "persist loop must append the tail"
+```
 
 - [ ] **Step 2: Run to verify failure** — `AttributeError: _recent_error_tails` / `TypeError: unexpected keyword 'errors'` / JS invariant fails.
 
@@ -547,15 +567,16 @@ and the persist loop (~line 281-283):
 **Files:**
 - Modify: `applio_browse_ui.py` (new `_make_validator` + `attach_path_validation`)
 - Modify: `patches/patch_browse_buttons.py:119-122` (generated-line template gains the validation call)
-- Test: `tests/test_browse_ui.py` (5 → 8), `tests/test_patch_fixtures.py` (assertion extension; count stays 5)
+- Test: `tests/test_browse_ui.py` (5 → 9), `tests/test_patch_fixtures.py` (assertion extension; count stays 5)
 
 **Acceptance Criteria:**
-- [ ] `attach_path_validation(target, mode)` wires `target.blur(fn=_make_validator(mode), outputs=[target])` — works for `gr.Textbox` AND `gr.Dropdown` targets (both expose `.blur` in gradio 6.20.0; verified `Events.blur` at `dropdown.py:45`).
-- [ ] Validator: empty value → returned unchanged, no warning; `~/x` → expanded value returned (self-heal); nonexistent path → `gr.Warning("Path does not exist: …")` and the expanded value returned; `mode="folder"` on a file / `mode in ("file","pth")` on a directory → `gr.Warning("Not a folder…"/"Not a file…")`.
+- [ ] `attach_path_validation(target, mode)` wires `target.blur(fn=_make_validator(mode), inputs=[target], outputs=[target])` — works for `gr.Textbox` AND `gr.Dropdown` targets (both list `Events.blur` in their `EVENTS` in the installed gradio 6.20.0 — `components/textbox.py:65`, `components/dropdown.py:44`; the 13 fields include both kinds, e.g. `dataset_path`/`g_pretrained_path` are Dropdowns at `tabs/train/train.py:388,725`, `record_audio_path` is a Textbox). A construction-time wiring test proves the API on both component kinds.
+- [ ] Validator: empty value → returned unchanged, no warning; `~` → expanded value returned (self-heal); nonexistent path → `gr.Warning("Path does not exist: …")` and the expanded value returned; `mode="folder"` on a file / `mode in ("file","pth")` on a directory → `gr.Warning("Not a folder…"/"Not a file…")`.
 - [ ] The patcher's injected block per field now contains both lines (browse button + validation attach) for all 13 fields; fixture test asserts `attach_path_validation(` appears once per field var.
-- [ ] Existing 5 browse tests still pass (the `_picker` seam untouched); suite prints `(8)`.
+- [ ] **Invariant:** the injected validation line must NOT contain the substring `_applio_browse_` — `tests/test_patch_fixtures.py:115` asserts `patched.count("_applio_browse_") == len(fields)` and would break on any such naming (the `_applio_browse_{var}` assignment var is the only allowed carrier of that prefix).
+- [ ] Existing 5 browse tests still pass (the `_picker` seam untouched); suite prints `(9)`.
 
-**Verify:** `venv_macos/bin/python tests/test_browse_ui.py && venv_macos/bin/python tests/test_patch_fixtures.py` → `(8)` and `(5)` pass lines.
+**Verify:** `venv_macos/bin/python tests/test_browse_ui.py && venv_macos/bin/python tests/test_patch_fixtures.py` → `(9)` and `(5)` pass lines.
 
 **Steps:**
 
@@ -576,22 +597,14 @@ def _with_recorded_warnings(fn):
 
 
 def test_validator_expands_tilde_and_self_heals():
-    v = applio_browse_ui._make_validator("file")
-    out, warnings = _with_recorded_warnings(lambda: v("~/no/such/dir"))
-    assert out.startswith("/") and "~" not in out
-    assert warnings == []  # nonexistent but no type check fires for unknown path? NO:
-```
-
-CAREFUL — `~/no/such/dir` does not exist, so the missing-path warning DOES fire. Correct test set:
-
-```python
-def test_validator_expands_tilde_and_self_heals():
     import os
 
-    v = applio_browse_ui._make_validator("file")
+    v = applio_browse_ui._make_validator("folder")
     home = os.path.expanduser("~")
     out, warnings = _with_recorded_warnings(lambda: v("~"))
-    assert out == home and warnings == []  # ~ exists; normalized value self-heals
+    assert out == home and warnings == []  # home IS a folder -> clean self-heal
+    out2, warnings2 = _with_recorded_warnings(lambda: v("   "))
+    assert out2 == "   " and warnings2 == []  # blank -> untouched, no warning
 
 
 def test_validator_warns_on_missing_path():
@@ -604,13 +617,29 @@ def test_validator_warns_on_missing_path():
 def test_validator_warns_on_wrong_type():
     import os
 
-    v = applio_browse_ui._make_validator("folder")
-    out, warnings = _with_recorded_warnings(lambda: v(__file__))  # a file, not folder
+    here = os.path.abspath(__file__)
+    v_folder = applio_browse_ui._make_validator("folder")
+    out, warnings = _with_recorded_warnings(lambda: v_folder(here))  # file, not folder
     assert warnings and warnings[0].startswith("Not a folder")
-    assert out == os.path.abspath(__file__) or out == __file__
+    assert out == here
+    v_file = applio_browse_ui._make_validator("file")
+    out2, warnings2 = _with_recorded_warnings(lambda: v_file(os.path.dirname(here)))
+    assert warnings2 and warnings2[0].startswith("Not a file")  # dir, not file
+    assert out2 == os.path.dirname(here)
+
+
+def test_attach_validation_wires_blur_on_both_kinds():
+    # Construction-time wiring on BOTH component kinds used by the 13 fields
+    # (Textbox + Dropdown both expose .blur in gradio 6.20.0). Same pattern as
+    # test_browse_button_creates_and_wires — no server needed.
+    with gr.Blocks():
+        tb = gr.Textbox()
+        dd = gr.Dropdown(choices=["a"], allow_custom_value=True)
+        applio_browse_ui.attach_path_validation(tb, "file")
+        applio_browse_ui.attach_path_validation(dd, "pth")
 ```
 
-Register in `run_all()`, bump count to `(8)`. In `tests/test_patch_fixtures.py`, extend the browse-buttons fixture assertion to also require, per field var, `f"applio_browse_ui.attach_path_validation({var},"` in the patched output (the file already asserts the browse line per var — mirror it).
+Register all four in `run_all()`, bump count to `(9)`. In `tests/test_patch_fixtures.py`, extend the per-field loop in `test_browse_buttons_patch` to also assert `f'applio_browse_ui.attach_path_validation({var}, "{mode}")' in patched` (mirroring the existing browse-line assertion) — and do NOT touch the `count("_applio_browse_")` assertion (see the invariant above).
 
 - [ ] **Step 2: Run to verify failure** — `AttributeError: _make_validator` and fixture assertion misses.
 
@@ -641,20 +670,20 @@ def attach_path_validation(target, mode):
     """Blur-time validation for a path field: expands ~, warns (announced
     toast channel) when the typed path is missing or the wrong type. Wired
     by patch_browse_buttons next to every Browse button."""
-    target.blur(fn=_make_validator(mode), outputs=[target])
+    target.blur(fn=_make_validator(mode), inputs=[target], outputs=[target])
 ```
 
-In `patches/patch_browse_buttons.py`, extend the generated-line template (lines 119-122):
+In `patches/patch_browse_buttons.py`, extend the generated-line template (lines 119-122). Match the existing single-quoted f-string idiom of the second line — do NOT introduce `\"` escapes inside the double-quoted f-string (they compile on 3.10 but are inconsistent with the file's style):
 
 ```python
         line = (
             f"\n{indent}_applio_browse_{var} = applio_browse_ui.browse_button("
             f'"{mode}", {var}, elem_id="browse-{var}")\n'
-            f"{indent}applio_browse_ui.attach_path_validation({var}, \"{mode}\")\n"
+            f'{indent}applio_browse_ui.attach_path_validation({var}, "{mode}")\n'
         )
 ```
 
-- [ ] **Step 4: Run to verify pass** — `(8)` and `(5)`; then run the patcher directly against a temp copy and `git checkout` any real sources if touched:
+- [ ] **Step 4: Run to verify pass** — `(9)` and `(5)`; then run the patcher directly against a temp copy and `git checkout` any real sources if touched:
 
 ```bash
 venv_macos/bin/python patches/patch_browse_buttons.py tabs/train/train.py
@@ -673,16 +702,19 @@ git status --short tabs/   # restore if dirty: git checkout -- tabs/train/train.
 - Modify: all `patches/patch_*.py` exit sites (inventory below), `build_macos.py:941-977` (the patch loop), `CLAUDE.md` (convention text)
 - Test: `tests/test_patcher_exit_codes.py` (NEW)
 
-**Exit-site inventory (verified 2026-08-21):**
-- Single-expression miss sites — change `sys.exit(0 if X else 1)` to `sys.exit(0 if X else 2)`: `patch_browse_buttons.py:197`, `patch_inference_progress.py:329`, `patch_data_paths.py:199`, `patch_loading_html.py:235`, `patch_custom_pretrained_paths.py:140`, `patch_extract_error_logging.py:88`, `patch_preflight_validation.py:109`, `patch_mute_paths.py:90`, `patch_preprocess_error_logging.py:82`, `patch_stop_infer.py:105`, `patch_static_resources.py:364`, `patch_download_paths.py:116`, `patch_pretrained_selector.py:138`, `patch_refinegan_legacy_infer.py:186`, `patch_stop_feedback.py:112`, `patch_f0_model_paths.py:112`, `patch_refinegan_legacy_train.py:198`, `patch_multiprocessing.py:172`, `patch_refinegan_legacy_discriminator.py:221`, `patch_subprocess_validation.py:279`, `patch_version_checker.py:95`, `patch_train_44100.py:263`, `patch_process_tracking.py:663`, `patch_train_paths.py:117`.
-- Multi-line miss exits (the `else`/fallback of a success check, or after a "Pattern not found" print) — change the `1` to `2`: `patch_dataset_paths.py:229`, `patch_inference_progress.py:325`, `patch_stop_infer.py:101`, `patch_progress_routes.py:64`, `patch_refinegan_legacy_infer.py:182`, `patch_refinegan_legacy.py:104`, `patch_refinegan_legacy_train.py:195` (CHECK: this may be the argv usage guard — classify by context, see rule), `patch_multiprocessing.py:169`, `patch_refinegan_legacy_discriminator.py:217`, `patch_web_a11y_payload.py:89`, `patch_train_44100.py:260`.
-- Usage guards (`if len(sys.argv) < 2: ... sys.exit(1)`) — KEEP at `1`.
+**Exit-site inventory (verified 2026-08-21 against the repo; the RULE below governs if lines drift):**
+- Single-expression sites — change `sys.exit(0 if X else 1)` to `sys.exit(0 if X else 2)` (the `X` is the patcher's own success flag; False = anchor miss): `patch_browse_buttons.py:197`, `patch_inference_progress.py:329`, `patch_data_paths.py:199`, `patch_loading_html.py:235`, `patch_custom_pretrained_paths.py:140`, `patch_extract_error_logging.py:88`, `patch_preflight_validation.py:109`, `patch_mute_paths.py:90`, `patch_preprocess_error_logging.py:82`, `patch_stop_infer.py:105`, `patch_static_resources.py:364` (NOTE: not currently registered in `patches_to_apply` — still gets the convention for the day it is), `patch_download_paths.py:116`, `patch_pretrained_selector.py:138`, `patch_refinegan_legacy_infer.py:186`, `patch_stop_feedback.py:112`, `patch_f0_model_paths.py:112`, `patch_refinegan_legacy_train.py:198`, `patch_multiprocessing.py:172`, `patch_refinegan_legacy_discriminator.py:221`, `patch_subprocess_validation.py:279`, `patch_version_checker.py:95`, `patch_train_44100.py:263`, `patch_process_tracking.py:663`, `patch_train_paths.py:117`. (Side effect, accepted: `patch_browse_buttons.apply()` also returns False for an unrecognized target path — the REPO-relpath guard at line 177 — which becomes exit 2; that guard can never fire inside the build loop, which always passes registered `tabs/…` paths.)
+- Multi-line literal `sys.exit(1)` MISS branches — change the `1` to `2`: `patch_dataset_paths.py:229` (else of the `success1 or success2` check), `patch_progress_routes.py:64` (after a "Pattern not found" print), `patch_web_a11y_payload.py:89` (same).
+- Multi-line literal `sys.exit(1)` FILE-NOT-FOUND guards (`if not file_path.exists():`) — change the `1` to `2` (a missing source file in the build is a hard error, same fatality as a miss; NOT a usage guard): `patch_multiprocessing.py:169`, `patch_train_44100.py:260`.
+- Usage guards (`if len(sys.argv) < 2: ... sys.exit(1)`) — KEEP at `1`: `patch_inference_progress.py:325`, `patch_refinegan_legacy_infer.py:182`, `patch_refinegan_legacy_train.py:195`, `patch_refinegan_legacy_discriminator.py:217`, `patch_stop_infer.py:101`, `patch_refinegan_legacy.py:104`.
 - DO NOT TOUCH: `patch_refinegan_legacy_train.py:102` and `:175` (`sys.exit(1)"""` — inside injected triple-quoted code), `patches/download_pretraineds.py` (downloader, own invocation at `build_macos.py:471`).
-- **Classification rule for every site:** usage guard (an `argv`/`argc` check within the previous ~4 lines) → keep 1; anchor/pattern miss (after a "Pattern not found"/"patch failed" print, or the failure branch of a success check) → 2; inside a triple-quoted string → untouched. Also update each patcher's docstring "Exit codes:" line (e.g. `patch_browse_buttons.py:19`) to `0 patched/already, 2 anchor miss`.
+- **Classification rule for every site:** usage guard (an `argv`/`argc` check within the previous ~4 lines) → keep 1; anchor/pattern miss (after a "Pattern not found"/"patch failed" print, the failure branch of a success check, or a file-not-found guard) → 2; inside a triple-quoted string → untouched. Also update each patcher's docstring "Exit codes:" line (e.g. `patch_browse_buttons.py:19`) to `0 patched/already, 2 anchor miss`.
+- **Benign-nonzero proof (the fail-on-nonzero loop is safe):** simulated 2026-08-21 by running EVERY registrable patcher against a `/tmp` copy of its pristine source with the same argument the build passes (dir or file), then re-running on the patched output — all 27 simulable registrations returned `0` on BOTH runs (`patch_browse_buttons` cannot be simulated off-repo because of its relpath guard, but every historical build passing with it registered is equivalent evidence). No patcher legitimately exits nonzero in a healthy build; the `success1 or success2` shape in `patch_dataset_paths` is noted below as a residual soft spot.
 
 **Acceptance Criteria:**
 - [ ] Every `patches/patch_*.py` exits `2` on anchor miss and `0` on patched/already; usage guards still exit `1`.
 - [ ] `build_macos.py`'s patch loop: exit `0` tolerated; ANY other code (2 = anchor miss, 1/3+ = crash or usage) is collected and the build FAILS after the loop with a message naming every failing patcher and pointing at CLAUDE.md's "Re-pointing patches after an upstream sync".
+- [ ] The two silent `SKIPPED` paths (patcher not found / source file not found) are ALSO collected as failures instead of `continue`-ing silently.
 - [ ] The stale comment `# 0 = patched, 1 = already patched` is replaced with accurate text.
 - [ ] CLAUDE.md's re-pointing section documents the new convention.
 - [ ] Behavioral test: 3 representative patchers against temp copies → pristine exit 0, re-run exit 0, mutated anchor exit 2.
@@ -710,13 +742,21 @@ import tempfile
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
-# (patcher, source file, anchor text to mutate). "file"-type arg unless the
-# patcher needs the directory -- both included to cover both conventions.
+# (patcher, source file, anchor text to mutate, arg convention). Arg
+# conventions verified against each patcher's __main__:
+#   "file" -> patcher takes the SOURCE FILE path (arbitrary location OK);
+#   "dir"  -> patcher takes the DIRECTORY and joins a fixed filename inside
+#             it (patch_train_paths looks for <base>/train.py).
+# patch_browse_buttons is deliberately NOT a case: apply() rejects any target
+# whose path relative to the REPO is not a registered tabs/... file (line
+# 177), so it cannot be exercised on a temp copy at all.
 CASES = [
-    ("patches/patch_progress_routes.py", "app.py", "prevent_thread_lock="),
-    ("patches/patch_browse_buttons.py", "tabs/train/train.py", "dataset_path"),
-    ("patches/patch_train_paths.py", "tabs/train/train.py", "dataset_path"),
+    ("patches/patch_progress_routes.py", "app.py", "prevent_thread_lock=", "file"),
+    ("patches/patch_web_a11y_payload.py", "app.py", "def launch_gradio(", "file"),
+    ("patches/patch_train_paths.py", "rvc/train/train.py", "current_dir = os.getcwd()", "dir"),
 ]
+# All three anchors occur EXACTLY ONCE in their pristine source (verified
+# 2026-08-21) — replace-all is still used defensively below.
 
 EXEMPT = {"download_pretraineds.py"}  # downloader, not an anchor patcher
 
@@ -728,13 +768,14 @@ def _run(patcher, target):
 
 
 def test_patcher_exit_codes_behavioral():
-    for patcher, source, anchor in CASES:
+    for patcher, source, anchor, convention in CASES:
         tmp = tempfile.mkdtemp()
         dst = os.path.join(tmp, os.path.basename(source))
         shutil.copy(os.path.join(REPO, source), dst)
-        first = _run(patcher, dst)
+        arg = dst if convention == "file" else tmp
+        first = _run(patcher, arg)
         assert first.returncode == 0, (patcher, first.returncode, first.stdout)
-        again = _run(patcher, dst)  # already-patched input
+        again = _run(patcher, arg)  # already-patched input
         assert again.returncode == 0, (patcher, again.returncode, again.stdout)
         # Mutate the anchor in a FRESH copy -> miss -> exit 2.
         shutil.copy(os.path.join(REPO, source), dst)
@@ -742,8 +783,8 @@ def test_patcher_exit_codes_behavioral():
             content = fh.read()
         assert anchor in content, (patcher, anchor)
         with open(dst, "w", encoding="utf8") as fh:
-            fh.write(content.replace(anchor, anchor + "_MUTATED", 1))
-        miss = _run(patcher, dst)
+            fh.write(content.replace(anchor, anchor + "_MUTATED"))
+        miss = _run(patcher, arg)
         assert miss.returncode == 2, (patcher, miss.returncode, miss.stdout)
 
 
@@ -779,17 +820,26 @@ if __name__ == "__main__":
     run_all()
 ```
 
-NOTE on CASES: `patch_progress_routes.py` is registered as "file"-type and takes the file path; `patch_browse_buttons`/`patch_train_paths` are "dir"-type — passing the FILE path works for them too because they resolve `os.path.join(base, filename)` from the argument's directory ONLY when given a dir; CHECK each patcher's `__main__` arg handling first and, where a patcher requires the directory, copy the source into `tmp/<original-parent-name>/<basename>` and pass `tmp/<original-parent-name>` instead. If a chosen CASE patcher's conventions make this awkward, substitute another patcher from the inventory — keep exactly 3 covering both arg types. If the anchor text appears multiple times, mutate ALL occurrences (`.replace(anchor, anchor + "_MUTATED")` without the count) to guarantee the miss.
+(Both app.py CASES live in SEPARATE `tempfile.mkdtemp()` trees so the two patchers' outputs cannot contaminate each other. If a CASE patcher's conventions ever drift, substitute another patcher from the inventory — keep exactly 3 covering both arg conventions.)
 
 - [ ] **Step 2: Run to verify failure** — behavioral cases exit 1 (not 2) on miss; source-scan lists the multi-line miss sites.
 
-- [ ] **Step 3: Implement** — apply the exit-site inventory classification across `patches/patch_*.py`; update docstring Exit-codes lines. In `build_macos.py`, replace the loop tail (lines 974-975) and add collection — final shape:
+- [ ] **Step 3: Implement** — apply the exit-site inventory classification across `patches/patch_*.py`; update docstring Exit-codes lines. In `build_macos.py`'s `pre_build_patch()` (loop head at line 943, tail at 971-977), ALSO convert the two silent `SKIPPED … continue` paths (patcher not found at ~944-946, source file not found at ~948-950) into collected failures — a missing patcher or source is the same silent-skip class as an anchor miss (all 33 registrations exist in the healthy tree, verified by the simulation above, so this cannot fire spuriously). Final shape of the loop region:
 
 ```python
     patch_failures = []  # (description, exit code) — any nonzero fails the build
 
     for patcher_path, source_file, description, patcher_type in patches_to_apply:
-        ...existing body...
+        if not os.path.exists(patcher_path):
+            patch_failures.append((description, "patcher not found"))
+            continue
+
+        if not os.path.exists(source_file):
+            patch_failures.append((description, "source file not found"))
+            continue
+
+        # ...unchanged: patched_files capture + patcher_arg resolution...
+
         result = subprocess.run(
             [sys.executable, patcher_path, patcher_arg], capture_output=True, text=True
         )
@@ -798,16 +848,15 @@ NOTE on CASES: `patch_progress_routes.py` is registered as "file"-type and takes
             if line:
                 print(f"    {line}")
 
-        if result.returncode == 0:
-            pass  # 0 = patched or already applied
-        else:
-            # 2 = anchor miss (upstream moved the anchor); anything else is a
-            # crash or invocation failure. Both ship a broken app if skipped.
-            patch_failures.append((description, result.returncode))
+        if result.returncode != 0:
+            # 0 = patched or already applied. 2 = anchor miss (upstream moved
+            # the anchor); anything else is a crash or invocation failure.
+            # Both ship a broken app if skipped.
+            patch_failures.append((description, str(result.returncode)))
 
     if patch_failures:
-        for description, code in patch_failures:
-            print(f"  PATCH FAILURE: {description} (exit {code})")
+        for description, why in patch_failures:
+            print(f"  PATCH FAILURE: {description} ({why})")
         raise SystemExit(
             "Patchers failed (anchor miss = exit 2, see CLAUDE.md "
             "'Re-pointing patches after an upstream sync')."
@@ -815,6 +864,8 @@ NOTE on CASES: `patch_progress_routes.py` is registered as "file"-type and takes
 
     return patched_files
 ```
+
+`pre_build_patch()` is called at module level (`build_macos.py:1010`, before `PyInstaller.__main__.run` at :1014), so the `SystemExit` kills the process BEFORE any PyInstaller work. The `PATCH_DEPENDENCIES` validation block above the loop is untouched.
 
 Update `CLAUDE.md`'s "Re-pointing patches after an upstream sync" bullet to record: patchers exit `0` (patched/already) or `2` (anchor miss); the build fails on any nonzero exit listing all failures; usage guards exit `1` but never fire in the build loop.
 
@@ -837,9 +888,9 @@ Update `CLAUDE.md`'s "Re-pointing patches after an upstream sync" bullet to reco
 - `applio_launcher.py`: `"Running"` (1189), `"Completed"` (2047-2049), `"Pause"` / `"Status: Running"` / `"Running"` / `"Paused"` badge+labels (2201-2218), `"Error"` (2231), `{"running": "Running", "cancelling": "Stopping…"}` (3365), `"Stopping…"` (3567, 3593), `"Paused" if … else "Running"` (3619), status-title map values `{"completed": "Completed", "failed": "Failed", "error": "Failed", "cancelled": "Cancelled", "canceled": "Cancelled", "interrupted": "Interrupted"}` (3844-3851), About alert informative lines (5808-5814: `"Voice Conversion Application"`, `"Based on RVC (Retrieval-Based Voice Conversion)"`, `"Native macOS port by Frédéric Guigand"`, `"© 2024-2026 IA Hispano"`).
 
 **Acceptance Criteria:**
-- [ ] Every listed literal is wrapped so `native_tr` receives it (or its format template, e.g. `_t("Fetching {name}").format(name=basename)`) at render/call time — lazy `import applio_i18n` / `_t = applio_i18n.native_tr` inside the function, per the pattern at `applio_launcher.py:5836-5838`. Status-map VALUES are translated where the map is built (raw status strings stay the KEYS); `'failed'` and `'error'` collapse to the SAME translated word so one override covers both.
+- [ ] Every listed literal is wrapped so `native_tr` receives it (or its format template, e.g. `_t("Fetching {basename}").format(basename=os.path.basename(fname))`) at render/call time — lazy `import applio_i18n` / `_t = applio_i18n.native_tr` inside the function, per the pattern at `applio_launcher.py:5836-5838` (macos_wrapper.py already uses the same shape — quit dialog at :402-416, data-location panel at :561-564). Status-map VALUES are translated where the map is built (raw status strings stay the KEYS); `'failed'` and `'error'` collapse to the SAME translated word so one override covers both.
 - [ ] With no overrides file, behavior is byte-identical to today (English keys returned unchanged).
-- [ ] New cluster-keys test passes: (a) an overrides tree translating 4+ sample cluster strings returns them via `native_tr`; (b) a source scan asserts every listed literal still appears in its owning file (guards key drift).
+- [ ] New cluster-keys test passes, and its WRAPPED-FORM assertions are the genuine pre-implementation failing signal: (a) an overrides tree translating sample cluster strings returns them via `native_tr`; (b) a source scan asserts every listed literal still appears verbatim in its owning file (guards key drift); (c) a source scan asserts the WRAPPED form `_t("…")` exists for representative sites — this fails before wrapping (the literals exist today but unwrapped) and passes after. (A bare `_t(`-count assertion would NOT work: `macos_wrapper.py` ALREADY has 17 `_t(` / 6 `native_tr` matches and `applio_launcher.py` 12/4 from earlier phases — a count threshold passes pre-implementation and proves nothing.)
 - [ ] Suites: `test_applio_i18n.py` prints `(9)`; `test_applio_a11y.py` still 17; `test_menu_spec.py` still 15.
 
 **Verify:** `venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python tests/test_applio_a11y.py` → `(9)` and `(17)`.
@@ -855,6 +906,19 @@ CLUSTER_KEYS = [
     ("applio_launcher.py", "Status: Running"),
     ("applio_launcher.py", "Stopping…"),
     ("applio_launcher.py", "Based on RVC (Retrieval-Based Voice Conversion)"),
+]
+
+# Wrapped-form expectations: (file, snippet that must exist after wrapping).
+# This is the FAILING half of the test pre-implementation.
+WRAPPED_FORMS = [
+    ("macos_wrapper.py", '_t("Initializing environment...")'),
+    ("macos_wrapper.py", '_t("Loading Neural Networks...")'),
+    ("macos_wrapper.py", '_t("Launching User Interface...")'),
+    ("applio_launcher.py", '_t("Status: Running")'),
+    ("applio_launcher.py", '_t("Pause")'),
+    ("applio_launcher.py", '_t("Stopping…")'),
+    ("applio_launcher.py", '_t("Failed")'),
+    ("applio_launcher.py", '_t("Voice Conversion Application")'),
 ]
 
 
@@ -873,36 +937,23 @@ def test_native_clusters_translatable_and_stable():
     tr = applio_i18n.NativeI18n(base_paths=[tmp])
     assert tr("Initializing environment...") == "Inicializando entorno..."
     assert tr("Loading Neural Networks...") == "Cargando redes neuronales..."
-    # Source-scan: the cluster literals stay verbatim in their owning files so
-    # the keys (and any overrides written against them) never drift.
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # (b) raw literals stay verbatim in their owning files so the keys (and
+    # any overrides written against them) never drift.
     for fname, literal in CLUSTER_KEYS:
         with open(os.path.join(repo, fname), encoding="utf8") as fh:
             assert literal in fh.read(), f"{fname} lost key {literal!r}"
+    # (c) the wrapping itself exists — representative sites in wrapped form.
+    for fname, snippet in WRAPPED_FORMS:
+        with open(os.path.join(repo, fname), encoding="utf8") as fh:
+            assert snippet in fh.read(), f"{fname} missing wrapped form {snippet!r}"
 ```
 
 Register in `run_all()`, bump count to `(9)`.
 
-- [ ] **Step 2: Run to verify failure** — the source-scan branch fails for the not-yet-wrapped literals is NOT how it fails (the literals exist today); it fails only if wrapping REWRITES them. So: run the test — it should PASS pre-implementation for the scan, and the overrides assertions pass only if `_make_tree("en_US")` + overrides work (they do). THEREFORE the meaningful failing signal is different: before wrapping, `native_tr` never receives these keys, which this test cannot see directly. Add the load-bearing assertion — after Step 3 lands, grep-verify wrapping:
+- [ ] **Step 2: Run to verify failure** — the `(c)` WRAPPED_FORMS assertions fail (literals exist but unwrapped); `(a)` and `(b)` pass both before and after by design (`(b)` is the key-drift guard, `(a)` proves the overrides plumbing).
 
-```bash
-rg -c "native_tr|_t\(" macos_wrapper.py applio_launcher.py
-```
-
-Before Step 3: `macos_wrapper.py` shows 0 matches (that IS the failing signal; record it). Adjust the test to ALSO assert wrapping exists (source scan for `_t(` usage count ≥ 10 in each file):
-
-```python
-    for fname in ("macos_wrapper.py", "applio_launcher.py"):
-        with open(os.path.join(repo, fname), encoding="utf8") as fh:
-            src = fh.read()
-        assert src.count("_t(") >= 10 or src.count("native_tr") >= 10, (
-            f"{fname}: cluster strings not routed through native_tr"
-        )
-```
-
-Now Step 2 genuinely fails (macos_wrapper has no `_t(` today).
-
-- [ ] **Step 3: Implement** — wrap every site in the list. Representative transformations (apply the same shape everywhere):
+- [ ] **Step 3: Implement** — wrap every English user-visible literal inside the listed line ranges (including the ones the site list abbreviates: `"Resume"`, `"Status: Paused"`, `"Status: Completed"`, `"Status: Error controlling process"`, `"Unknown"`). Do NOT wrap log-file lines (`_add_log_line(...)` payloads) or `_announce_for_accessibility` payloads — those flow through `AnnouncementPolicy`'s own translator (wired at `applio_launcher.py:4777-4780`) and double-wrapping would corrupt the keys. Representative transformations (apply the same shape everywhere):
 
 ```python
 # macos_wrapper.py loading stage (was: self.sub_heading = "Initializing environment...")
@@ -913,8 +964,8 @@ self.technical_detail = _t("Allocating memory...")
 ```
 
 ```python
-# Formatted stage (was: f"Fetching {basename}" / "Fetching {basename}".format(...)):
-stage = _t("Fetching {basename}").format(basename=basename)
+# Formatted stage (was: self.sub_heading = f"Fetching {os.path.basename(fname)}"):
+self.sub_heading = _t("Fetching {basename}").format(basename=os.path.basename(fname))
 ```
 
 ```python
@@ -939,14 +990,17 @@ TITLES = {
 ```
 
 ```python
-# About alert (5808-5814):
-informative = "\n".join([
-    _t("Voice Conversion Application"),
-    _t("Based on RVC (Retrieval-Based Voice Conversion)"),
-    "",
-    _t("Native macOS port by Frédéric Guigand"),
-    _t("© 2024-2026 IA Hispano"),
-])
+# About alert (5806-5813) — the Version line is NOT translated and stays first:
+alert.setInformativeText_(
+    f"Version {version}\n\n"
+    + "\n".join([
+        _t("Voice Conversion Application"),
+        _t("Based on RVC (Retrieval-Based Voice Conversion)"),
+        "",
+        _t("Native macOS port by Frédéric Guigand"),
+        _t("© 2024-2026 IA Hispano"),
+    ])
+)
 ```
 
 The `_t = applio_i18n.native_tr` import goes at the TOP of each function that uses it (lazy — `applio_i18n` is AppKit-free so import order is safe, but keep the established call-time pattern). Where a literal appears inside an f-string with variables, translate the TEMPLATE then `.format(...)` — never translate the concatenated result.
@@ -990,11 +1044,11 @@ The `_t = applio_i18n.native_tr` import goes at the TOP of each function that us
 - No source modifications (validation only). Build artifacts under `build/`, `dist/` (gitignored).
 
 **Acceptance Criteria:**
-- [ ] All 9 script suites green: `test_applio_a11y` (17), `test_menu_spec` (15), `test_native_picker` (3), `test_browse_ui` (8), `test_progress_api` (11), `test_patch_fixtures` (5), `test_applio_i18n` (9), `test_a11y_js_invariants` (2), `test_patcher_exit_codes` (2), plus `-m pytest tests/test_inference_progress.py` (5) — 77 total (adjust the expected total if implementation legitimately shifted a count; report any shift).
+- [ ] All 9 script suites green: `test_applio_a11y` (17), `test_menu_spec` (15), `test_native_picker` (3), `test_browse_ui` (9), `test_progress_api` (11), `test_patch_fixtures` (5), `test_applio_i18n` (9), `test_a11y_js_invariants` (2), `test_patcher_exit_codes` (2), plus `-m pytest tests/test_inference_progress.py` (5) — 78 total (17+15+3+9+11+5+9+2+2+5; adjust the expected total if implementation legitimately shifted a count; report any shift).
 - [ ] `venv_macos/bin/python build_macos.py` (cert-free smoke) completes with `BUILD COMPLETE`, as the FINAL command of a background run (no trailing `echo` masking the exit code), and the log shows every `Patching:` line with no `PATCH FAILURE`.
 - [ ] Post-build: `git status` shows no upstream files with patch markers; restore with `git checkout -- assets core.py rvc tabs app.py` if `tabs/train/train.py` or others are dirty (known behavior).
 - [ ] Bundle checks: `stat -f "%Sm" dist/Applio.app/Contents/MacOS/Applio` timestamp AFTER the last commit; `dist/Applio.app/Contents/Resources/assets/applio_a11y.js` contains `failedTail` and `#browse-record_audio_path`.
-- [ ] Boot smoke: launch `dist/Applio.app`, find the gradio port in `~/Library/Logs/Applio/applio_launcher.log`, `curl -s "http://127.0.0.1:<port>/applio-a11y/progress?client=web"` returns JSON containing `"errors"`, quit via `osascript -e 'tell application "Applio" to quit'`.
+- [ ] Boot smoke: launch `dist/Applio.app`, wait for the backend (the port is FIXED — `macos_wrapper.py:1167-1168` sets `server_host = "127.0.0.1"`, `server_port = 6969`; no log scraping needed; poll with a short bash retry loop, macOS has no `timeout`), then `curl -s "http://127.0.0.1:6969/applio-a11y/progress?client=web"` returns JSON containing `"errors"`; quit via `osascript -e 'tell application "Applio" to quit'`. (If 6969 never responds, THEN check `~/Library/Logs/Applio/applio_launcher.log` for a bind failure — EADDRINUSE fails fast per the supervisor.)
 - [ ] No pushes, no PRs, no tags (hard gate — branch stays local).
 
 **Verify:** the suite commands + build command below, all green/complete.
@@ -1026,9 +1080,10 @@ venv_macos/bin/python build_macos.py
 
 ---
 
-## Self-Review (completed at write time)
+## Self-Review (updated at final-review time)
 
 1. **Spec coverage:** audit §7 additions — patcher exit codes (T6), aria-pressed scoping (T2), i18n guards (T1), word-map unification (T3), English clusters (T7) ✓; Phase 2 deferrals — log-tail surfacing (T4), typed-path validation (T5) ✓; docs (T8) + whole-branch validation (T9) ✓. Out of scope by recorded decision: upstream Applio/gradio PRs (separate post-pass plan).
-2. **Placeholder scan:** no TBD/TODO; every code step carries real code; Task 6's CASES carries a verified fallback instruction (substitute patchers / handle dir-type args) rather than a blank.
-3. **Type consistency:** `terminal_words_from_history(entries)` defined in T3 and consumed by T3 (both call sites) and referenced by T4's neighborhood (no signature drift); `attach_path_validation(target, mode)` defined in T5 and emitted by T5's patcher template only; `failedTail(errors, job)` defined and used within T4's JS edits; `errors=None` param on `build_progress_payload` introduced in T4 and asserted in T4's tests.
-4. **Known deliberate roughness:** Task 6's per-site line numbers are a verified snapshot — the classification RULE governs if lines drift; Task 7's test initially passes its scan half (documented, with the added wrapping-count assertion as the real failing signal).
+2. **Placeholder scan:** no TBD/TODO; every code step carries real code; Task 6's CASES patchers/anchors are individually verified (each anchor occurs exactly once in its pristine source; both arg conventions covered; `patch_browse_buttons` excluded because its REPO-relpath guard makes off-repo testing impossible).
+3. **Type consistency:** `terminal_words_from_history(entries)` defined in T3 and consumed by T3 (both call sites); `attach_path_validation(target, mode)` defined in T5, emitted by T5's patcher template only, and proven against the real gradio API by T5's wiring test (both `Textbox` and `Dropdown` list `Events.blur`); `failedTail(errors, job)` defined and used within T4's JS edits; `errors=None` param on `build_progress_payload` introduced in T4 and asserted in T4's tests.
+4. **Verified against the installed stack (2026-08-21, final review):** gradio 6.20.0 `.form` class real / `gradio-column` nonexistent / Column renders `div.column` (→ T2 scopes via `.gr-accordion`); every registered patcher exits 0 on pristine AND already-patched temp-copy inputs (→ T6's fail-on-nonzero cannot break a healthy build); `macos_wrapper.py` already contains `_t(` usage (→ T7's failing signal is the wrapped-FORM scan, not a count); gradio port fixed at 127.0.0.1:6969 (→ T9's boot smoke curls it directly).
+5. **Known deliberate roughness:** Task 6's per-site line numbers are a verified snapshot — the classification RULE governs if lines drift; `patch_dataset_paths.py`'s `success1 or success2` means a single-file anchor miss still exits 0 if the OTHER file patched (pre-existing shape, noted as residual; tightening it to `and` is a one-line follow-up if a sync ever trips it); Task 5's fixture-suite `count("_applio_browse_") == len(fields)` invariant is documented in the AC so the validation line can never reintroduce that substring.
