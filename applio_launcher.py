@@ -2029,6 +2029,7 @@ class ProgressWindowController:
             current_status = self.status_label.stringValue()
             if "Running" in current_status or "Paused" in current_status:
                 self.status_label.setStringValue_("Status: Completed")
+                self.status_badge.setStringValue_("Completed")
                 if self._total_epoch:
                     self.progress_bar.setDoubleValue_(self._total_epoch)
                 else:
@@ -2125,6 +2126,7 @@ class ProgressWindowController:
             try:
                 psutil.Process(pid).terminate()
                 self.status_label.setStringValue_("Status: Terminated")
+                self.status_badge.setStringValue_("Terminated")
                 self._add_log_line(
                     f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process terminated by user"
                 )
@@ -2141,6 +2143,7 @@ class ProgressWindowController:
             except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError) as e:
                 logging.warning(f"[ProgressWindow] Could not terminate process: {e}")
                 self.status_label.setStringValue_("Status: Already terminated")
+                self.status_badge.setStringValue_("Already terminated")
 
     def togglePause_(self, sender):
         """Toggle pause/resume."""
@@ -2155,6 +2158,7 @@ class ProgressWindowController:
                 self.pause_btn.setTitle_("Pause")
                 self.pause_btn.setAccessibilityLabel_("Pause process")
                 self.status_label.setStringValue_("Status: Running")
+                self.status_badge.setStringValue_("Running")
                 self._add_log_line(
                     f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process resumed"
                 )
@@ -2168,6 +2172,7 @@ class ProgressWindowController:
                 self.pause_btn.setTitle_("Resume")
                 self.pause_btn.setAccessibilityLabel_("Resume process")
                 self.status_label.setStringValue_("Status: Paused")
+                self.status_badge.setStringValue_("Paused")
                 self._add_log_line(
                     f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process paused"
                 )
@@ -2180,6 +2185,7 @@ class ProgressWindowController:
         except (ProcessLookupError, PermissionError, OSError) as e:
             logging.warning(f"[ProgressWindow] Could not toggle pause: {e}")
             self.status_label.setStringValue_("Status: Error controlling process")
+            self.status_badge.setStringValue_("Error")
 
     def openLogsFolder_(self, sender):
         """Open logs folder in Finder."""
@@ -2795,7 +2801,7 @@ class ProcessDashboardController(NSObject):
         self.detail_status.setBezeled_(False)
         self.detail_status.setDrawsBackground_(False)
         self.detail_status.setEditable_(False)
-        self.detail_status.setStringValue_("No process selected")
+        self._set_detail_status("No process selected", badge_text="Idle")
         self.detail_status.setAccessibilityLabel_("Process status")
         self.detail_panel.contentView().addSubview_(self.detail_status)
 
@@ -2954,6 +2960,21 @@ class ProcessDashboardController(NSObject):
         # Initially hidden
         self.detail_panel.setHidden_(True)
 
+    def _set_detail_status(self, display, badge_text=None):
+        """Single choke point for every detail-status write.
+
+        Writes the status line and, when this controller has a status badge,
+        the badge together so the two can never drift apart. ``badge_text``
+        overrides the badge string when it should differ from the status
+        line (e.g. the idle default).
+        """
+        if hasattr(self, "detail_status") and self.detail_status:
+            self.detail_status.setStringValue_(display)
+        if hasattr(self, "status_badge") and self.status_badge:
+            self.status_badge.setStringValue_(
+                badge_text if badge_text is not None else display
+            )
+
     def _update_detail_panel(self):
         """Update detail panel with selected process info.
 
@@ -3067,7 +3088,7 @@ class ProcessDashboardController(NSObject):
                     status_text = f"{status.title()} - {phase}"
                 else:
                     status_text = status.title()
-                self.detail_status.setStringValue_(status_text)
+                self._set_detail_status(status_text)
 
             # --- Real training metrics, parsed live from the run's training.log ---
             # training.log holds epoch/step/loss/speed per epoch. The legacy
@@ -3112,6 +3133,14 @@ class ProcessDashboardController(NSObject):
                 if hasattr(self, "detail_progress_text") and self.detail_progress_text:
                     self.detail_progress_text.setStringValue_(pct_txt)
 
+            # Re-assert the training labels: an inference row may have
+            # repurposed these outlets, so every training write restores them.
+            if hasattr(self, "detail_best_label") and self.detail_best_label:
+                self.detail_best_label.setAccessibilityLabel_("Best epoch and its loss")
+            if hasattr(self, "detail_current_label") and self.detail_current_label:
+                self.detail_current_label.setAccessibilityLabel_(
+                    "Current epoch, step and training speed"
+                )
             # Best epoch + loss headline (green) - the inference-relevant number
             if hasattr(self, "detail_best_label") and self.detail_best_label:
                 if metrics and metrics.get("best_epoch") is not None:
@@ -3274,7 +3303,7 @@ class ProcessDashboardController(NSObject):
                 status, status.title()
             )
             if hasattr(self, "detail_status") and self.detail_status:
-                self.detail_status.setStringValue_(label)
+                self._set_detail_status(label)
             # Normalize a history entry for compute_inference_stats: history
             # rows store started_at/completed_at as ISO strings and omit
             # processed/ended_at. Work on a copy so the stored entry is untouched.
@@ -3312,6 +3341,15 @@ class ProcessDashboardController(NSObject):
             if hasattr(self, "detail_progress_text") and self.detail_progress_text:
                 self.detail_progress_text.setStringValue_(
                     f"{processed}/{total} files ({stats['pct']}%)"
+                )
+            # Inference repurposes the training outlets: re-label them for
+            # VoiceOver before writing values (the training render path
+            # re-asserts its own labels, so switching row types self-corrects).
+            if hasattr(self, "detail_best_label") and self.detail_best_label:
+                self.detail_best_label.setAccessibilityLabel_("Conversion speed")
+            if hasattr(self, "detail_current_label") and self.detail_current_label:
+                self.detail_current_label.setAccessibilityLabel_(
+                    "Converted, skipped and current file"
                 )
             if hasattr(self, "detail_current_label") and self.detail_current_label:
                 cur = proc.get("current_file", "")
@@ -3392,6 +3430,7 @@ class ProcessDashboardController(NSObject):
                 # Pause is meaningless for an in-process batch (no PID to SIGSTOP)
                 self.pause_btn.setEnabled_(False)
                 self.pause_btn.setTitle_("Pause")
+                self.pause_btn.setAccessibilityLabel_("Pause")
             if hasattr(self, "reveal_btn") and self.reveal_btn:
                 self.reveal_btn.setEnabled_(has_output)
             if hasattr(self, "open_btn") and self.open_btn:
@@ -3411,7 +3450,9 @@ class ProcessDashboardController(NSObject):
             self.stop_btn.setEnabled_(pid_alive)
         if hasattr(self, "pause_btn") and self.pause_btn:
             self.pause_btn.setEnabled_(pid_alive)
-            self.pause_btn.setTitle_("Resume" if is_stopped else "Pause")
+            new_title = "Resume" if is_stopped else "Pause"
+            self.pause_btn.setTitle_(new_title)
+            self.pause_btn.setAccessibilityLabel_(new_title)
 
         has_log = bool(self._resolve_log_path(proc))
         if hasattr(self, "reveal_btn") and self.reveal_btn:
@@ -3437,7 +3478,7 @@ class ProcessDashboardController(NSObject):
                 os.makedirs(os.path.dirname(flag), exist_ok=True)
                 Path(flag).touch()
                 if hasattr(self, "detail_status") and self.detail_status:
-                    self.detail_status.setStringValue_("Stopping…")
+                    self._set_detail_status("Stopping…")
                 if hasattr(self, "stop_btn") and self.stop_btn:
                     self.stop_btn.setEnabled_(False)
                 logging.info("[Dashboard] Wrote inference cancel flag")
@@ -3463,7 +3504,7 @@ class ProcessDashboardController(NSObject):
             if hasattr(self, "pause_btn") and self.pause_btn:
                 self.pause_btn.setEnabled_(False)
             if hasattr(self, "detail_status") and self.detail_status:
-                self.detail_status.setStringValue_("Stopping…")
+                self._set_detail_status("Stopping…")
         except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError) as e:
             logging.warning(f"[Dashboard] Could not stop process: {e}")
 
@@ -3482,14 +3523,14 @@ class ProcessDashboardController(NSObject):
             os.kill(pid, signal.SIGCONT if is_stopped else signal.SIGSTOP)
             now_stopped = not is_stopped
             if sender is not None and hasattr(sender, "setTitle_"):
-                sender.setTitle_("Resume" if now_stopped else "Pause")
+                new_title = "Resume" if now_stopped else "Pause"
+                sender.setTitle_(new_title)
+                sender.setAccessibilityLabel_(new_title)
             logging.info(
                 f"[Dashboard] Process pid {pid} {'paused' if now_stopped else 'resumed'}"
             )
             if hasattr(self, "detail_status") and self.detail_status:
-                self.detail_status.setStringValue_(
-                    "Paused" if now_stopped else "Running"
-                )
+                self._set_detail_status("Paused" if now_stopped else "Running")
         except (ProcessLookupError, PermissionError, OSError) as e:
             logging.warning(f"[Dashboard] Could not toggle pause: {e}")
 
