@@ -671,6 +671,29 @@ All 15 plan tasks + final whole-branch review + fix wave complete. Cert-free bui
 6. **Dialogs**: Enter on quit confirm must NOT terminate; Escape dismisses update alerts; first-open focus lands on the dashboard table.
 7. **Braille** (if available): repeat 1 + 4; note churn/panning problems.
 
+### Checklist results (user run, Phase 1 build, 2026-08-21)
+1. Clipboard — OK.
+2. Boot with VoiceOver — OK.
+3. Tab traversal — OK.
+4. Job run — **FAILED: no announcements at job start or finish.** Not yet bisected
+   (engine vs. VoiceOver routing): unknown whether `[A11y] start:`/`terminal:` lines were in
+   `applio_launcher.log` at the time. Leading hypothesis (§6, SO 57045146): the posting element
+   must be focused or an ancestor of the focused element — with the VO cursor inside the
+   WKWebView content, a native announcement posted from window-level context is ignored by
+   VoiceOver. Secondary: VO not running at that moment (native announcements only speak under
+   VO), or the job type wasn't heartbeat-tracked. **Phase 2 did not change the native
+   announcement path, so this is NOT auto-resolved** — the Phase 2 manual pass re-tests with a
+   bisecting procedure: (a) confirm VO running, (b) `grep A11y` the launcher log during a batch
+   (lines present = engine works → routing bug; absent = engine bug), (c) spoken with VO cursor
+   in web content vs. on native chrome. If routing: fix = post from (or re-focus through) the
+   WKWebView element.
+5. Toast catching — user noticed no toast-caching problem; completion audibility effectively
+   untested given step 4's silence. Phase 2's web "Last result" region is the designed remedy
+   for toast transience — verify in the Phase 2 pass.
+6. Dialogs — quit via menu exits the app (works). Enter-on-quit-confirm and
+   Escape-dismisses-update-alert sub-checks not clearly exercised — fold into the Phase 2 pass.
+7. Braille — untestable (no display available).
+
 ### Routed to the Phase 2 plan (final-review triage + observations)
 
 ### Phase 3 additions born during Phase 2 execution (2026-08-21, feat/a11y-phase2 final review)
