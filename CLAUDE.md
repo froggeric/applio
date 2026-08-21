@@ -47,8 +47,11 @@ docker run -p 6969:6969 applio
 
 ```
 app.py              # Main entry - Gradio web UI initialization
+applio_launcher.py  # Native app entry (single-process: menu + GUI + Gradio supervisor)
 core.py             # Core logic exports (inference, training, TTS)
-macos_wrapper.py    # macOS native wrapper (pywebview)
+macos_wrapper.py    # macOS native wrapper (pywebview; started by the launcher)
+patches/            # Build-time patchers applied to upstream sources, then restored
+menu_spec.py        # Native menu spec - one source of truth for both renderers
 tabs/               # Gradio UI tabs (inference/, train/, tts/, realtime/, etc.)
 rvc/                # Voice conversion engine
 ├── infer/          # Inference pipeline (VoiceConverter, Pipeline)
@@ -73,7 +76,9 @@ assets/
 | 44.1kHz patch | `patches/patch_train_44100.py` |
 | Code signing config | `assets/entitlements.plist` |
 | Fork differences | `FORK_DIFFERENCES.md` |
-| Main entry point | `app.py` |
+| Gradio web UI entry | `app.py` |
+| Native app entry (dev + built app) | `applio_launcher.py` |
+| Native menu definition | `menu_spec.py` |
 | Core function exports | `core.py` |
 | Voice conversion logic | `rvc/infer/infer.py` (VoiceConverter class) |
 | Conversion pipeline | `rvc/infer/pipeline.py` (Pipeline class) |
@@ -120,7 +125,7 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 
 **Re-pointing patches after an upstream sync:**
 - Iterate WITHOUT a full build: `build_macos.py` runs the *entire* build at module level
-  (line ~677 `pre_build_patch()` → PyInstaller), so **never `import build_macos`** for testing.
+  (module-level `patched_files = pre_build_patch()` → PyInstaller), so **never `import build_macos`** for testing.
   Instead run each patcher directly, e.g. `venv_macos/bin/python patches/patch_X.py <arg>`,
   then `git checkout -- <source>` to restore.
 - Each patcher prints `Pattern not found` / `patch failed` when upstream changed its anchor;
@@ -139,6 +144,8 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 - `assets/entitlements.plist`
 - `patches/`, `macos_wrapper.py`, `build_macos.py`, `Applio.spec`
 - `menu_spec.py`, `applio_update_check.py`, `tests/test_menu_spec.py`, `STUDIO_PRODUCTION_GUIDE.html`
+- `applio_launcher.py`, `applio_inference_stats.py`, `tests/test_inference_progress.py`,
+  `DEBUGGING_HISTORY.md`, `CHANGELOG.md`
 - `install_applio_mac.sh`, `requirements_macos.txt`, `CLAUDE.md`
 - Fork-only additions also live INSIDE `rvc/`: `rvc/lib/algorithm/generators/refinegan_legacy.py`,
   `rvc/lib/tools/applio_paths.py`, `rvc/lib/tools/process_log_parser.py` (verify any path with the
@@ -346,7 +353,7 @@ history browsing.
 - All dialogs use native NSAlert/NSWindow/NSPanel instead of pywebview HTML
 - CRITICAL: Event loop choice matters - `AppHelper.runEventLoop()` for GUI apps with windows, NOT `runConsoleEventLoop()` (console tools only - causes window freeze)
 - NSAlert for confirmations, NSWindow for complex UIs, NSPanel for utility windows
-- Dialog classes: `AboutWindowController`, `ProgressWindowController` in `applio_launcher.py`
+- Dialog classes: `ProgressWindowController`, `ProcessDashboardController` in `applio_launcher.py` (About is a plain NSAlert via `_show_about_alert`; no AboutWindowController exists)
 - CRITICAL: PyObjC method names - `method:with:param:` becomes `method_with_param_` (colons→underscores, append trailing underscore), e.g., `systemFontOfSize:weight:` → `systemFontOfSize_weight_` NOT `systemFontOfSize_ofWeight_`
 - CRITICAL: NSBox doesn't have `setFillColor_()` in PyObjC - use bordered style or layer-based background instead
 - `addSubview:positioned:relativeTo:` → `addSubview_positioned_relativeTo_` (NOT `addSubview_positioned_relative_`)
@@ -396,6 +403,7 @@ history browsing.
 **Version management:**
 - Upstream renamed `assets/config.json` → `assets/config_template.json` (3.6.3) and now
   **gitignores `config.json`**; `app.py` creates `config.json` at runtime by copying the template.
+- Check upstream version: `git show upstream/main:assets/config_template.json | grep version`
 - At **build time** the template is the source of truth (`config.json` is gitignored + locally
   regenerated), so `build_macos.py` and `patches/patch_loading_html.py` read `config_template.json`
   FIRST, then fall back to `config.json` (reading config.json first would embed a stale dev-local
@@ -440,10 +448,6 @@ is NOT in `active_processes.json`. Tracked separately:
 - Delete release: `gh api repos/{owner}/{repo}/releases/{id} -X DELETE`
 - Delete a release ASSET: `gh api -X DELETE repos/{owner}/{repo}/releases/assets/{asset_id}` (path is `releases/assets/{asset_id}`, NOT `releases/{release_id}/assets/{id}`, which 404s)
 - **Manual release vs CI:** pushing a `v*` tag auto-runs `release-macos.yml` (build+sign+attach). If you cut a release MANUALLY (local signed DMG + curl upload), `gh run cancel <id>` the triggered run right after tagging; otherwise it clashes on the same asset name + bills macOS minutes
-
-**Version management:**
-- Check upstream version: `git show upstream/main:assets/config_template.json | grep version`
-- `build_macos.py` reads version from the config (template at build time) - keep both in sync
 
 ## Data Flow
 
