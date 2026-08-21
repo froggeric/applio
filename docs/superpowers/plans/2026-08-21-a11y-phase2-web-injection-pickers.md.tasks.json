@@ -48,9 +48,10 @@
     {
       "id": 6,
       "subject": "Task 6: applio_progress_api.py — progress payload, settings echo, nav-token hook",
-      "status": "pending",
+      "status": "completed",
       "description": "Pure payload/enrichment; __main__ launcher resolution; words map; log_file + seek tails; per-request owner; injectable clock; cached fallback; run_in_threadpool route; HIDDEN_IMPORTS incl. process_log_parser. See plan Task 6.",
-      "verifyCommand": "venv_macos/bin/python tests/test_progress_api.py"
+      "verifyCommand": "venv_macos/bin/python tests/test_progress_api.py",
+      "lastUpdated": "2026-08-21T18:02:46.784125"
     },
     {
       "id": 7,
