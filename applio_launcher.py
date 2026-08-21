@@ -64,6 +64,7 @@ from pathlib import Path
 from collections import deque
 import weakref
 import menu_spec
+import applio_a11y
 
 # Optional psutil for process verification
 try:
@@ -4585,6 +4586,7 @@ class ApplioLauncher:
         self.progress_window = None
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
+        self._a11y_policy = applio_a11y.AnnouncementPolicy()  # Job lifecycle announcements
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
         self._menu_handler = (
@@ -4945,6 +4947,7 @@ class ApplioLauncher:
                 self._dashboard_controller.update_process_list()
             except Exception as e:
                 logging.warning(f"[Launcher] dashboard heartbeat failed: {e}")
+        self._a11y_heartbeat()
 
     def _check_show_progress_monitor_signal(self):
         """Check if wrapper requested to show Progress Monitor via IPC.
@@ -5048,6 +5051,84 @@ class ApplioLauncher:
         sdl = self._find_item_by_key("file.set_data_location")
         if sdl is not None:
             sdl.setEnabled_(first_run)
+
+    # ---- Accessibility heartbeat (Phase 1: lifecycle announcements + dock badge) ----
+
+    def _a11y_snapshot(self):
+        """Current tracked-job snapshot for the announcement policy.
+
+        Sources are the module-level functions (verified scopes): subprocess
+        jobs from get_active_processes(), the in-app batch from
+        _synthesize_inference_proc() — disjoint, no dedupe. Keys are
+        type:name so two jobs sharing a model name (e.g. preprocess vs
+        training) are tracked independently. Paused is derived per-proc via
+        psutil because active_processes.json keeps SIGSTOPped jobs "running".
+        """
+        snap = {}
+        for proc in get_active_processes():
+            name = (proc.get("model_name") or "").strip() or str(proc.get("pid"))
+            status = "running"
+            pid = proc.get("pid")
+            if pid and PSUTIL_AVAILABLE:
+                try:
+                    if psutil.Process(pid).status() == psutil.STATUS_STOPPED:
+                        status = "paused"
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            snap[f"{proc.get('type', 'process')}:{name}"] = {
+                "type": proc.get("type", "process"),
+                "name": name,
+                "status": status,
+            }
+        inf = _synthesize_inference_proc()
+        if inf:
+            name = (inf.get("model_name") or "").strip() or "batch"
+            snap[f"inference:{name}"] = {
+                "type": "batch inference",
+                "name": name,
+                "status": "running",
+            }
+        return snap
+
+    def _a11y_heartbeat(self):
+        """Diff job states every 2 s; announce changes; refresh the dock badge."""
+        try:
+            snap = self._a11y_snapshot()
+            events = self._a11y_policy.events(snap)
+        except Exception:
+            logging.debug("[A11y] snapshot failed", exc_info=True)
+            return
+        for kind, msg in events:
+            logging.info(f"[A11y] {kind}: {msg}")
+            AppHelper.callAfter(self._a11y_post, msg, kind)
+        running = sum(1 for v in snap.values() if v.get("status") == "running")
+        AppHelper.callAfter(self._a11y_update_badge, running)
+
+    def _a11y_post(self, msg, kind):
+        """Runs on the main thread. Post the AX announcement + attention request."""
+        try:
+            from AppKit import NSApp, NSCriticalRequest, NSInformationalRequest
+
+            element = (
+                NSApp.keyWindow() or NSApp.mainWindow() or self._main_window.native
+            )
+            applio_a11y.post_announcement(msg, element)
+            if kind == "terminal":
+                bad = any(w in msg for w in ("fail", "error", "cancel", "interrupt"))
+                NSApp.requestUserAttention_(
+                    NSCriticalRequest if bad else NSInformationalRequest
+                )
+        except Exception:
+            pass
+
+    def _a11y_update_badge(self, running):
+        """Runs on the main thread. Dock badge = number of running jobs."""
+        try:
+            from AppKit import NSApp
+
+            NSApp.dockTile().setBadgeLabel_(str(running) if running else None)
+        except Exception:
+            pass
 
     def _find_item_by_key(self, key):
         """Find the live NSMenuItem for an action key via self._key_to_tag, else None."""
