@@ -1071,8 +1071,13 @@ if os.path.exists(info_plist_path):
             plist = plistlib.load(f)
 
         # Permissions & Usage Descriptions
-        # Note: NSMicrophoneUsageDescription removed - wrapper doesn't need direct mic access.
-        # Gradio runs in browser via pywebview, browser handles its own mic permissions.
+        # Realtime voice conversion captures the microphone IN-PROCESS
+        # (rvc/realtime/audio.py sd.InputStream) since the single-process merge;
+        # macOS auto-denies the TCC prompt without this key. (No audio-input
+        # entitlement needed: the app is not sandboxed.)
+        plist["NSMicrophoneUsageDescription"] = (
+            "Applio uses the microphone for real-time voice conversion."
+        )
         plist["NSCameraUsageDescription"] = (
             "Applio needs camera access for visual processing."
         )

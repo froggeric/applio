@@ -7,7 +7,7 @@
     <false/>
     
     <!-- Hardware Access -->
-    <!-- Note: audio-input removed - not needed for wrapper, Gradio handles audio in browser -->
+    <!-- No audio-input entitlement needed: the app is not sandboxed; mic TCC is granted via NSMicrophoneUsageDescription in build_macos.py (in-process capture since the single-process merge) -->
     <key>com.apple.security.device.camera</key>
     <true/>
 
