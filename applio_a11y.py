@@ -10,7 +10,14 @@ No per-tick chatter, no speech synthesis (must never collide with the audio
 the user is evaluating). Percentage/epoch milestones are Phase 2.
 """
 
-TERMINAL_STATUSES = {"completed", "failed", "error", "cancelled", "canceled", "interrupted"}
+TERMINAL_STATUSES = {
+    "completed",
+    "failed",
+    "error",
+    "cancelled",
+    "canceled",
+    "interrupted",
+}
 
 
 class AnnouncementPolicy:

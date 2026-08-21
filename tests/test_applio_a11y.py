@@ -28,14 +28,18 @@ def test_steady_state_no_events():
 def test_terminal_transition():
     p = AnnouncementPolicy()
     p.events(SNAP)
-    evts = p.events({"myvoice": {"type": "training", "name": "myvoice", "status": "completed"}})
+    evts = p.events(
+        {"myvoice": {"type": "training", "name": "myvoice", "status": "completed"}}
+    )
     assert evts == [("terminal", "training: myvoice completed")], evts
 
 
 def test_failed_is_terminal():
     p = AnnouncementPolicy()
     p.events(SNAP)
-    evts = p.events({"myvoice": {"type": "training", "name": "myvoice", "status": "failed"}})
+    evts = p.events(
+        {"myvoice": {"type": "training", "name": "myvoice", "status": "failed"}}
+    )
     assert evts[0][0] == "terminal" and "failed" in evts[0][1]
 
 
@@ -82,7 +86,9 @@ def test_prime_then_steady_no_start():
 
 
 if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    fns = [
+        v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)
+    ]
     for fn in fns:
         fn()
         print(f"PASS {fn.__name__}")

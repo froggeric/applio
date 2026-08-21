@@ -27,9 +27,7 @@ UPLOAD_MARKER = "# _APPLIO_A11Y_UPLOAD"
 #         #    gr.Info("No active training processes found")
 # Indent capture is HORIZONTAL-ONLY (\n([ \t]+)) per CLAUDE.md: (\n\s+) would
 # grab the preceding blank line's newline and shift every injected line.
-STOP_TRAIN_RE = re.compile(
-    r"\n([ \t]+)# if killed > 0:\n(?:[ \t]+#[^\n]*\n)+"
-)
+STOP_TRAIN_RE = re.compile(r"\n([ \t]+)# if killed > 0:\n(?:[ \t]+#[^\n]*\n)+")
 # Each replacement reproduces exactly ONE leading newline (the one the regex
 # consumed); the blank line + `except:` that follow the block stay untouched.
 STOP_TRAIN_REPLACEMENT = (
@@ -64,7 +62,7 @@ def patch_upload(content):
     insert_at = ret + 1
     inject = (
         f"    {UPLOAD_MARKER}\n"
-        "    gr.Info(\"Audio uploaded. It is now selected in the "
+        '    gr.Info("Audio uploaded. It is now selected in the '
         "'Select Audio' dropdown.\")\n"
     )
     return content[:insert_at] + inject + content[insert_at:], "patched"

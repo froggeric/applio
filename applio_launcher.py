@@ -2140,7 +2140,9 @@ class ProgressWindowController:
             # directly for this first open (later re-keys use the initial one).
             self.window.makeFirstResponder_(target)
         except Exception:
-            logging.debug("[ProgressWindow] first-responder setup failed", exc_info=True)
+            logging.debug(
+                "[ProgressWindow] first-responder setup failed", exc_info=True
+            )
 
         # Initial log read - queue to background thread instead of blocking main thread
         # The background thread will pick up existing content on first poll
@@ -4706,7 +4708,9 @@ class ApplioAppDelegate(NSObject):
                     "Terminating now may interrupt a checkpoint write. Quit anyway?"
                 )
                 alert.setAlertStyle_(NSAlertStyleWarning)
-                alert.addButtonWithTitle_("Cancel")  # First: auto Escape; NO Return default
+                alert.addButtonWithTitle_(
+                    "Cancel"
+                )  # First: auto Escape; NO Return default
                 alert.addButtonWithTitle_(
                     "Terminate & Quit"
                 )  # Second: no key equivalent — explicit click only
@@ -4750,7 +4754,9 @@ class ApplioLauncher:
         self.progress_window = None
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
-        self._a11y_policy = applio_a11y.AnnouncementPolicy()  # Job lifecycle announcements
+        self._a11y_policy = (
+            applio_a11y.AnnouncementPolicy()
+        )  # Job lifecycle announcements
         self._a11y_primed = False  # First heartbeat primes, doesn't announce
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
@@ -5276,7 +5282,9 @@ class ApplioLauncher:
                         f"{proc.get('model_name') or 'active job'}"
                     ).strip()
                     ni = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                        title, "runDispatch:" if handler and tag is not None else None, ""
+                        title,
+                        "runDispatch:" if handler and tag is not None else None,
+                        "",
                     )
                     if handler and tag is not None:
                         ni.setTarget_(handler)
