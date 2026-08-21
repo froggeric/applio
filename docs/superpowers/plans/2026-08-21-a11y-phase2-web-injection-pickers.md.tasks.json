@@ -23,9 +23,10 @@
     {
       "id": 3,
       "subject": "Task 3: Patcher correctness fixes — history-before-untrack write order, bounded upload scan",
-      "status": "pending",
+      "status": "completed",
       "description": "patch_process_tracking (injects into core.py): history-before-untrack inside finally with _proc guards; patch_stop_feedback bounded save_to_wav2 scan; tests/test_patch_fixtures.py red-then-green + dirty-tree guard. See plan Task 3.",
-      "verifyCommand": "venv_macos/bin/python tests/test_patch_fixtures.py"
+      "verifyCommand": "venv_macos/bin/python tests/test_patch_fixtures.py",
+      "lastUpdated": "2026-08-21T17:59:41.667740"
     },
     {
       "id": 4,
