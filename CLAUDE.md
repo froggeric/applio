@@ -455,8 +455,7 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   swaps upstream `app.py`'s inline `js=` entry for a `_applio_a11y_js(client_mode)` helper reading
   the file from `now_dir`/`sys._MEIPASS` (ships via the `("assets","assets")` datas). Creates a
   live region + "Last result" region client-side, polls the route every 2 s, announces job
-  milestones/terminals, heals accordion/tab semantics (selectors pinned against gradio 6.20.0 —
-  see task-8-report.md), restores focus after gradio re-renders, and announces output-textbox changes.
+  milestones/terminals, heals accordion/tab semantics (selectors pinned against gradio 6.20.0), restores focus after gradio re-renders, and announces output-textbox changes.
 - `applio_native_picker.py` — `native_browse(mode)` opens NSOpenPanel via `AppHelper.callAfter`
   (gradio handlers run on worker threads; the panel MUST run on the main AppKit thread; the worker
   blocks on an Event). Availability is an EXPLICIT `mark_native_loop_available()` flag set by the

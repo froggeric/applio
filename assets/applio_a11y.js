@@ -21,7 +21,7 @@
   var lastOutputText = {};  // textbox elem_id/text -> last announced value
 
   /* SELECTORS pinned from a live-DOM session against the installed gradio
-     6.20.0 (python app.py + devtools; evidence in task-8-report.md):
+     6.20.0 (python app.py + devtools):
      - the accordion container is <div class="block gr-accordion ..."> and
        the open state lives ON the header button (button.label-wrap gains
        the "open" class); block-accordion/gradio-accordion match nothing.
