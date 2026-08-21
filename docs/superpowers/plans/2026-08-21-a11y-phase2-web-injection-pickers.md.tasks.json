@@ -12,12 +12,13 @@
     {
       "id": 2,
       "subject": "Task 2: Launcher refinements — pid keys, badge truth, Stopping row, lazy history, call-site order",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
       "description": "Snapshot keys type:name:pid + word_key; lazy terminal words; count_live badge; post_announcement call order (FIRST step); Stopping row; {phase} comment. See plan Task 2.",
-      "verifyCommand": "venv_macos/bin/python -m py_compile applio_launcher.py && venv_macos/bin/python tests/test_applio_a11y.py"
+      "verifyCommand": "venv_macos/bin/python -m py_compile applio_launcher.py && venv_macos/bin/python tests/test_applio_a11y.py",
+      "lastUpdated": "2026-08-21T17:56:50.334239"
     },
     {
       "id": 3,
