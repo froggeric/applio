@@ -101,11 +101,85 @@ def test_progress_routes_patch():
     assert guard != -1 and keepalive != -1 and guard < keepalive
 
 
+def test_browse_buttons_patch():
+    browse = _load("patch_browse_buttons", "patches/patch_browse_buttons.py")
+    for rel, fields in browse.FIELDS.items():
+        src = open(os.path.join(REPO, rel), encoding="utf8").read()
+        assert "_APPLIO_BROWSE_" not in src, (
+            f"{rel} is dirty (patched?) - restore first"
+        )
+        patched, status = browse.patch_file(src, fields, browse.MARKERS[rel])
+        # A skip here means a field var drifted upstream and its button would
+        # silently never ship - fail loudly (patcher's skip warnings print above).
+        assert status == "patched", f"{rel}: status={status}"
+        assert patched.count("_applio_browse_") == len(fields), (
+            f"{rel}: expected {len(fields)} inserted lines, "
+            f"got {patched.count('_applio_browse_')}"
+        )
+        i18n_idx = patched.find("i18n = I18nAuto()")
+        imp_idx = patched.find("import applio_browse_ui  # _APPLIO_BROWSE_IMPORT_")
+        assert i18n_idx != -1 and imp_idx > i18n_idx, (
+            f"{rel}: import not after i18n anchor"
+        )
+        for var, mode in fields:
+            line = (
+                f'_applio_browse_{var} = applio_browse_ui.browse_button("{mode}", {var},'
+            )
+            assert line in patched, f"{rel}: wrong mode/target on {var}"
+            m = re.search(
+                rf"^(?P<indent>[ \t]*){re.escape(var)} = gr\.(?:Textbox|Dropdown)\(",
+                patched,
+                re.MULTILINE,
+            )
+            assert m, f"{rel}: definition for {var} vanished"
+            end = browse._find_statement_end(patched, m.end() - 1)
+            ins = patched.find(f"_applio_browse_{var} = ")
+            assert end != -1 and ins > end, (
+                f"{rel}: {var} browse line before its definition"
+            )
+            # Only whitespace (the blank line + indent) between the closing
+            # paren and the factory line = immediately after the statement,
+            # before the next one.
+            assert patched[end:ins].strip() == "", f"{rel}: {var} browse line misplaced"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf8"
+        ) as tf:
+            tf.write(patched)
+        try:
+            py_compile.compile(tf.name, doraise=True)
+        finally:
+            os.unlink(tf.name)
+    # Synthetic negative: one field definition missing -> that field skipped,
+    # the file still patches with the remaining fields.
+    synthetic = (
+        "i18n = I18nAuto()\n"
+        "\n"
+        "def tts_tab():\n"
+        "    with gr.Column():\n"
+        "        input_tts_path = gr.Textbox(\n"
+        '            label=i18n("Input path"),\n'
+        "            interactive=True,\n"
+        "        )\n"
+        "        output_tts_path = gr.Textbox(\n"
+        '            label=i18n("Output path"),\n'
+        "            interactive=True,\n"
+        "        )\n"
+    )
+    patched, status = browse.patch_file(
+        synthetic, browse.FIELDS["tabs/tts/tts.py"], browse.MARKERS["tabs/tts/tts.py"]
+    )
+    assert status == "patched"
+    assert "_applio_browse_input_tts_path" in patched
+    assert "_applio_browse_output_tts_path" in patched
+    assert "_applio_browse_output_rvc_path" not in patched
+
+
 def run_all():
     test_history_written_before_untrack()
     test_upload_scan_bounded_to_function_body()
     test_progress_routes_patch()
-    print("All patch fixture tests passed (3).")
+    test_browse_buttons_patch()
+    print("All patch fixture tests passed (4).")
 
 
 if __name__ == "__main__":

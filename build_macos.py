@@ -541,6 +541,7 @@ HIDDEN_IMPORTS = [
     "applio_update_check",  # Shared update check (lazy-imported -> PyInstaller can't trace it)
     "applio_a11y",  # Accessibility announcement engine (lazy AppKit import -> listed for safety)
     "applio_native_picker",  # Native NSOpenPanel Browse-button picker (lazy AppKit import)
+    "applio_browse_ui",  # Browse-button factory injected into tab files at build time
     "applio_progress_api",  # /applio-a11y/progress payload (lazy-imported by patched app.py)
     "rvc.lib.tools.process_log_parser",  # Training-log metrics for the progress payload (unimported -> DATA-only frozen otherwise)
     "wget",  # Used by rvc/lib/utils.py for downloads
@@ -872,6 +873,42 @@ def pre_build_patch():
             "patches/patch_progress_routes.py",
             "app.py",
             "app.py - a11y progress route",
+            "file",
+        ),
+        (
+            "patches/patch_browse_buttons.py",
+            "tabs/train/train.py",
+            "train.py - a11y Browse buttons",
+            "file",
+        ),
+        (
+            "patches/patch_browse_buttons.py",
+            "tabs/inference/inference.py",
+            "inference.py - a11y Browse buttons",
+            "file",
+        ),
+        (
+            "patches/patch_browse_buttons.py",
+            "tabs/tts/tts.py",
+            "tts.py - a11y Browse buttons",
+            "file",
+        ),
+        (
+            "patches/patch_browse_buttons.py",
+            "tabs/realtime/realtime.py",
+            "realtime.py - a11y Browse buttons",
+            "file",
+        ),
+        (
+            "patches/patch_browse_buttons.py",
+            "tabs/voice_blender/voice_blender.py",
+            "voice_blender.py - a11y Browse buttons",
+            "file",
+        ),
+        (
+            "patches/patch_browse_buttons.py",
+            "tabs/extra/sections/processing.py",
+            "processing.py - a11y Browse buttons",
             "file",
         ),
     ]
