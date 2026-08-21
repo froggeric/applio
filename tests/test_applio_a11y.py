@@ -54,6 +54,14 @@ def test_disappeared_running_announces_finished():
     assert evts == [("terminal", "training: myvoice finished")], evts
 
 
+def test_disappeared_paused_announces_finished():
+    p = AnnouncementPolicy()
+    p.events(SNAP)
+    p.events({"myvoice": {"type": "training", "name": "myvoice", "status": "paused"}})
+    evts = p.events({})
+    assert evts == [("terminal", "training: myvoice finished")], evts
+
+
 def test_disappeared_terminal_no_event():
     p = AnnouncementPolicy()
     p.events({"m": {"type": "tts", "name": "m", "status": "completed"}})

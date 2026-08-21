@@ -43,7 +43,7 @@ class AnnouncementPolicy:
             self._seen[key] = (status, label)
         for key in [k for k in self._seen if k not in snapshot]:
             prev_status, label = self._seen.pop(key)
-            if prev_status == "running":
+            if prev_status in ("running", "paused"):
                 out.append(("terminal", f"{label} finished"))
         return out
 
