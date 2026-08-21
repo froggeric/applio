@@ -311,16 +311,29 @@ def patch_run_preprocess_script(content: str) -> tuple[str, bool]:
 \1    _proc.wait()
 \1finally:
 \1    _log_file.close()
-\1    _untrack_process("preprocess")
-\1# Add to history on completion
-\1_add_to_history({
-\1    "type": "preprocess",
-\1    "model_name": model_name,
-\1    "started_at": _started_at,
-\1    "completed_at": _applio_dt.datetime.now().isoformat(),
-\1    "status": "completed" if _proc.returncode == 0 else "failed",
-\1    "log_path": _log_file_path
-\1})
+\1    # Add to history BEFORE untracking: once the key leaves
+\1    # active_processes.json the terminal word must already be in
+\1    # process_history.json (untrack-then-write raced heartbeat readers).
+\1    try:
+\1        _add_to_history({
+\1            "type": "preprocess",
+\1            "model_name": model_name,
+\1            "started_at": _started_at,
+\1            "completed_at": _applio_dt.datetime.now().isoformat(),
+\1            "status": (
+\1                "completed"
+\1                if "_proc" in locals()
+\1                and _proc.returncode == 0
+\1                else "failed"
+\1            ),
+\1            "log_path": _log_file_path
+\1        })
+\1    except Exception:
+\1        pass
+\1    try:
+\1        _untrack_process("preprocess")
+\1    except Exception:
+\1        pass
 \1if _proc.returncode != 0:
 \1    return f"Error: Preprocessing failed with code {_proc.returncode}"
 
@@ -361,16 +374,27 @@ def patch_run_extract_script(content: str) -> tuple[str, bool]:
 \1    _proc.wait()
 \1finally:
 \1    _log_file.close()
-\1    _untrack_process("extract")
-\1# Add to history on completion
-\1_add_to_history({
-\1    "type": "extract",
-\1    "model_name": model_name,
-\1    "started_at": _started_at,
-\1    "completed_at": _applio_dt.datetime.now().isoformat(),
-\1    "status": "completed" if _proc.returncode == 0 else "failed",
-\1    "log_path": _log_file_path
-\1})
+\1    # Add to history BEFORE untracking (see preprocess note).
+\1    try:
+\1        _add_to_history({
+\1            "type": "extract",
+\1            "model_name": model_name,
+\1            "started_at": _started_at,
+\1            "completed_at": _applio_dt.datetime.now().isoformat(),
+\1            "status": (
+\1                "completed"
+\1                if "_proc" in locals()
+\1                and _proc.returncode == 0
+\1                else "failed"
+\1            ),
+\1            "log_path": _log_file_path
+\1        })
+\1    except Exception:
+\1        pass
+\1    try:
+\1        _untrack_process("extract")
+\1    except Exception:
+\1        pass
 \1if _proc.returncode != 0:
 \1    return f"Error: Feature extraction failed with code {_proc.returncode}"
 
@@ -420,26 +444,41 @@ def patch_run_train_script(content: str) -> tuple[str, bool]:
 \1    _proc.wait()
 \1finally:
 \1    _log_file.close()
-\1    _untrack_process("training")
-\1# Add to history on completion (with best-epoch snapshot for durability)
-\1_history_entry = {
-\1    "type": "training",
-\1    "model_name": model_name,
-\1    "started_at": _started_at,
-\1    "completed_at": _applio_dt.datetime.now().isoformat(),
-\1    "status": "completed" if _proc.returncode == 0 else "failed",
-\1    "log_path": _log_file_path,
-\1    "total_epoch": total_epoch
-\1}
-\1# Snapshot final metrics so they survive a retrain overwriting training.log.
-\1# Pass the pre-truncation points so a resumed run's curve spans its lineage.
-\1_snapshot = _snapshot_training_metrics(_log_file_path, _prior_points)
-\1if _snapshot:
-\1    _history_entry["best_epoch"] = _snapshot["best_epoch"]
-\1    _history_entry["best_loss"] = _snapshot["best_loss"]
-\1    _history_entry["final_epoch"] = _snapshot["final_epoch"]
-\1    _history_entry["epoch_points"] = _snapshot["epoch_points"]
-\1_add_to_history(_history_entry)
+\1    # Add to history BEFORE untracking (see preprocess note). The snapshot
+\1    # opens training.log itself, so it runs after _log_file.close().
+\1    try:
+\1        # Snapshot final metrics so they survive a retrain overwriting training.log.
+\1        # Pass the pre-truncation points so a resumed run's curve spans its lineage.
+\1        _snapshot = _snapshot_training_metrics(_log_file_path, _prior_points)
+\1    except Exception:
+\1        _snapshot = None
+\1    try:
+\1        _history_entry = {
+\1            "type": "training",
+\1            "model_name": model_name,
+\1            "started_at": _started_at,
+\1            "completed_at": _applio_dt.datetime.now().isoformat(),
+\1            "status": (
+\1                "completed"
+\1                if "_proc" in locals()
+\1                and _proc.returncode == 0
+\1                else "failed"
+\1            ),
+\1            "log_path": _log_file_path,
+\1            "total_epoch": total_epoch
+\1        }
+\1        if _snapshot:
+\1            _history_entry["best_epoch"] = _snapshot["best_epoch"]
+\1            _history_entry["best_loss"] = _snapshot["best_loss"]
+\1            _history_entry["final_epoch"] = _snapshot["final_epoch"]
+\1            _history_entry["epoch_points"] = _snapshot["epoch_points"]
+\1        _add_to_history(_history_entry)
+\1    except Exception:
+\1        pass
+\1    try:
+\1        _untrack_process("training")
+\1    except Exception:
+\1        pass
 \1if _proc.returncode != 0:
 \1    return f"Error: Training failed with code {_proc.returncode}"
 
@@ -510,15 +549,26 @@ def patch_voice_conversion(content: str) -> tuple[str, bool]:
 \1    _track_process("tts", _proc.pid)
 \1    _stdout, _stderr = _proc.communicate()
 \1finally:
-\1    _untrack_process("tts")
-\1# Add to history on completion
-\1_add_to_history({
-\1    "type": "tts",
-\1    "model_name": "TTS",
-\1    "started_at": _started_at,
-\1    "completed_at": _applio_dt.datetime.now().isoformat(),
-\1    "status": "completed" if _proc.returncode == 0 else "failed"
-\1})
+\1    # Add to history BEFORE untracking (see preprocess note).
+\1    try:
+\1        _add_to_history({
+\1            "type": "tts",
+\1            "model_name": "TTS",
+\1            "started_at": _started_at,
+\1            "completed_at": _applio_dt.datetime.now().isoformat(),
+\1            "status": (
+\1                "completed"
+\1                if "_proc" in locals()
+\1                and _proc.returncode == 0
+\1                else "failed"
+\1            )
+\1        })
+\1    except Exception:
+\1        pass
+\1    try:
+\1        _untrack_process("tts")
+\1    except Exception:
+\1        pass
 \1if _proc.returncode != 0:
 \1    raise RuntimeError(_stderr.strip())
 \1infer_pipeline = import_voice_converter()"""

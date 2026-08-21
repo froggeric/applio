@@ -56,7 +56,12 @@ def patch_upload(content):
     idx = content.find("def save_to_wav2(")
     if idx == -1:
         return content, "miss"
-    ret = content.find("\n    return", idx)
+    # Bound the scan to save_to_wav2's body: an unbounded find() would inject
+    # the toast into whatever LATER function owns the next "\n    return".
+    body_end = content.find("\ndef ", idx)
+    if body_end == -1:
+        body_end = len(content)
+    ret = content.find("\n    return", idx, body_end)
     if ret == -1:
         return content, "miss"
     insert_at = ret + 1
