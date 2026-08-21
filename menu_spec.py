@@ -71,19 +71,40 @@ EDIT_KEYS = {
     "edit.paste",
     "edit.select_all",
 }
-TAXONOMY = APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS | EDIT_KEYS
+# Accessibility settings (App menu > Accessibility). The four children are
+# regular dispatch leaves (the launcher's announcement engine drives them);
+# the parent (a11y.menu) is display-only, like process.status.
+A11Y_CHILD_KEYS = {
+    "a11y.verbosity.off",
+    "a11y.verbosity.standard",
+    "a11y.verbosity.verbose",
+    "a11y.sound_cues",
+}
+A11Y_KEYS = A11Y_CHILD_KEYS | {"a11y.menu"}
+TAXONOMY = (
+    APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS | EDIT_KEYS | A11Y_KEYS
+)
 
-# Display-only items (no dispatch; rendered disabled, mutated by the launcher timer).
-DISPLAY_KEYS = {"process.status"}
+# Display-only items (no dispatch; rendered disabled / plain parents, mutated
+# by the launcher). a11y.menu is the Accessibility submenu PARENT, not a leaf,
+# so it has no dispatch of its own.
+DISPLAY_KEYS = {"process.status", "a11y.menu"}
 
 # Keys the launcher renderer must wire dispatch for.
 LAUNCHER_ACTION_KEYS = (
-    APP_KEYS | FILE_KEYS | PROCESS_KEYS | WINDOW_KEYS | HELP_KEYS | EDIT_KEYS
+    APP_KEYS
+    | FILE_KEYS
+    | PROCESS_KEYS
+    | WINDOW_KEYS
+    | HELP_KEYS
+    | EDIT_KEYS
+    | A11Y_CHILD_KEYS
 ) - set()
 # Standalone wrapper handles everything EXCEPT the four app-menu items pywebview injects
 # (About / Hide / Hide Others / Quit). Verified: webview/platforms/cocoa.py _add_app_menu
 # runs unconditionally and provides those.
 # also omit window.zoom / window.bring_all_to_front — no pywebview Window API for them
+# and omit the a11y children — the standalone wrapper has no announcement engine
 WRAPPER_ACTION_KEYS = LAUNCHER_ACTION_KEYS - {
     "app.about",
     "app.hide",
@@ -92,6 +113,7 @@ WRAPPER_ACTION_KEYS = LAUNCHER_ACTION_KEYS - {
     "window.zoom",
     "window.bring_all_to_front",
     *EDIT_KEYS,  # selector-based: cannot be rendered by the static pywebview menu
+    *A11Y_CHILD_KEYS,
 }
 
 # Reveal targets (relative to the resolved data dir).
@@ -130,6 +152,22 @@ MENU = [
             MenuItem(key="app.about", title="About Applio"),
             MenuItem(separator=True),
             MenuItem(key="app.check_updates", title="Check for Updates…"),
+            MenuItem(
+                key="a11y.menu",
+                title="Accessibility",
+                submenu=[
+                    MenuItem(key="a11y.verbosity.off", title="Announcements: Off"),
+                    MenuItem(
+                        key="a11y.verbosity.standard",
+                        title="Announcements: Standard",
+                    ),
+                    MenuItem(
+                        key="a11y.verbosity.verbose",
+                        title="Announcements: Verbose",
+                    ),
+                    MenuItem(key="a11y.sound_cues", title="Sound Cues"),
+                ],
+            ),
             MenuItem(separator=True),
             MenuItem(key="app.hide", title="Hide Applio", shortcut="h", mods=("cmd",)),
             MenuItem(

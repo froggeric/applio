@@ -118,9 +118,14 @@ def test_action_key_contracts():
         "window.zoom",
         "window.bring_all_to_front",
     }
+    from menu_spec import A11Y_CHILD_KEYS
+
+    # Amended by Task 9: the a11y children are launcher-only too (the
+    # standalone wrapper has no announcement engine to drive them).
     assert (
-        WRAPPER_ACTION_KEYS == LAUNCHER_ACTION_KEYS - injected - EDIT_KEYS
-    ), "wrapper contract mismatch (Edit items are launcher-only)"
+        WRAPPER_ACTION_KEYS
+        == LAUNCHER_ACTION_KEYS - injected - EDIT_KEYS - A11Y_CHILD_KEYS
+    ), "wrapper contract mismatch (Edit + a11y items are launcher-only)"
     assert injected <= LAUNCHER_ACTION_KEYS, "injected keys must be in launcher set"
 
 
@@ -128,6 +133,25 @@ def test_display_keys_are_dynamic():
     for leaf in iter_leaves(MENU):
         if leaf.key in DISPLAY_KEYS:
             assert leaf.dynamic, f"display key {leaf.key!r} must be dynamic"
+
+
+def test_a11y_menu_present():
+    import menu_spec
+
+    app_menu_items = menu_spec.MENU[0].submenu  # the App menu's item list
+    a11y = [mi for mi in app_menu_items if mi.key == "a11y.menu"]
+    assert a11y and a11y[0].title == "Accessibility"
+    child_keys = {mi.key for mi in a11y[0].submenu}
+    assert child_keys == menu_spec.A11Y_CHILD_KEYS
+
+
+def test_a11y_keys_sets():
+    import menu_spec
+
+    assert menu_spec.A11Y_KEYS <= menu_spec.TAXONOMY
+    assert menu_spec.A11Y_CHILD_KEYS <= menu_spec.LAUNCHER_ACTION_KEYS
+    assert not (menu_spec.A11Y_KEYS & menu_spec.WRAPPER_ACTION_KEYS)
+    assert "a11y.menu" in menu_spec.DISPLAY_KEYS
 
 
 def test_app_menu_const():

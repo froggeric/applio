@@ -4772,6 +4772,35 @@ class ApplioLauncher:
             applio_native_picker.mark_native_loop_available()
         except Exception:
             pass
+        # Accessibility settings (Task 9): persisted in NSUserDefaults under
+        # namespaced a11y.* keys, echoed to the web payload. Guarded read —
+        # __init__ must not gain an unguarded PyObjC import (the module keeps
+        # a NATIVE_APIS_AVAILABLE fallback path), so fall back to defaults.
+        self._a11y_verbosity = "standard"
+        self._a11y_sound_cues = False
+        try:
+            from Foundation import NSUserDefaults
+
+            defaults = NSUserDefaults.standardUserDefaults()
+            verbosity = defaults.stringForKey_("a11y.verbosity") or "standard"
+            if verbosity in ("off", "standard", "verbose"):
+                self._a11y_verbosity = verbosity
+            self._a11y_sound_cues = bool(defaults.boolForKey_("a11y.sound_cues"))
+        except Exception:
+            logging.debug("[A11y] settings read failed", exc_info=True)
+        self._push_a11y_settings()
+        # Native owns announcements (the in-app WKWebView client is silenced by
+        # the web payload's owner flag); web-side layout changes are marshaled
+        # to the main thread and posted as an AX layout-changed notification.
+        try:
+            import applio_progress_api
+
+            applio_progress_api.set_announce_owner("native")
+            applio_progress_api.set_layout_changed_callback(
+                lambda: AppHelper.callAfter(self._post_webview_layout_changed)
+            )
+        except Exception:
+            pass
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
         self._menu_handler = (
@@ -5071,6 +5100,11 @@ class ApplioLauncher:
             self._key_to_tag,
             is_top_level=True,
         )
+        # Apply the a11y check marks to the FRESH menu (callers setMainMenu_
+        # only after this returns, so resolving via NSApp.mainMenu() here would
+        # hit the old menu) — this is what makes the states survive the
+        # post-webview.start menu re-wipe.
+        self._refresh_a11y_submenu(menu=main_menu)
         return main_menu
 
     def _reassert_menu_and_delegate(self):
@@ -5117,32 +5151,19 @@ class ApplioLauncher:
         sets it (verified against venv_macos webview/platforms/cocoa.py);
         without this, Tab moves only between text inputs. Idempotent: the
         flag is set only on success, so the heartbeat retries until the
-        webview exists. Verified: pywebview's cocoa backend sets the
-        WebKitHost (a WKWebView subclass) as the window's contentView at
-        didFinishNavigation (cocoa.py:381), so contentView() IS the webview.
+        webview exists (found via the shared _find_webview helper).
         """
         if getattr(self, "_webview_kb_done", False):
             return
-        try:
-            from AppKit import NSApp
-            from WebKit import WKWebView
-        except Exception:
+        cv = self._find_webview()
+        if cv is None:
             return
         try:
-            for win in NSApp.windows():
-                cv = win.contentView()
-                if isinstance(cv, WKWebView):
-                    try:
-                        cv.configuration().preferences().setTabFocusesLinks_(True)
-                        self._webview_kb_done = True
-                        logging.info("[A11y] WKWebView tab traversal enabled")
-                    except Exception:
-                        logging.debug(
-                            "[A11y] setTabFocusesLinks_ failed", exc_info=True
-                        )
-                    return
+            cv.configuration().preferences().setTabFocusesLinks_(True)
+            self._webview_kb_done = True
+            logging.info("[A11y] WKWebView tab traversal enabled")
         except Exception:
-            logging.debug("[A11y] webview enumeration failed", exc_info=True)
+            logging.debug("[A11y] setTabFocusesLinks_ failed", exc_info=True)
 
     def _start_menu_update_timer(self):
         """Start timer to periodically update menu state."""
@@ -5401,6 +5422,14 @@ class ApplioLauncher:
                 self._a11y_policy.prime(snap)
                 self._a11y_primed = True
                 events = []
+            elif self._a11y_verbosity == "off":
+                # Announcements off: still consume events every tick — events()
+                # is what keeps the policy's _seen current, so re-enabling
+                # later doesn't replay "Started X" for every already-running
+                # job. terminal_words={} keeps the history read lazy (the
+                # words only shape messages, which are discarded).
+                self._a11y_policy.events(snap, terminal_words={})
+                events = []
             else:
                 # Terminal words are a locked whole-file history read; only
                 # pay it when a snapshot key actually disappeared.
@@ -5418,6 +5447,8 @@ class ApplioLauncher:
 
     def _a11y_post(self, msg, kind):
         """Runs on the main thread. Post the AX announcement + attention request."""
+        if self._a11y_verbosity == "off":
+            return  # defense in depth: the heartbeat already gates this
         try:
             from AppKit import NSApp, NSCriticalRequest, NSInformationalRequest
 
@@ -5430,6 +5461,13 @@ class ApplioLauncher:
                 NSApp.requestUserAttention_(
                     NSCriticalRequest if bad else NSInformationalRequest
                 )
+                if self._a11y_sound_cues:
+                    try:
+                        from AppKit import NSSound
+
+                        NSSound.soundNamed_("Basso" if bad else "Glass").play()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -5442,14 +5480,136 @@ class ApplioLauncher:
         except Exception:
             pass
 
-    def _find_item_by_key(self, key):
-        """Find the live NSMenuItem for an action key via self._key_to_tag, else None."""
+    # ---- Accessibility settings (Task 9: verbosity + sound cues) ----
+
+    def _push_a11y_settings(self):
+        """Echo the current a11y settings to the web payload (exception-safe:
+        the progress API is optional and never worth crashing the menu)."""
+        try:
+            import applio_progress_api
+
+            applio_progress_api.set_settings(
+                {"verbosity": self._a11y_verbosity, "sound": self._a11y_sound_cues}
+            )
+        except Exception:
+            pass
+
+    def _set_a11y_verbosity(self, value):
+        """Persist + apply an Announcements choice (radio behavior)."""
+        from Foundation import NSUserDefaults
+
+        self._a11y_verbosity = value
+        defaults = NSUserDefaults.standardUserDefaults()
+        defaults.setObject_forKey_(value, "a11y.verbosity")
+        defaults.synchronize()
+        self._push_a11y_settings()
+        self._refresh_a11y_submenu()
+
+    def _toggle_a11y_sound(self):
+        """Persist + apply the Sound Cues toggle."""
+        from Foundation import NSUserDefaults
+
+        self._a11y_sound_cues = not self._a11y_sound_cues
+        defaults = NSUserDefaults.standardUserDefaults()
+        defaults.setBool_forKey_(self._a11y_sound_cues, "a11y.sound_cues")
+        defaults.synchronize()
+        self._push_a11y_settings()
+        self._refresh_a11y_submenu()
+
+    def _refresh_a11y_submenu(self, menu=None):
+        """Sync the Accessibility submenu check marks with persisted settings.
+
+        Resolves live items via _find_item_by_key (backed by _key_to_tag,
+        repopulated on every _build_native_menu pass), so it is rebuild-safe:
+        called at the end of _build_native_menu (states survive the pywebview
+        menu re-wipe) and after every toggle. No 2 s rebuild — states change
+        only via this menu. `menu` lets a caller target a freshly built menu
+        that is not yet NSApp.mainMenu() (setMainMenu_ runs after the build).
+        """
+        import AppKit
+
+        try:
+            current_verbosity = {
+                "off": "a11y.verbosity.off",
+                "standard": "a11y.verbosity.standard",
+                "verbose": "a11y.verbosity.verbose",
+            }[self._a11y_verbosity]
+            for key in (
+                "a11y.verbosity.off",
+                "a11y.verbosity.standard",
+                "a11y.verbosity.verbose",
+                "a11y.sound_cues",
+            ):
+                row = self._find_item_by_key(key, menu=menu)
+                if not row:
+                    continue
+                if key.startswith("a11y.verbosity."):
+                    row.setState_(
+                        AppKit.NSOnState
+                        if key == current_verbosity
+                        else AppKit.NSOffState
+                    )
+                else:
+                    row.setState_(
+                        AppKit.NSOnState if self._a11y_sound_cues else AppKit.NSOffState
+                    )
+        except Exception:
+            pass
+
+    def _find_webview(self):
+        """The WKWebView contentView among NSApp.windows(), else None.
+
+        pywebview's cocoa backend sets the WebKitHost (a WKWebView subclass)
+        as the window's contentView at didFinishNavigation, so contentView()
+        IS the webview. Shared by keyboard-access enablement and the AX
+        layout-changed post (Task 9).
+        """
+        try:
+            from AppKit import NSApp
+            from WebKit import WKWebView
+        except Exception:
+            return None
+        try:
+            for win in NSApp.windows():
+                cv = win.contentView()
+                if isinstance(cv, WKWebView):
+                    return cv
+        except Exception:
+            logging.debug("[A11y] webview enumeration failed", exc_info=True)
+        return None
+
+    def _post_webview_layout_changed(self):
+        """Main thread: post an AX layout-changed notification on the webview.
+
+        Fired via applio_progress_api's layout callback when the web payload
+        reports a navigation-token change (route/view swap), so VoiceOver
+        re-scans the changed region instead of staying on a stale focus.
+        """
+        try:
+            from AppKit import (
+                NSAccessibilityLayoutChangedNotification,
+                NSAccessibilityPostNotification,
+            )
+
+            cv = self._find_webview()
+            if cv is not None:
+                NSAccessibilityPostNotification(
+                    cv, NSAccessibilityLayoutChangedNotification
+                )
+        except Exception:
+            pass
+
+    def _find_item_by_key(self, key, menu=None):
+        """Find the live NSMenuItem for an action key via self._key_to_tag, else None.
+
+        `menu` defaults to NSApp.mainMenu(); pass an explicit menu to search a
+        freshly built one that has not been installed yet."""
         target_tag = getattr(self, "_key_to_tag", {}).get(key)
         if target_tag is None:
             return None
         from AppKit import NSApp
 
-        main = NSApp.mainMenu()
+        main = menu if menu is not None else NSApp.mainMenu()
         return _find_item_by_tag(main, target_tag)
 
     def _launch_time_update_check(self):
@@ -5504,6 +5664,11 @@ class ApplioLauncher:
         # Custom actions - ALL zero-arg callables.
         d["app.about"] = lambda: self.showAbout_(None)
         d["app.check_updates"] = lambda: self.checkUpdates_(None)
+        # Accessibility settings submenu (Task 9)
+        d["a11y.verbosity.off"] = lambda: self._set_a11y_verbosity("off")
+        d["a11y.verbosity.standard"] = lambda: self._set_a11y_verbosity("standard")
+        d["a11y.verbosity.verbose"] = lambda: self._set_a11y_verbosity("verbose")
+        d["a11y.sound_cues"] = self._toggle_a11y_sound
         d["file.set_data_location"] = lambda: self.setDataLocation_(None)
         d["process.open_dashboard"] = lambda: self.showProgressMonitor_(None)
         d["process.open_logs"] = self._open_training_logs  # already zero-arg
