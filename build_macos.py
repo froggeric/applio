@@ -540,6 +540,8 @@ HIDDEN_IMPORTS = [
     "menu_spec",  # Spec-driven native menu (imported by launcher + wrapper)
     "applio_update_check",  # Shared update check (lazy-imported -> PyInstaller can't trace it)
     "applio_a11y",  # Accessibility announcement engine (lazy AppKit import -> listed for safety)
+    "applio_progress_api",  # /applio-a11y/progress payload (lazy-imported by patched app.py)
+    "rvc.lib.tools.process_log_parser",  # Training-log metrics for the progress payload (unimported -> DATA-only frozen otherwise)
     "wget",  # Used by rvc/lib/utils.py for downloads
     "resampy",  # Audio resampling library
     "librosa",  # Audio analysis library
