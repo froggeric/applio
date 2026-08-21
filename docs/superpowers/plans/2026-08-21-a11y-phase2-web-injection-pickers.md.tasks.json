@@ -57,12 +57,13 @@
     {
       "id": 7,
       "subject": "Task 7: patch_progress_routes.py — app.py route registration + prevent_thread_lock flip",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         6
       ],
       "description": "Flip prevent_thread_lock, register routes before the TB anchor, not-client keep-alive preserves never-returns; fixture test; registration tuple. See plan Task 7.",
-      "verifyCommand": "venv_macos/bin/python tests/test_patch_fixtures.py && venv_macos/bin/python patches/patch_progress_routes.py app.py && venv_macos/bin/python -m py_compile app.py"
+      "verifyCommand": "venv_macos/bin/python tests/test_patch_fixtures.py && venv_macos/bin/python patches/patch_progress_routes.py app.py && venv_macos/bin/python -m py_compile app.py",
+      "lastUpdated": "2026-08-21T18:09:42.613213"
     },
     {
       "id": 8,
