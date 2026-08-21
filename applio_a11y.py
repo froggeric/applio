@@ -19,12 +19,29 @@ class AnnouncementPolicy:
     def __init__(self):
         self._seen = {}  # key -> (status, label)
 
-    def events(self, snapshot):
+    def prime(self, snapshot):
+        """Populate _seen from a snapshot WITHOUT emitting events.
+
+        Call once with the first heartbeat's snapshot so a relaunch that finds
+        already-running jobs (e.g. an hour-old training) records them silently;
+        events() would otherwise announce "Started X" for each of them.
+        """
+        for key, info in snapshot.items():
+            label = f"{info.get('type', 'process')}: {info.get('name') or key}"
+            self._seen[key] = (info.get("status", "running"), label)
+
+    def events(self, snapshot, terminal_words=None):
         """Return [(kind, message)] to announce.
 
         snapshot: dict key -> {"type": str, "name": str, "status": str}
         kind: "start" | "terminal" | "info"
+        terminal_words: optional dict key -> word announced when a job
+            DISAPPEARS while running/paused (default "finished"). The launcher
+            passes the job's stored history status so a subprocess that died
+            non-zero announces "failed" instead of "finished" — the state file
+            nulls dead entries, so disappearance is the only failure signal.
         """
+        words = terminal_words or {}
         out = []
         for key, info in snapshot.items():
             status = info.get("status", "running")
@@ -44,7 +61,7 @@ class AnnouncementPolicy:
         for key in [k for k in self._seen if k not in snapshot]:
             prev_status, label = self._seen.pop(key)
             if prev_status in ("running", "paused"):
-                out.append(("terminal", f"{label} finished"))
+                out.append(("terminal", f"{label} {words.get(key, 'finished')}"))
         return out
 
 

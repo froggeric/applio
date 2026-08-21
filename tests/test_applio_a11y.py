@@ -68,6 +68,19 @@ def test_disappeared_terminal_no_event():
     assert p.events({}) == []
 
 
+def test_disappeared_with_terminal_words():
+    p = AnnouncementPolicy()
+    p.events(SNAP)
+    evts = p.events({}, terminal_words={"myvoice": "failed"})
+    assert evts == [("terminal", "training: myvoice failed")], evts
+
+
+def test_prime_then_steady_no_start():
+    p = AnnouncementPolicy()
+    p.prime(SNAP)
+    assert p.events(SNAP) == [], "primed snapshot must not announce Started"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

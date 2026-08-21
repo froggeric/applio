@@ -205,7 +205,9 @@ def check_for_updates_interactive():
             alert.setAlertStyle_(NSAlertStyleWarning)
             NSApp.activateIgnoringOtherApps_(True)
             buttons = alert.buttons()
-            if buttons:
+            # Escape on the last button only when there's a choice; a lone OK
+            # must keep its auto-Return (setting \x1b would replace it).
+            if len(buttons) > 1:
                 buttons[-1].setKeyEquivalent_("\x1b")
             if alert.runModal() == NSAlertFirstButtonReturn:
                 subprocess.Popen(["open", release_url])
@@ -215,14 +217,16 @@ def check_for_updates_interactive():
                 f"A new version of Applio is available.\n\n"
                 f"Current version: v{VERSION}\n"
                 f"Latest version: v{latest_version}\n\n"
-                "Would you like to download the update?"
+                "Would you like to open the releases page to get the new version?"
             )
             alert.addButtonWithTitle_("Open Releases Page…")
             alert.addButtonWithTitle_("Later")
             alert.setAlertStyle_(NSAlertStyleInformational)
             NSApp.activateIgnoringOtherApps_(True)
             buttons = alert.buttons()
-            if buttons:
+            # Escape on the last button only when there's a choice; a lone OK
+            # must keep its auto-Return (setting \x1b would replace it).
+            if len(buttons) > 1:
                 buttons[-1].setKeyEquivalent_("\x1b")
             if alert.runModal() == NSAlertFirstButtonReturn:
                 subprocess.Popen(["open", release_url])
@@ -235,7 +239,9 @@ def check_for_updates_interactive():
             alert.setAlertStyle_(NSAlertStyleInformational)
             NSApp.activateIgnoringOtherApps_(True)
             buttons = alert.buttons()
-            if buttons:
+            # Escape on the last button only when there's a choice; a lone OK
+            # must keep its auto-Return (setting \x1b would replace it).
+            if len(buttons) > 1:
                 buttons[-1].setKeyEquivalent_("\x1b")
             alert.runModal()
 
@@ -273,7 +279,9 @@ def check_for_updates_at_launch():
         alert.setAlertStyle_(NSAlertStyleInformational)
         NSApp.activateIgnoringOtherApps_(True)
         buttons = alert.buttons()
-        if buttons:
+        # Escape on the last button only when there's a choice; a lone OK
+        # must keep its auto-Return (setting \x1b would replace it).
+        if len(buttons) > 1:
             buttons[-1].setKeyEquivalent_("\x1b")
         if alert.runModal() == NSAlertFirstButtonReturn:
             subprocess.Popen(["open", url])

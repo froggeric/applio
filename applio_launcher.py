@@ -2135,6 +2135,10 @@ class ProgressWindowController:
                 else self.logs_btn
             )
             self.window.setInitialFirstResponder_(target)
+            # setInitialFirstResponder_ is consulted when the window BECOMES
+            # key; ordering front above already made it key, so move focus
+            # directly for this first open (later re-keys use the initial one).
+            self.window.makeFirstResponder_(target)
         except Exception:
             logging.debug("[ProgressWindow] first-responder setup failed", exc_info=True)
 
@@ -4110,6 +4114,10 @@ class ProcessDashboardController(NSObject):
         # with row 0 preselected so Enter has a target even before any click.
         try:
             self.window.setInitialFirstResponder_(self.process_table)
+            # setInitialFirstResponder_ is consulted when the window BECOMES
+            # key; makeKeyAndOrderFront_ above already did that, so move focus
+            # directly for this first open (later re-keys use the initial one).
+            self.window.makeFirstResponder_(self.process_table)
             if self.process_table.numberOfRows() > 0:
                 from Foundation import NSIndexSet
 
@@ -4743,6 +4751,7 @@ class ApplioLauncher:
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
         self._a11y_policy = applio_a11y.AnnouncementPolicy()  # Job lifecycle announcements
+        self._a11y_primed = False  # First heartbeat primes, doesn't announce
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
         self._menu_handler = (
@@ -5333,11 +5342,43 @@ class ApplioLauncher:
             }
         return snap
 
+    def _a11y_terminal_words(self):
+        """Map snapshot keys -> stored history status for jobs that vanished.
+
+        get_active_processes() nulls dead entries, so a subprocess that died
+        non-zero reaches the policy only as a disappearance. History (written
+        in the same finally-block that untracks) carries the real outcome;
+        feeding it to events() makes the announcement say "failed" instead of
+        the default "finished". History is newest-first, so the most recent
+        entry for a key wins.
+        """
+        try:
+            words = {}
+            for entry in get_recent_processes(limit=20):
+                name = (entry.get("model_name") or "").strip()
+                etype = (entry.get("type") or "").strip()
+                status = (entry.get("status") or "").strip()
+                if name and etype and status:
+                    words.setdefault(f"{etype}:{name}", status)
+            return words
+        except Exception:
+            logging.debug("[A11y] terminal words lookup failed", exc_info=True)
+            return {}
+
     def _a11y_heartbeat(self):
         """Diff job states every 2 s; announce changes; refresh the dock badge."""
         try:
             snap = self._a11y_snapshot()
-            events = self._a11y_policy.events(snap)
+            if not self._a11y_primed:
+                # First heartbeat: record already-running jobs silently so a
+                # relaunch doesn't announce "Started X" for hour-old jobs.
+                self._a11y_policy.prime(snap)
+                self._a11y_primed = True
+                events = []
+            else:
+                events = self._a11y_policy.events(
+                    snap, terminal_words=self._a11y_terminal_words()
+                )
         except Exception:
             logging.debug("[A11y] snapshot failed", exc_info=True)
             return

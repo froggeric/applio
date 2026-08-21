@@ -15,8 +15,9 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   - **Edit menu + keyboard shortcuts.** Edit → Cut/Copy/Paste/Select All (⌘X/⌘C/⌘V/⌘A) reaches
     text fields inside the web UI through the responder chain; ⌘L opens the Logs folder, ⇧⌘D
     sets the data location, ⌘0 refocuses the main window, ⇧⌘R reveals the data folder in Finder.
-  - **Process menu live jobs submenu.** The Process menu now lists active background jobs with
-    Pause/Resume/Open Dashboard actions instead of a static disabled status line.
+  - **Process menu live jobs submenu.** The Process menu now lists active background jobs;
+    selecting one opens the dashboard (Pause/Resume live in its action bar) instead of a
+    static disabled status line.
   - **Enabled downloads.** Model export / download links open a native save panel instead of
     being silently swallowed by the webview.
   - **Accessible boot/loading screen.** The startup screen is a polite live region announcing
