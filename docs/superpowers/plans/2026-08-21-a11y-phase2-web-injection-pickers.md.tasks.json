@@ -69,13 +69,14 @@
     {
       "id": 8,
       "subject": "Task 8: assets/applio_a11y.js + patch_web_a11y_payload.py — the web payload",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         6,
         7
       ],
       "description": "Live + Last-result regions, accordion healing (sentinel selectors pinned via MANDATORY live-DOM session), aria-pressed, img alt, focus restore, output-textbox mutations, toast capture, polling with client=native + words + milestones; js= patcher. See plan Task 8.",
-      "verifyCommand": "node --check assets/applio_a11y.js && venv_macos/bin/python tests/test_patch_fixtures.py"
+      "verifyCommand": "node --check assets/applio_a11y.js && venv_macos/bin/python tests/test_patch_fixtures.py",
+      "lastUpdated": "2026-08-21T18:31:06.614145"
     },
     {
       "id": 9,
