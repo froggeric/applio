@@ -4495,6 +4495,13 @@ def _fill_ns_menu(
     """
     from AppKit import NSMenuItem
 
+    # Titles translate at RENDER time (menu_spec stays English literals).
+    # Lazy, call-time: a module-level import would couple menu building to
+    # config/i18n presence at import time.
+    import applio_i18n
+
+    _tr = applio_i18n.native_tr
+
     for mi in spec_menu:
         if mi.separator:
             ns_menu.addItem_(NSMenuItem.separatorItem())
@@ -4518,20 +4525,20 @@ def _fill_ns_menu(
                 # the item itself is left untitled (and MENU[0] must stay untitled so
                 # macOS renders the bold app name from the bundle).
                 if mi.title:
-                    sub.setTitle_(mi.title)
+                    sub.setTitle_(_tr(mi.title))
                 parent_item = NSMenuItem.alloc().init()
             else:
                 # Nested submenu (e.g. "Reveal in Finder" inside File): Cocoa shows
                 # the ITEM's title, not the submenu's, so set it explicitly.
                 parent_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                    mi.title, "", ""
+                    _tr(mi.title), "", ""
                 )
             parent_item.setSubmenu_(sub)
             ns_menu.addItem_(parent_item)
             continue
         # leaf
         item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            mi.title, "", mi.shortcut or ""
+            _tr(mi.title), "", mi.shortcut or ""
         )
         if mi.shortcut and mi.mods:
             item.setKeyEquivalentModifierMask_(_mods_to_mask(mi.mods))
@@ -4703,6 +4710,9 @@ class ApplioAppDelegate(NSObject):
             )
 
             try:
+                import applio_i18n
+
+                _t = applio_i18n.native_tr
                 info = ", ".join(
                     f"{p.get('type', '?')}:{p.get('model_name', '?')}"
                     for p in active[:3]
@@ -4710,17 +4720,19 @@ class ApplioAppDelegate(NSObject):
                 if len(active) > 3:
                     info += f", +{len(active) - 3} more"
                 alert = NSAlert.alloc().init()
-                alert.setMessageText_("Quit Applio?")
+                alert.setMessageText_(_t("Quit Applio?"))
                 alert.setInformativeText_(
-                    f"{len(active)} process(es) still running ({info}). "
-                    "Terminating now may interrupt a checkpoint write. Quit anyway?"
+                    _t(
+                        "{n} process(es) still running ({info}). "
+                        "Terminating now may interrupt a checkpoint write. Quit anyway?"
+                    ).format(n=len(active), info=info)
                 )
                 alert.setAlertStyle_(NSAlertStyleWarning)
                 alert.addButtonWithTitle_(
-                    "Cancel"
+                    _t("Cancel")
                 )  # First: auto Escape; NO Return default
                 alert.addButtonWithTitle_(
-                    "Terminate & Quit"
+                    _t("Terminate & Quit")
                 )  # Second: no key equivalent — explicit click only
                 if alert.runModal() != NSAlertSecondButtonReturn:
                     return 0  # NSTerminateCancel
@@ -4762,9 +4774,11 @@ class ApplioLauncher:
         self.progress_window = None
         self._menu_update_timer = None
         self._dashboard_controller = None  # Persistent dashboard window
-        self._a11y_policy = (
-            applio_a11y.AnnouncementPolicy()
-        )  # Job lifecycle announcements
+        import applio_i18n
+
+        self._a11y_policy = applio_a11y.AnnouncementPolicy(
+            translator=applio_i18n.native_tr
+        )  # Job lifecycle announcements (translated, English fallback)
         self._a11y_primed = False  # First heartbeat primes, doesn't announce
         try:
             import applio_native_picker
@@ -5819,17 +5833,23 @@ class ApplioLauncher:
         if not NATIVE_APIS_AVAILABLE:
             return
 
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         if not self._first_run_done():
             from AppKit import NSAlert, NSAlertStyleInformational
 
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Choose a Data Location First")
+            alert.setMessageText_(_t("Choose a Data Location First"))
             alert.setInformativeText_(
-                "Applio is asking you to choose where to store its data. "
-                "Please complete that prompt first, then you can change it here."
+                _t(
+                    "Applio is asking you to choose where to store its data. "
+                    "Please complete that prompt first, then you can change it here."
+                )
             )
             alert.setAlertStyle_(NSAlertStyleInformational)
-            alert.addButtonWithTitle_("OK")
+            alert.addButtonWithTitle_(_t("OK"))
             alert.runModal()
             return
 
@@ -5841,9 +5861,9 @@ class ApplioLauncher:
         panel.setCanChooseDirectories_(True)
         panel.setAllowsMultipleSelection_(False)
         panel.setMessage_(
-            "Select a folder to store Applio data (models, training, logs):"
+            _t("Select a folder to store Applio data (models, training, logs):")
         )
-        panel.setPrompt_("Choose")
+        panel.setPrompt_(_t("Choose"))
 
         # Get current data path as starting point
         current_path = os.environ.get(
@@ -5870,13 +5890,15 @@ class ApplioLauncher:
                 from AppKit import NSAlert, NSAlertStyleWarning
 
                 alert = NSAlert.alloc().init()
-                alert.setMessageText_("Restart Required")
+                alert.setMessageText_(_t("Restart Required"))
                 alert.setInformativeText_(
-                    f"Data location set to:\n{new_path}\n\n"
-                    "Please restart Applio for this change to take effect."
+                    _t(
+                        "Data location set to:\n{path}\n\n"
+                        "Please restart Applio for this change to take effect."
+                    ).format(path=new_path)
                 )
                 alert.setAlertStyle_(NSAlertStyleWarning)
-                alert.addButtonWithTitle_("OK")
+                alert.addButtonWithTitle_(_t("OK"))
                 alert.runModal()
 
     def showProgressMonitor_(self, sender):

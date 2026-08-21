@@ -31,7 +31,10 @@ def count_live(snapshot):
 class AnnouncementPolicy:
     """Diffs consecutive process snapshots and decides what to announce."""
 
-    def __init__(self):
+    def __init__(self, translator=None):
+        # Optional key->string callable (applio_i18n.native_tr); identity
+        # default keeps messages byte-identical when untranslated.
+        self._t = translator or (lambda s: s)
         self._seen = {}  # key -> (status, label, word_key)
 
     def prime(self, snapshot):
@@ -71,19 +74,25 @@ class AnnouncementPolicy:
             prev = self._seen.get(key, (None, label, key))[0]
             if prev is None:
                 if status == "running":
-                    out.append(("start", f"Started {label}"))
+                    out.append(
+                        ("start", self._t("Started {label}").format(label=label))
+                    )
             elif prev != status:
                 if status in TERMINAL_STATUSES:
-                    out.append(("terminal", f"{label} {status}"))
+                    word = self._t(status)  # unknown words fall back to the raw word
+                    msg = self._t("{label} {status}").format(label=label, status=word)
+                    out.append(("terminal", msg))
                 elif status == "paused":
-                    out.append(("info", f"{label} paused"))
+                    out.append(("info", self._t("{label} paused").format(label=label)))
                 elif status == "running":
-                    out.append(("info", f"{label} resumed"))
+                    out.append(("info", self._t("{label} resumed").format(label=label)))
             self._seen[key] = (status, label, info.get("word_key", key))
         for key in [k for k in self._seen if k not in snapshot]:
             prev_status, label, word_key = self._seen.pop(key)
             if prev_status in LIVE_STATUSES:
-                out.append(("terminal", f"{label} {words.get(word_key, 'finished')}"))
+                word = self._t(words.get(word_key, "finished"))
+                msg = self._t("{label} {status}").format(label=label, status=word)
+                out.append(("terminal", msg))
         return out
 
     def missing_keys(self, snapshot):

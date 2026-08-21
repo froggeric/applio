@@ -380,6 +380,10 @@ def show_close_confirmation() -> int:
         NSAlertSecondButtonReturn,
     )
 
+    import applio_i18n
+
+    _t = applio_i18n.native_tr
+
     active = get_active_process_list()
     if not active:
         return CLOSE_QUIT  # No active processes, allow close
@@ -395,19 +399,21 @@ def show_close_confirmation() -> int:
         process_info += f"\n  ... and {len(active) - 3} more"
 
     alert = NSAlert.alloc().init()
-    alert.setMessageText_("Active Processes Running")
+    alert.setMessageText_(_t("Active Processes Running"))
     alert.setInformativeText_(
-        f"The following processes are still running:\n{process_info}\n\n"
-        "What would you like to do?"
+        _t(
+            "The following processes are still running:\n{procs}\n\n"
+            "What would you like to do?"
+        ).format(procs=process_info)
     )
     alert.setAlertStyle_(NSAlertStyleWarning)
     alert.addButtonWithTitle_(
-        "Keep Running"
+        _t("Keep Running")
     )  # First: safe default — auto Return; SIGSTOP'd jobs keep running
     alert.addButtonWithTitle_(
-        "Terminate & Quit"
+        _t("Terminate & Quit")
     )  # Second: no key equivalent — explicit click only
-    alert.addButtonWithTitle_("Cancel")  # Third: auto Escape (title-based)
+    alert.addButtonWithTitle_(_t("Cancel"))  # Third: auto Escape (title-based)
 
     response = alert.runModal()
 
@@ -543,15 +549,19 @@ def select_data_folder(default_path: str = None) -> str | None:
     if not NATIVE_APIS_AVAILABLE:
         return default_path
 
+    import applio_i18n
+
+    _t = applio_i18n.native_tr
+
     panel = NSOpenPanel.openPanel()
     panel.setCanChooseFiles_(False)
     panel.setCanChooseDirectories_(True)
     panel.setAllowsMultipleSelection_(False)
     panel.setCanCreateDirectories_(True)
-    panel.setTitle_("Select Applio Data Location")
-    panel.setPrompt_("Select")
+    panel.setTitle_(_t("Select Applio Data Location"))
+    panel.setPrompt_(_t("Select"))
     panel.setMessage_(
-        "Choose where Applio will store models, datasets, and training data."
+        _t("Choose where Applio will store models, datasets, and training data.")
     )
 
     if default_path:
@@ -572,12 +582,18 @@ def confirm_data_location(default_location, message, info):
     """
     from AppKit import NSAlert, NSApp, NSAlertFirstButtonReturn
 
+    import applio_i18n
+
+    _t = applio_i18n.native_tr
+
     NSApp.activateIgnoringOtherApps_(True)
     alert = NSAlert.alloc().init()
+    # message/info arrive pre-translated from the call sites (they may embed
+    # dynamic paths/errors, so they are template-formatted there, not here).
     alert.setMessageText_(message)
     alert.setInformativeText_(info)
-    alert.addButtonWithTitle_("Use Default")
-    alert.addButtonWithTitle_("Choose Again…")
+    alert.addButtonWithTitle_(_t("Use Default"))
+    alert.addButtonWithTitle_(_t("Choose Again…"))
     return alert.runModal() == NSAlertFirstButtonReturn
 
 
@@ -998,6 +1014,10 @@ def render_pywebview():
 
     dispatch = _build_wrapper_dispatch(open_in_finder, change_data_location)
 
+    import applio_i18n
+
+    _tr = applio_i18n.native_tr  # titles translate at render; spec stays English
+
     def build(nodes, is_app_payload=False):
         items = []
         for mi in nodes:
@@ -1008,14 +1028,18 @@ def render_pywebview():
                     items.append(MenuSeparator())
                 continue
             if mi.submenu:
-                items.append(Menu(mi.title, build(mi.submenu)))
+                children = build(mi.submenu)
+                if not children:
+                    continue  # empty nested submenu (children launcher-only, e.g.
+                    # Accessibility) — mirrors the top-level empty check below
+                items.append(Menu(_tr(mi.title), children))
                 continue
             if not mi.key:
                 continue  # display-only status line: pywebview can't mutate it; skip
             fn = dispatch.get(mi.key)
             if fn is None:
                 continue  # keys pywebview injects (about/hide/hide_others/quit) -> omit
-            items.append(MenuAction(mi.title, (lambda f=fn: f())))
+            items.append(MenuAction(_tr(mi.title), (lambda f=fn: f())))
         if items and isinstance(items[-1], MenuSeparator):
             items.pop()  # drop a trailing separator
         return items
@@ -1028,7 +1052,7 @@ def render_pywebview():
             children = build(top.submenu)
             if not children:
                 continue  # e.g. Edit: selector-only items this renderer cannot bind
-            out.append(Menu(top.title, children))
+            out.append(Menu(_tr(top.title), children))
     return out
 
 
@@ -1520,15 +1544,21 @@ class ApplioApp:
         try:
             from AppKit import NSAlert, NSApp
 
+            import applio_i18n
+
+            _t = applio_i18n.native_tr
+
             NSApp.activateIgnoringOtherApps_(True)
             alert = NSAlert.alloc().init()
-            alert.setMessageText_("Applio failed to start")
+            alert.setMessageText_(_t("Applio failed to start"))
             alert.setInformativeText_(
-                "The backend did not become ready in time. The log file explains "
-                "why: once the window loads, use Process → Open Debug Logs…, or "
-                "open ~/Library/Logs/Applio/ manually."
+                _t(
+                    "The backend did not become ready in time. The log file explains "
+                    "why: once the window loads, use Process → Open Debug Logs…, or "
+                    "open ~/Library/Logs/Applio/ manually."
+                )
             )
-            alert.addButtonWithTitle_("OK")
+            alert.addButtonWithTitle_(_t("OK"))
             alert.runModal()
         except Exception:
             pass
@@ -1813,6 +1843,10 @@ def start_gui(launcher=None):
     DATA_PATH = _prefs.get_data_path()
 
     if not DATA_PATH:
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         # First run - prompt for location
         default_location = os.path.expanduser("~/Applio")
         DATA_PATH = select_data_folder(default_location)
@@ -1821,9 +1855,11 @@ def start_gui(launcher=None):
             # User cancelled - confirm the fallback instead of silently defaulting
             use_default = confirm_data_location(
                 default_location,
-                "No data location was chosen.",
-                "Applio stores models, datasets and training results in the data "
-                f"location. Use the default ({default_location}) or choose again?",
+                _t("No data location was chosen."),
+                _t(
+                    "Applio stores models, datasets and training results in the data "
+                    "location. Use the default ({default}) or choose again?"
+                ).format(default=default_location),
             )
             if use_default:
                 DATA_PATH = default_location
@@ -1845,9 +1881,11 @@ def start_gui(launcher=None):
         while path_error is not None:
             use_default = confirm_data_location(
                 default_location,
-                "The selected location is not writable.",
-                f"Error: {path_error}\nUse the default location "
-                f"({default_location}) or choose again?",
+                _t("The selected location is not writable."),
+                _t(
+                    "Error: {error}\nUse the default location "
+                    "({default}) or choose again?"
+                ).format(error=path_error, default=default_location),
             )
             if use_default:
                 path_error = None

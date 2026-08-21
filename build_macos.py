@@ -540,6 +540,7 @@ HIDDEN_IMPORTS = [
     "menu_spec",  # Spec-driven native menu (imported by launcher + wrapper)
     "applio_update_check",  # Shared update check (lazy-imported -> PyInstaller can't trace it)
     "applio_a11y",  # Accessibility announcement engine (lazy AppKit import -> listed for safety)
+    "applio_i18n",  # Native-string i18n translator (lazy import at every call site)
     "applio_native_picker",  # Native NSOpenPanel Browse-button picker (lazy AppKit import)
     "applio_browse_ui",  # Browse-button factory injected into tab files at build time
     "applio_progress_api",  # /applio-a11y/progress payload (lazy-imported by patched app.py)

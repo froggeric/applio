@@ -190,18 +190,24 @@ def check_for_updates_interactive():
         logging.warning("[Update] AppKit unavailable; skipping interactive check")
         return
 
+    import applio_i18n
+
+    _t = applio_i18n.native_tr
+
     def _on_main(result):
         latest_version, release_url, error_message = result
         alert = NSAlert.alloc().init()
         if error_message or not latest_version:
-            alert.setMessageText_("Could Not Check for Updates")
+            alert.setMessageText_(_t("Could Not Check for Updates"))
             alert.setInformativeText_(
-                f"An error occurred while checking for updates.\n\n"
-                f"{error_message or 'No release tag found.'}\n\n"
-                "You can manually check for updates on GitHub."
+                _t(
+                    "An error occurred while checking for updates.\n\n"
+                    "{error}\n\n"
+                    "You can manually check for updates on GitHub."
+                ).format(error=error_message or _t("No release tag found."))
             )
-            alert.addButtonWithTitle_("Open GitHub Releases")
-            alert.addButtonWithTitle_("OK")
+            alert.addButtonWithTitle_(_t("Open GitHub Releases"))
+            alert.addButtonWithTitle_(_t("OK"))
             alert.setAlertStyle_(NSAlertStyleWarning)
             NSApp.activateIgnoringOtherApps_(True)
             buttons = alert.buttons()
@@ -212,15 +218,17 @@ def check_for_updates_interactive():
             if alert.runModal() == NSAlertFirstButtonReturn:
                 subprocess.Popen(["open", release_url])
         elif is_update_available(VERSION, latest_version, release_url)[0]:
-            alert.setMessageText_("Update Available")
+            alert.setMessageText_(_t("Update Available"))
             alert.setInformativeText_(
-                f"A new version of Applio is available.\n\n"
-                f"Current version: v{VERSION}\n"
-                f"Latest version: v{latest_version}\n\n"
-                "Would you like to open the releases page to get the new version?"
+                _t(
+                    "A new version of Applio is available.\n\n"
+                    "Current version: v{current}\n"
+                    "Latest version: v{latest}\n\n"
+                    "Would you like to open the releases page to get the new version?"
+                ).format(current=VERSION, latest=latest_version)
             )
-            alert.addButtonWithTitle_("Open Releases Page…")
-            alert.addButtonWithTitle_("Later")
+            alert.addButtonWithTitle_(_t("Open Releases Page…"))
+            alert.addButtonWithTitle_(_t("Later"))
             alert.setAlertStyle_(NSAlertStyleInformational)
             NSApp.activateIgnoringOtherApps_(True)
             buttons = alert.buttons()
@@ -231,11 +239,13 @@ def check_for_updates_interactive():
             if alert.runModal() == NSAlertFirstButtonReturn:
                 subprocess.Popen(["open", release_url])
         else:
-            alert.setMessageText_("You're Up to Date")
+            alert.setMessageText_(_t("You're Up to Date"))
             alert.setInformativeText_(
-                f"Applio is running the latest version.\n\nVersion {VERSION}"
+                _t("Applio is running the latest version.\n\nVersion {version}").format(
+                    version=VERSION
+                )
             )
-            alert.addButtonWithTitle_("OK")
+            alert.addButtonWithTitle_(_t("OK"))
             alert.setAlertStyle_(NSAlertStyleInformational)
             NSApp.activateIgnoringOtherApps_(True)
             buttons = alert.buttons()
@@ -268,14 +278,20 @@ def check_for_updates_at_launch():
             )
         except ImportError:
             return
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         alert = NSAlert.alloc().init()
-        alert.setMessageText_("Update Available")
+        alert.setMessageText_(_t("Update Available"))
         alert.setInformativeText_(
-            f"A new version of Applio is available (v{latest_version}).\n\n"
-            f"You are running v{VERSION}."
+            _t(
+                "A new version of Applio is available (v{latest}).\n\n"
+                "You are running v{current}."
+            ).format(latest=latest_version, current=VERSION)
         )
-        alert.addButtonWithTitle_("Open GitHub Releases")
-        alert.addButtonWithTitle_("Later")
+        alert.addButtonWithTitle_(_t("Open GitHub Releases"))
+        alert.addButtonWithTitle_(_t("Later"))
         alert.setAlertStyle_(NSAlertStyleInformational)
         NSApp.activateIgnoringOtherApps_(True)
         buttons = alert.buttons()
