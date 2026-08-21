@@ -1900,8 +1900,9 @@ class ProgressWindowController:
         self.phase_label.setStringValue_(
             f"{icon}  {phase.upper()}  •  {current} of {total} {total_label}"
         )
-        # AX value mirrors the line above minus the emoji, which screen
-        # readers pronounce as noise ("face with monocle" etc.).
+        # AX value mirrors the visual line minus the emoji; casing stays
+        # natural (screen readers read "Feature extraction" naturally —
+        # the visual .upper() is styling only).
         self.phase_label.setAccessibilityValue_(
             f"{phase} — {current} of {total} {total_label}"
         )
@@ -3821,10 +3822,17 @@ class ProcessDashboardController(NSObject):
         Paused from the psutil SIGSTOP probe stamped by _annotate_pause_state
         at list-refresh time (active_processes.json keeps paused jobs
         "running"); history rows use the status stored when the run ended.
+        A cancelling batch shows "Stopping" — checked BEFORE the probe,
+        which synthesized inference procs force to False (never paused).
         """
         if row < len(self._active_processes):
             proc = self._active_processes[row]
-            word = "Paused" if proc.get("_ps_stopped") else "Running"
+            if proc.get("status") == "cancelling":
+                word = "Stopping"
+            elif proc.get("_ps_stopped"):
+                word = "Paused"
+            else:
+                word = "Running"
             proc_type = proc.get("type", "Unknown").capitalize()
             model_name = proc.get("model_name", "")
             return f"{word} — {proc_type}: {model_name}"
@@ -5304,8 +5312,9 @@ class ApplioLauncher:
         Sources are the module-level functions (verified scopes): subprocess
         jobs from get_active_processes(), the in-app batch from
         _synthesize_inference_proc() — disjoint, no dedupe. Keys are
-        type:name so two jobs sharing a model name (e.g. preprocess vs
-        training) are tracked independently. Paused is derived per-proc via
+        type:name:pid so same-type jobs sharing a model name (e.g. a
+        relaunched preprocess) are tracked independently; word_key drops
+        the pid to match history's type:name keys. Paused is derived per-proc via
         psutil because active_processes.json keeps SIGSTOPped jobs "running".
         The in-app batch's "cancelling" maps onto the policy's terminal
         "cancelled" (see the inference block below for why a bare passthrough
@@ -5322,10 +5331,12 @@ class ApplioLauncher:
                         status = "paused"
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
-            snap[f"{proc.get('type', 'process')}:{name}"] = {
+            key = f"{proc.get('type', 'process')}:{name}:{pid or 'x'}"
+            snap[key] = {
                 "type": proc.get("type", "process"),
                 "name": name,
                 "status": status,
+                "word_key": f"{proc.get('type', 'process')}:{name}",
             }
         inf = _synthesize_inference_proc()
         if inf:
@@ -5343,10 +5354,11 @@ class ApplioLauncher:
                 status = "cancelled"
             elif status != "running":
                 status = "running"
-            snap[f"inference:{name}"] = {
+            snap[f"inference:{name}:app"] = {
                 "type": "batch inference",
                 "name": name,
                 "status": status,
+                "word_key": f"inference:{name}",
             }
         return snap
 
@@ -5384,17 +5396,19 @@ class ApplioLauncher:
                 self._a11y_primed = True
                 events = []
             else:
-                events = self._a11y_policy.events(
-                    snap, terminal_words=self._a11y_terminal_words()
-                )
+                # Terminal words are a locked whole-file history read; only
+                # pay it when a snapshot key actually disappeared.
+                missing = self._a11y_policy.missing_keys(snap)
+                words = self._a11y_terminal_words() if missing else {}
+                events = self._a11y_policy.events(snap, terminal_words=words)
         except Exception:
             logging.debug("[A11y] snapshot failed", exc_info=True)
             return
         for kind, msg in events:
             logging.info(f"[A11y] {kind}: {msg}")
             AppHelper.callAfter(self._a11y_post, msg, kind)
-        running = sum(1 for v in snap.values() if v.get("status") == "running")
-        AppHelper.callAfter(self._a11y_update_badge, running)
+        live = applio_a11y.count_live(snap)
+        AppHelper.callAfter(self._a11y_update_badge, live)
 
     def _a11y_post(self, msg, kind):
         """Runs on the main thread. Post the AX announcement + attention request."""
@@ -5404,7 +5418,7 @@ class ApplioLauncher:
             element = (
                 NSApp.keyWindow() or NSApp.mainWindow() or self._main_window.native
             )
-            applio_a11y.post_announcement(msg, element)
+            applio_a11y.post_announcement(element, msg)
             if kind == "terminal":
                 bad = any(w in msg for w in ("fail", "error", "cancel", "interrupt"))
                 NSApp.requestUserAttention_(
@@ -5414,7 +5428,7 @@ class ApplioLauncher:
             pass
 
     def _a11y_update_badge(self, running):
-        """Runs on the main thread. Dock badge = number of running jobs."""
+        """Runs on the main thread. Dock badge = number of live jobs."""
         try:
             from AppKit import NSApp
 
