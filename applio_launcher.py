@@ -2122,6 +2122,22 @@ class ProgressWindowController:
         self.window.makeKeyAndOrderFront_(None)
         logging.info(f"[ProgressWindow] Showing window for {self.process_type}")
 
+        # Initial keyboard focus: Pause is the primary RECOVERABLE action. Never
+        # Terminate — a reflexive Return there would kill the run. After a user
+        # terminate both pause+terminate are disabled; fall back to the always-
+        # enabled, fully non-destructive Open Logs.
+        try:
+            target = (
+                self.pause_btn
+                if hasattr(self, "pause_btn")
+                and self.pause_btn
+                and self.pause_btn.isEnabled()
+                else self.logs_btn
+            )
+            self.window.setInitialFirstResponder_(target)
+        except Exception:
+            logging.debug("[ProgressWindow] first-responder setup failed", exc_info=True)
+
         # Initial log read - queue to background thread instead of blocking main thread
         # The background thread will pick up existing content on first poll
         if self.log_file_path and os.path.exists(self.log_file_path):
@@ -4090,6 +4106,19 @@ class ProcessDashboardController(NSObject):
         logging.info(f"[Dashboard] Showing window (state: {self._current_state})")
         self.window.makeKeyAndOrderFront_(None)
 
+        # Give the process list keyboard focus on open (arrows/Enter act on it),
+        # with row 0 preselected so Enter has a target even before any click.
+        try:
+            self.window.setInitialFirstResponder_(self.process_table)
+            if self.process_table.numberOfRows() > 0:
+                from Foundation import NSIndexSet
+
+                self.process_table.selectRowIndexes_byExtendingSelection_(
+                    NSIndexSet.indexSetWithIndex_(0), False
+                )
+        except Exception:
+            logging.debug("[Dashboard] first-responder setup failed", exc_info=True)
+
         # User has shown interest in the dashboard this session — enable auto-show.
         self._opened_this_session = True
 
@@ -4652,7 +4681,7 @@ class ApplioAppDelegate(NSObject):
             from AppKit import (
                 NSAlert,
                 NSAlertStyleWarning,
-                NSAlertFirstButtonReturn,
+                NSAlertSecondButtonReturn,
             )
 
             try:
@@ -4669,9 +4698,11 @@ class ApplioAppDelegate(NSObject):
                     "Terminating now may interrupt a checkpoint write. Quit anyway?"
                 )
                 alert.setAlertStyle_(NSAlertStyleWarning)
-                alert.addButtonWithTitle_("Terminate & Quit")
-                alert.addButtonWithTitle_("Cancel")
-                if alert.runModal() != NSAlertFirstButtonReturn:
+                alert.addButtonWithTitle_("Cancel")  # First: auto Escape; NO Return default
+                alert.addButtonWithTitle_(
+                    "Terminate & Quit"
+                )  # Second: no key equivalent — explicit click only
+                if alert.runModal() != NSAlertSecondButtonReturn:
                     return 0  # NSTerminateCancel
             except Exception as e:
                 logging.warning(f"[AppDelegate] quit-confirm alert failed: {e}")

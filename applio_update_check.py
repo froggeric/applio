@@ -183,6 +183,7 @@ def check_for_updates_interactive():
             NSAlertFirstButtonReturn,
             NSAlertStyleInformational,
             NSAlertStyleWarning,
+            NSApp,
         )
         from PyObjCTools import AppHelper
     except ImportError:
@@ -202,6 +203,10 @@ def check_for_updates_interactive():
             alert.addButtonWithTitle_("Open GitHub Releases")
             alert.addButtonWithTitle_("OK")
             alert.setAlertStyle_(NSAlertStyleWarning)
+            NSApp.activateIgnoringOtherApps_(True)
+            buttons = alert.buttons()
+            if buttons:
+                buttons[-1].setKeyEquivalent_("\x1b")
             if alert.runModal() == NSAlertFirstButtonReturn:
                 subprocess.Popen(["open", release_url])
         elif is_update_available(VERSION, latest_version, release_url)[0]:
@@ -212,9 +217,13 @@ def check_for_updates_interactive():
                 f"Latest version: v{latest_version}\n\n"
                 "Would you like to download the update?"
             )
-            alert.addButtonWithTitle_("Download Update")
+            alert.addButtonWithTitle_("Open Releases Page…")
             alert.addButtonWithTitle_("Later")
             alert.setAlertStyle_(NSAlertStyleInformational)
+            NSApp.activateIgnoringOtherApps_(True)
+            buttons = alert.buttons()
+            if buttons:
+                buttons[-1].setKeyEquivalent_("\x1b")
             if alert.runModal() == NSAlertFirstButtonReturn:
                 subprocess.Popen(["open", release_url])
         else:
@@ -224,6 +233,10 @@ def check_for_updates_interactive():
             )
             alert.addButtonWithTitle_("OK")
             alert.setAlertStyle_(NSAlertStyleInformational)
+            NSApp.activateIgnoringOtherApps_(True)
+            buttons = alert.buttons()
+            if buttons:
+                buttons[-1].setKeyEquivalent_("\x1b")
             alert.runModal()
 
     _run_async_on_main(_fetch_result, _on_main)
@@ -245,6 +258,7 @@ def check_for_updates_at_launch():
                 NSAlert,
                 NSAlertFirstButtonReturn,
                 NSAlertStyleInformational,
+                NSApp,
             )
         except ImportError:
             return
@@ -257,6 +271,10 @@ def check_for_updates_at_launch():
         alert.addButtonWithTitle_("Open GitHub Releases")
         alert.addButtonWithTitle_("Later")
         alert.setAlertStyle_(NSAlertStyleInformational)
+        NSApp.activateIgnoringOtherApps_(True)
+        buttons = alert.buttons()
+        if buttons:
+            buttons[-1].setKeyEquivalent_("\x1b")
         if alert.runModal() == NSAlertFirstButtonReturn:
             subprocess.Popen(["open", url])
 

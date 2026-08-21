@@ -366,8 +366,8 @@ def show_close_confirmation() -> int:
     """Show native confirmation dialog when closing with active processes.
 
     Returns:
-        CLOSE_QUIT (1): User wants to terminate and quit
         CLOSE_KEEP_RUNNING (2): User wants to keep processes running in background
+        CLOSE_QUIT (1): User wants to terminate and quit
         CLOSE_CANCEL (3): User cancelled the close action
     """
     if not NATIVE_APIS_AVAILABLE:
@@ -402,19 +402,19 @@ def show_close_confirmation() -> int:
     )
     alert.setAlertStyle_(NSAlertStyleWarning)
     alert.addButtonWithTitle_(
-        "Terminate & Quit"
-    )  # First button (NSAlertFirstButtonReturn)
-    alert.addButtonWithTitle_(
         "Keep Running"
-    )  # Second button (NSAlertSecondButtonReturn)
-    alert.addButtonWithTitle_("Cancel")  # Third button
+    )  # First: safe default — auto Return; SIGSTOP'd jobs keep running
+    alert.addButtonWithTitle_(
+        "Terminate & Quit"
+    )  # Second: no key equivalent — explicit click only
+    alert.addButtonWithTitle_("Cancel")  # Third: auto Escape (title-based)
 
     response = alert.runModal()
 
     if response == NSAlertFirstButtonReturn:
-        return CLOSE_QUIT
-    elif response == NSAlertSecondButtonReturn:
         return CLOSE_KEEP_RUNNING
+    elif response == NSAlertSecondButtonReturn:
+        return CLOSE_QUIT
     else:
         return CLOSE_CANCEL
 
