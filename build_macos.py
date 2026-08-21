@@ -539,6 +539,7 @@ HIDDEN_IMPORTS = [
     "webview.platforms.cocoa",
     "menu_spec",  # Spec-driven native menu (imported by launcher + wrapper)
     "applio_update_check",  # Shared update check (lazy-imported -> PyInstaller can't trace it)
+    "applio_a11y",  # Accessibility announcement engine (lazy AppKit import -> listed for safety)
     "wget",  # Used by rvc/lib/utils.py for downloads
     "resampy",  # Audio resampling library
     "librosa",  # Audio analysis library
