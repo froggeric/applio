@@ -4,15 +4,18 @@
     {
       "id": 1,
       "subject": "Task 1: applio_a11y.py refinements — statuses, keys, badge count, lazy words, arg order",
-      "status": "pending",
+      "status": "completed",
       "description": "LIVE_STATUSES + invariant; pop-based disappearance with word_key 3-tuple; count_live; missing_keys; post_announcement(element, message). 17 tests. See plan Task 1.",
-      "verifyCommand": "venv_macos/bin/python tests/test_applio_a11y.py"
+      "verifyCommand": "venv_macos/bin/python tests/test_applio_a11y.py",
+      "lastUpdated": "2026-08-21T17:53:05.104577"
     },
     {
       "id": 2,
       "subject": "Task 2: Launcher refinements — pid keys, badge truth, Stopping row, lazy history, call-site order",
       "status": "pending",
-      "blockedBy": [1],
+      "blockedBy": [
+        1
+      ],
       "description": "Snapshot keys type:name:pid + word_key; lazy terminal words; count_live badge; post_announcement call order (FIRST step); Stopping row; {phase} comment. See plan Task 2.",
       "verifyCommand": "venv_macos/bin/python -m py_compile applio_launcher.py && venv_macos/bin/python tests/test_applio_a11y.py"
     },
@@ -34,7 +37,9 @@
       "id": 5,
       "subject": "Task 5: applio_browse_ui.py + patch_browse_buttons.py — Browse buttons on all path fields",
       "status": "pending",
-      "blockedBy": [4],
+      "blockedBy": [
+        4
+      ],
       "description": "Factory + handler (expanduser, gr.Info fallbacks); patcher inserts one line after each of 13 verified fields (incl. input_folder_batch/output_folder_batch) across 6 upstream tab files; no-silent-skips fixture assertion; 6 registration tuples. See plan Task 5.",
       "verifyCommand": "venv_macos/bin/python tests/test_browse_ui.py && venv_macos/bin/python tests/test_patch_fixtures.py"
     },
@@ -49,7 +54,9 @@
       "id": 7,
       "subject": "Task 7: patch_progress_routes.py — app.py route registration + prevent_thread_lock flip",
       "status": "pending",
-      "blockedBy": [6],
+      "blockedBy": [
+        6
+      ],
       "description": "Flip prevent_thread_lock, register routes before the TB anchor, not-client keep-alive preserves never-returns; fixture test; registration tuple. See plan Task 7.",
       "verifyCommand": "venv_macos/bin/python tests/test_patch_fixtures.py && venv_macos/bin/python patches/patch_progress_routes.py app.py && venv_macos/bin/python -m py_compile app.py"
     },
@@ -57,7 +64,10 @@
       "id": 8,
       "subject": "Task 8: assets/applio_a11y.js + patch_web_a11y_payload.py — the web payload",
       "status": "pending",
-      "blockedBy": [6, 7],
+      "blockedBy": [
+        6,
+        7
+      ],
       "description": "Live + Last-result regions, accordion healing (sentinel selectors pinned via MANDATORY live-DOM session), aria-pressed, img alt, focus restore, output-textbox mutations, toast capture, polling with client=native + words + milestones; js= patcher. See plan Task 8.",
       "verifyCommand": "node --check assets/applio_a11y.js && venv_macos/bin/python tests/test_patch_fixtures.py"
     },
@@ -65,7 +75,9 @@
       "id": 9,
       "subject": "Task 9: Accessibility settings submenu — verbosity + sound cues, persisted, consumed everywhere",
       "status": "pending",
-      "blockedBy": [6],
+      "blockedBy": [
+        6
+      ],
       "description": "Spec-submenu children wired by existing dispatch; states via _find_item_by_key, refresh at end of _build_native_menu; NSUserDefaults a11y.*; off gates logging+posts; NSSound cues; settings echo + layout callback. Amended formula test. See plan Task 9.",
       "verifyCommand": "venv_macos/bin/python tests/test_menu_spec.py && venv_macos/bin/python -m py_compile applio_launcher.py menu_spec.py"
     },
@@ -73,7 +85,9 @@
       "id": 10,
       "subject": "Task 10: applio_i18n.py — native-string i18n plumbing",
       "status": "pending",
-      "blockedBy": [1],
+      "blockedBy": [
+        1
+      ],
       "description": "AppKit-free loader (config locale resolution, _MEIPASS) + fork-owned overrides layer (NO upstream locale file edited); policy translator hook; alert + menu-render wiring; 5 tests. See plan Task 10.",
       "verifyCommand": "venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python tests/test_applio_a11y.py"
     },
@@ -81,7 +95,18 @@
       "id": 11,
       "subject": "Task 11: Integration — build wiring, docs, full test pass, frozen validation",
       "status": "pending",
-      "blockedBy": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "blockedBy": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
       "description": "Registration + HIDDEN_IMPORTS audit; full test chain; black; cert-free build + clean tree + timestamps; frozen smoke (per-request owner, non-empty jobs, /config grep, picker, settings persistence, [A11y]-absent, Last-result); CLAUDE.md + CHANGELOG + Phase 3 deferral list. See plan Task 11.",
       "verifyCommand": "venv_macos/bin/python tests/test_applio_a11y.py && venv_macos/bin/python tests/test_menu_spec.py && venv_macos/bin/python tests/test_native_picker.py && venv_macos/bin/python tests/test_browse_ui.py && venv_macos/bin/python tests/test_progress_api.py && venv_macos/bin/python tests/test_patch_fixtures.py && venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python -m pytest tests/test_inference_progress.py -v"
     }
