@@ -79,12 +79,13 @@
     {
       "id": 9,
       "subject": "Task 9: Accessibility settings submenu — verbosity + sound cues, persisted, consumed everywhere",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         6
       ],
       "description": "Spec-submenu children wired by existing dispatch; states via _find_item_by_key, refresh at end of _build_native_menu; NSUserDefaults a11y.*; off gates logging+posts; NSSound cues; settings echo + layout callback. Amended formula test. See plan Task 9.",
-      "verifyCommand": "venv_macos/bin/python tests/test_menu_spec.py && venv_macos/bin/python -m py_compile applio_launcher.py menu_spec.py"
+      "verifyCommand": "venv_macos/bin/python tests/test_menu_spec.py && venv_macos/bin/python -m py_compile applio_launcher.py menu_spec.py",
+      "lastUpdated": "2026-08-21T18:16:46.613827"
     },
     {
       "id": 10,
