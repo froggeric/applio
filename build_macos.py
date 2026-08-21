@@ -911,6 +911,12 @@ def pre_build_patch():
             "processing.py - a11y Browse buttons",
             "file",
         ),
+        (
+            "patches/patch_web_a11y_payload.py",
+            "app.py",
+            "app.py - inject a11y web payload",
+            "file",
+        ),
     ]
 
     # Validate patch order matches dependencies

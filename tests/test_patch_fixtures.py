@@ -174,12 +174,42 @@ def test_browse_buttons_patch():
     assert "_applio_browse_output_rvc_path" not in patched
 
 
+def test_web_payload_patch():
+    payload = _load("patch_web_a11y_payload", "patches/patch_web_a11y_payload.py")
+    src = open(os.path.join(REPO, "app.py"), encoding="utf8").read()
+    assert "_APPLIO_A11Y_JS_" not in src, (
+        "app.py is dirty (patched?) - restore first"
+    )
+    patched, status = payload.patch_app(src)
+    assert status in ("patched", "already")
+    assert "def _applio_a11y_js(" in patched and "_APPLIO_A11Y_JS_" in patched
+    assert '"js": _applio_a11y_js(client_mode),' in patched
+    # Only the GRADIO_6 entry inside launch_gradio is replaced; the dead
+    # `if not GRADIO_6` fallback keeps its inline js=, and css stays put.
+    helper_idx = patched.index("def _applio_a11y_js(")
+    launch_idx = patched.index("def launch_gradio(")
+    call_idx = patched.index('"js": _applio_a11y_js(client_mode),')
+    assert helper_idx < launch_idx < call_idx
+    assert '"css": "footer{display:none !important}",' in patched
+    repatched, status2 = payload.patch_app(patched)
+    assert status2 == "already" and repatched == patched  # idempotent
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".py", delete=False, encoding="utf8"
+    ) as tf:
+        tf.write(patched)
+    try:
+        py_compile.compile(tf.name, doraise=True)
+    finally:
+        os.unlink(tf.name)
+
+
 def run_all():
     test_history_written_before_untrack()
     test_upload_scan_bounded_to_function_body()
     test_progress_routes_patch()
     test_browse_buttons_patch()
-    print("All patch fixture tests passed (4).")
+    test_web_payload_patch()
+    print("All patch fixture tests passed (5).")
 
 
 if __name__ == "__main__":
