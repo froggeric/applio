@@ -2373,6 +2373,23 @@ class LossChartView(NSView):
                 continue
         self._points = cleaned
         self.setNeedsDisplay_(True)
+        # VoiceOver cannot read a custom-drawn chart; publish a text summary
+        # of the plotted data as the view's AX value. Points are (epoch, loss)
+        # tuples — see the cleaning loop above.
+        try:
+            pts = self._points or []
+            if pts:
+                best = min(pts, key=lambda t: t[1])
+                summary = (
+                    f"Loss chart: {len(pts)} epochs plotted. Best loss "
+                    f"{best[1]:.4g} at epoch {best[0]}. Latest: loss "
+                    f"{pts[-1][1]:.4g} at epoch {pts[-1][0]}."
+                )
+            else:
+                summary = "Loss chart: no data yet."
+            self.setAccessibilityValue_(summary)
+        except Exception:
+            pass
 
     def drawRect_(self, rect):
         """Draw background, gridlines + loss axis labels, the loss polyline,
@@ -3115,6 +3132,9 @@ class ProcessDashboardController(NSObject):
                     self.detail_progress.stopAnimation_(None)
                     self.detail_progress.setIndeterminate_(False)
                     self.detail_progress.setDoubleValue_(frac * 100.0)
+                    self.detail_progress.setAccessibilityValue_(
+                        f"{int(frac * 100)} percent"
+                    )
                     pct_txt = f"Epoch {cur_ep}/{total_epoch}  ({int(frac * 100)}%)"
                 elif status == "running":
                     # No metrics yet (just started) or non-training: spin to
@@ -3338,6 +3358,9 @@ class ProcessDashboardController(NSObject):
                 self.detail_progress.stopAnimation_(None)
                 self.detail_progress.setIndeterminate_(False)
                 self.detail_progress.setDoubleValue_(stats["pct"])
+                self.detail_progress.setAccessibilityValue_(
+                    f"{int(stats['pct'])} percent"
+                )
             if hasattr(self, "detail_progress_text") and self.detail_progress_text:
                 self.detail_progress_text.setStringValue_(
                     f"{processed}/{total} files ({stats['pct']}%)"
@@ -3409,6 +3432,26 @@ class ProcessDashboardController(NSObject):
         if pid and verify_process_identity(pid, started_at):
             return pid
         return None
+
+    def _annotate_pause_state(self, procs):
+        """Stamp live SIGSTOP state on each proc (JSON status stays 'running').
+
+        Called once per list rebuild (refresh_process_list/update_process_list)
+        so the row builder can spell out Paused vs Running without probing
+        psutil per visible cell on every repaint. Procs without a live pid —
+        e.g. the synthesized inference proc — stay False (an in-process batch
+        cannot be SIGSTOPped, so "Running" is the truthful word).
+        """
+        for proc in procs:
+            proc["_ps_stopped"] = False
+            pid = self._current_pid(proc)
+            if pid and PSUTIL_AVAILABLE:
+                try:
+                    proc["_ps_stopped"] = (
+                        psutil.Process(pid).status() == psutil.STATUS_STOPPED
+                    )
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
 
     def _update_action_bar(self, proc):
         """Enable/disable action buttons + set the Pause label for the shown proc.
@@ -3729,23 +3772,36 @@ class ProcessDashboardController(NSObject):
         return len(self._active_processes) + len(self._recent_processes)
 
     def tableView_objectValueForTableColumn_row_(self, tableView, column, row):
-        """Return cell content for given row."""
+        """Return cell content for given row.
+
+        Rows spell the state out in words (VoiceOver reads them verbatim —
+        symbol prefixes like ●/⏸/✓ are silence or noise). Active rows derive
+        Paused from the psutil SIGSTOP probe stamped by _annotate_pause_state
+        at list-refresh time (active_processes.json keeps paused jobs
+        "running"); history rows use the status stored when the run ended.
+        """
         if row < len(self._active_processes):
             proc = self._active_processes[row]
-            status = proc.get("status", "running")
-            # Create status indicator
-            indicator = "●" if status == "running" else "⏸"
+            word = "Paused" if proc.get("_ps_stopped") else "Running"
             proc_type = proc.get("type", "Unknown").capitalize()
             model_name = proc.get("model_name", "")
-            return f"{indicator} {proc_type}: {model_name}"
+            return f"{word} — {proc_type}: {model_name}"
         else:
-            # Recent process
             recent_idx = row - len(self._active_processes)
             if recent_idx < len(self._recent_processes):
                 proc = self._recent_processes[recent_idx]
+                status = (proc.get("status") or "completed").lower()
+                word = {
+                    "completed": "Completed",
+                    "failed": "Failed",
+                    "error": "Failed",
+                    "cancelled": "Cancelled",
+                    "canceled": "Cancelled",
+                    "interrupted": "Interrupted",
+                }.get(status, status.capitalize() or "Completed")
                 proc_type = proc.get("type", "Unknown").capitalize()
                 model_name = proc.get("model_name", "")
-                return f"✓ {proc_type}: {model_name}"
+                return f"{word} — {proc_type}: {model_name}"
         return ""
 
     # =================================================================
@@ -3787,6 +3843,10 @@ class ProcessDashboardController(NSObject):
         _inf_proc = _synthesize_inference_proc()
         if _inf_proc:
             self._active_processes.append(_inf_proc)
+
+        # Probe SIGSTOP state once per refresh so row cells render truthfully
+        # without a psutil call per visible cell (see _annotate_pause_state).
+        self._annotate_pause_state(self._active_processes)
 
         try:
             self._recent_processes = get_recent_processes(limit=5)
@@ -4288,6 +4348,10 @@ class ProcessDashboardController(NSObject):
         _inf_proc = _synthesize_inference_proc()
         if _inf_proc:
             self._active_processes.append(_inf_proc)
+
+        # Probe SIGSTOP state once per refresh so row cells render truthfully
+        # without a psutil call per visible cell (see _annotate_pause_state).
+        self._annotate_pause_state(self._active_processes)
 
         try:
             self._recent_processes = get_recent_processes(limit=5)
