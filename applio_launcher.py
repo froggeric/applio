@@ -5052,26 +5052,17 @@ class ApplioLauncher:
         if not dyn:
             return
 
-        # process.status — TITLE ONLY (a display line; built disabled, stays disabled).
-        # model_name from active_processes.json (no epoch/ETA; those require log parsing
-        # that belongs in the dashboard, not the menu).
-        status = dyn.get("process.status")
-        if status:
-            item, _hint = status
-            active = get_active_processes()
-            if active:
-                entry = active[0]
-                typ = (entry.get("type") or "process").capitalize()
-                name = (entry.get("model_name") or "active job").strip() or "active job"
-                item.setTitle_(f"● {typ}: {name}")
-            else:
-                item.setTitle_("No active processes")
+        # process.status — live jobs submenu, rebuilt every cycle (each job item
+        # opens the dashboard). model_name from active_processes.json (no epoch/ETA;
+        # those require log parsing that belongs in the dashboard, not the menu).
+        if dyn.get("process.status"):
+            self._refresh_status_submenu(get_active_processes())
 
         first_run = self._first_run_done()
         data_dir = self._resolve_data_dir() if first_run else None
         # Drive exists:<subpath> reveal items + first-run gating. SKIP status items
-        # here — their enabled state is "disabled" (set at build time) and must not
-        # be flipped on by the else branch.
+        # here — the status submenu parent's enabled state is owned by
+        # _refresh_status_submenu and must not be gated by first-run.
         for key, (item, hint) in dyn.items():
             if hint == "status":
                 continue
@@ -5087,6 +5078,50 @@ class ApplioLauncher:
         sdl = self._find_item_by_key("file.set_data_location")
         if sdl is not None:
             sdl.setEnabled_(first_run)
+
+    def _refresh_status_submenu(self, procs):
+        """Rebuild the Process→Active Processes submenu from tracked jobs.
+
+        Each job item dispatches through the SAME entry as the Open Progress
+        Dashboard item (runDispatch: + _menu_handler + its recorded tag), so the
+        dispatch table never grows. setSubmenu_ REPLACES the previous submenu
+        (no accumulation); a fresh NSMenu per rebuild is autoreleased, not a
+        leak. Exception-guarded: the 2 s menu timer must never die.
+        """
+        entry = getattr(self, "_dynamic_items", {}).get("process.status")
+        if not entry:
+            return
+        item, _hint = entry
+        try:
+            from AppKit import NSMenu, NSMenuItem
+
+            sub = NSMenu.alloc().init()
+            tag = getattr(self, "_key_to_tag", {}).get("process.open_dashboard")
+            handler = self._menu_handler  # MenuActionHandler (NSObject proxy)
+            if not procs:
+                ni = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    "No active processes", None, ""
+                )
+                ni.setEnabled_(False)
+                sub.addItem_(ni)
+            else:
+                for proc in procs:
+                    title = (
+                        f"{(proc.get('type') or 'process').capitalize()}: "
+                        f"{proc.get('model_name') or 'active job'}"
+                    ).strip()
+                    ni = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                        title, "runDispatch:" if handler and tag is not None else None, ""
+                    )
+                    if handler and tag is not None:
+                        ni.setTarget_(handler)
+                        ni.setTag_(tag)  # same tag as Open Progress Dashboard
+                    sub.addItem_(ni)
+            item.setSubmenu_(sub)
+            item.setEnabled_(True)  # display-only items are built disabled; a
+            # disabled item's submenu cannot open, so force-enable the parent
+        except Exception:
+            logging.debug("[Menu] status submenu rebuild failed", exc_info=True)
 
     # ---- Accessibility heartbeat (Phase 1: lifecycle announcements + dock badge) ----
 

@@ -215,7 +215,10 @@ MENU = [
         title="Process",
         submenu=[
             MenuItem(
-                key="process.status", title="No active processes", dynamic="status"
+                key="process.status",
+                title="Active Processes",
+                dynamic="status",  # launcher rebuilds the submenu every 2 s
+                submenu=[],  # populated at runtime; empty spec submenu is valid
             ),
             MenuItem(separator=True),
             MenuItem(
