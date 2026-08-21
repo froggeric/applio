@@ -5,6 +5,38 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ## [Unreleased]
 
+### Added
+
+- **Accessibility, Phase 1 (native wrapper foundation).** Voice support across the native app:
+  - **Announced job lifecycle + dock badge.** VoiceOver speaks when a training, preprocessing,
+    feature-extraction, or batch-inference job starts, finishes, errors, or is cancelled
+    (`[A11y]` lines in `~/Library/Logs/Applio/applio_launcher.log`), the dock badge shows the
+    number of active jobs, and finished jobs request dock attention.
+  - **Edit menu + keyboard shortcuts.** Edit → Cut/Copy/Paste/Select All (⌘X/⌘C/⌘V/⌘A) reaches
+    text fields inside the web UI through the responder chain; ⌘L opens the Logs folder, ⇧⌘D
+    sets the data location, ⌘0 refocuses the main window, ⇧⌘R reveals the data folder in Finder.
+  - **Process menu live jobs submenu.** The Process menu now lists active background jobs with
+    Pause/Resume/Open Dashboard actions instead of a static disabled status line.
+  - **Enabled downloads.** Model export / download links open a native save panel instead of
+    being silently swallowed by the webview.
+  - **Accessible boot/loading screen.** The startup screen is a polite live region announcing
+    each boot stage, its progress bar exposes real values, the window title tracks the stage,
+    and a stalled boot raises an alert instead of hanging forever.
+- **Mic permission string.** Re-added `NSMicrophoneUsageDescription` so realtime voice
+  conversion can request microphone access instead of being silently denied.
+
+### Fixed
+
+- **Truthful accessibility labels.** Dashboard labels track Pause/Resume, inference mode, and
+  real status; dashboard rows, the loss chart, and progress bars expose their values to
+  VoiceOver; the progress window's live log zone reads as words instead of glyph noise.
+- **Safe dialog defaults.** Destructive confirms put Cancel first and never bind Return (Enter
+  on the quit confirm does nothing; Escape cancels); update alerts activate properly; progress
+  dialogs land focus on a safe first responder. The close confirmation defaults to "Keep
+  Running". First run without a chosen data location now asks instead of silently defaulting.
+- **Announced Stop/upload feedback.** Stop and file-upload actions in the web UI post
+  spoken/spoken-equivalent feedback via a build-time patch instead of failing silently.
+
 ---
 
 ## [3.6.4.0] - 2026-08-13
