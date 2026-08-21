@@ -103,7 +103,7 @@
     {
       "id": 11,
       "subject": "Task 11: Integration — build wiring, docs, full test pass, frozen validation",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1,
         2,
@@ -117,7 +117,8 @@
         10
       ],
       "description": "Registration + HIDDEN_IMPORTS audit; full test chain; black; cert-free build + clean tree + timestamps; frozen smoke (per-request owner, non-empty jobs, /config grep, picker, settings persistence, [A11y]-absent, Last-result); CLAUDE.md + CHANGELOG + Phase 3 deferral list. See plan Task 11.",
-      "verifyCommand": "venv_macos/bin/python tests/test_applio_a11y.py && venv_macos/bin/python tests/test_menu_spec.py && venv_macos/bin/python tests/test_native_picker.py && venv_macos/bin/python tests/test_browse_ui.py && venv_macos/bin/python tests/test_progress_api.py && venv_macos/bin/python tests/test_patch_fixtures.py && venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python -m pytest tests/test_inference_progress.py -v"
+      "verifyCommand": "venv_macos/bin/python tests/test_applio_a11y.py && venv_macos/bin/python tests/test_menu_spec.py && venv_macos/bin/python tests/test_native_picker.py && venv_macos/bin/python tests/test_browse_ui.py && venv_macos/bin/python tests/test_progress_api.py && venv_macos/bin/python tests/test_patch_fixtures.py && venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python -m pytest tests/test_inference_progress.py -v",
+      "lastUpdated": "2026-08-21T18:51:34.433826"
     }
   ]
 }
