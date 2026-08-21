@@ -4766,6 +4766,12 @@ class ApplioLauncher:
             applio_a11y.AnnouncementPolicy()
         )  # Job lifecycle announcements
         self._a11y_primed = False  # First heartbeat primes, doesn't announce
+        try:
+            import applio_native_picker
+
+            applio_native_picker.mark_native_loop_available()
+        except Exception:
+            pass
         self._terminating = False  # Reentry protection for signal handlers
         self._dist_center = None  # NSDistributedNotificationCenter reference
         self._menu_handler = (
