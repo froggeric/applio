@@ -92,12 +92,13 @@
     {
       "id": 10,
       "subject": "Task 10: applio_i18n.py — native-string i18n plumbing",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
       "description": "AppKit-free loader (config locale resolution, _MEIPASS) + fork-owned overrides layer (NO upstream locale file edited); policy translator hook; alert + menu-render wiring; 5 tests. See plan Task 10.",
-      "verifyCommand": "venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python tests/test_applio_a11y.py"
+      "verifyCommand": "venv_macos/bin/python tests/test_applio_i18n.py && venv_macos/bin/python tests/test_applio_a11y.py",
+      "lastUpdated": "2026-08-21T18:40:32.346703"
     },
     {
       "id": 11,
