@@ -7,6 +7,20 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Added
 
+- **Accessibility, Phase 2 (web UI, pickers, settings, i18n).** Screen-reader support now reaches
+  inside the Gradio web UI, and path fields get native pickers:
+  - **Announcements in the web UI.** A live region + "Last result" region are injected into the
+    page; job milestones ("25% of epoch 12/50"), completions, failures, and output-text changes are
+    announced in external browsers too (the in-app window keeps its native VoiceOver engine — no
+    double-speaking). Accordion and tab semantics are healed for VoiceOver, and focus is restored
+    after Gradio re-renders.
+  - **Browse… buttons on every path field.** All 13 path fields across Training, Inference, TTS,
+    Realtime, Voice Blender, and Processing get a "Browse…" button opening a native macOS
+    file/folder panel; the chosen path fills the field, and typed `~/…` paths are expanded.
+  - **Accessibility settings submenu.** Announcements: Off / Standard / Verbose, plus Sound Cues —
+    persisted across launches, applied to both the native engine and the web UI.
+  - **Localized native strings.** Menu, picker, and announcement strings resolve through the
+    app's language setting (fork-owned translation layer; upstream files untouched).
 - **Accessibility, Phase 1 (native wrapper foundation).** Voice support across the native app:
   - **Announced job lifecycle + dock badge.** Posts VoiceOver announcements (with `[A11y]`
     lines in `~/Library/Logs/Applio/applio_launcher.log`) when a training, preprocessing,

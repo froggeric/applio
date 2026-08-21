@@ -440,6 +440,65 @@ is NOT in `active_processes.json`. Tracked separately:
   completed_at to epoch) so completed runs show counts/duration. `_sweep_stale_inference_progress`
   marks a stale `running` record `interrupted` on startup.
 
+**Accessibility (a11y) Phase 2 — web payload, native pickers, settings, i18n:**
+Phase 1 (native announcements, badge, Edit menu, live-jobs submenu) lives in `applio_a11y.py` +
+`applio_launcher.py` (see CHANGELOG [Unreleased]). Phase 2 extends a11y INTO the Gradio web UI.
+Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS):
+- `applio_progress_api.py` — serves `GET /applio-a11y/progress` (FastAPI route registered on the
+  gradio app by `patches/patch_progress_routes.py`): live jobs + metrics (training log tails parsed
+  via `rvc.lib.tools.process_log_parser`; inference stats via `applio_inference_stats`), history-derived
+  terminal words, and an a11y-settings echo. AppKit-free; the LAUNCHER pushes state in
+  (`set_settings`/`set_announce_owner`/`set_layout_changed_callback`). The launcher runs as `__main__`
+  (frozen entry AND dev), so launcher resolution is `sys.modules.get("applio_launcher")` with a
+  `__main__` fallback — a plain `get()` always misses.
+- `assets/applio_a11y.js` — injected at build time by `patches/patch_web_a11y_payload.py`, which
+  swaps upstream `app.py`'s inline `js=` entry for a `_applio_a11y_js(client_mode)` helper reading
+  the file from `now_dir`/`sys._MEIPASS` (ships via the `("assets","assets")` datas). Creates a
+  live region + "Last result" region client-side, polls the route every 2 s, announces job
+  milestones/terminals, heals accordion/tab semantics (selectors pinned against gradio 6.20.0 —
+  see task-8-report.md), restores focus after gradio re-renders, and announces output-textbox changes.
+- `applio_native_picker.py` — `native_browse(mode)` opens NSOpenPanel via `AppHelper.callAfter`
+  (gradio handlers run on worker threads; the panel MUST run on the main AppKit thread; the worker
+  blocks on an Event). Availability is an EXPLICIT `mark_native_loop_available()` flag set by the
+  launcher — "NSApp is None" CANNOT detect headless (PyObjC materializes a non-None proxy), so
+  without the flag dev/tests return `("unavailable", None)` immediately instead of hanging 600 s.
+- `applio_browse_ui.py` — `browse_button(mode, target, elem_id)` factory; `patches/patch_browse_buttons.py`
+  injects a "Browse…" button after each of 13 path fields across 6 tab files (train ×3, inference ×3,
+  tts ×3, realtime ×1, voice_blender ×2, processing ×1 — see its `FIELDS`). Handler runs the native
+  picker, writes the path into the field, and `expanduser()`s BOTH the picked path and a typed value
+  passing through. Picker-unavailable (external browser) explains itself via `gr.Info` (announced toast).
+- `applio_i18n.py` — AppKit-free translator for native-side strings (menu/picker/announcements).
+  Keys are the English text; an OPTIONAL fork-owned `assets/applio_i18n_overrides.json`
+  (`{locale: {key: tr}}`) layers over upstream locale files, which stay pristine.
+- **Per-request announce-owner rule:** the payload's `announce.owner` is `"native"` only when the
+  global owner is native AND the request carries `client=native` (the JS sends it when
+  `window.pywebview` exists — i.e. the in-app WKWebView). Any other client (external browser at the
+  same port) gets `"web"` and the JS announces. This is why the route must be per-request, not a
+  static flag.
+- **`prevent_thread_lock` flip:** `patch_progress_routes.py` flips upstream `app.py`'s
+  `launch(prevent_thread_lock=client_mode)` to `True` so `launch()` returns the FastAPI app and the
+  routes can be registered, then (when not client_mode) parks the calling thread in a
+  `while True: sleep(5)` — `launch_gradio()` still never returns (the supervisor's contract).
+  Everything after the launch call — including the TensorBoard proxy — stays DEAD in normal mode
+  (status quo). Bind failures still raise on the calling thread (gradio raises before the thread
+  lock matters), so the supervisor's OSError fail-fast is preserved.
+- **a11y settings:** Accessibility submenu (native menu, `menu_spec.py` keys `a11y.menu` +
+  `a11y.verbosity.{off,standard,verbose}` + `a11y.sound_cues`), persisted in NSUserDefaults
+  (`com.iahispano.applio`) under `a11y.verbosity` (string) / `a11y.sound_cues` (bool), echoed to the
+  web payload via `applio_progress_api.set_settings`. Verbosity "off" gates native `[A11y]` log lines
+  AND announcements (the heartbeat still computes events to keep `_seen` fresh); "verbose" adds
+  per-epoch/milestone detail; sound cues play a short beep on terminal events.
+- **Patcher order note:** the two `app.py` patchers (`patch_progress_routes`, `patch_web_a11y_payload`)
+  anchor on DISJOINT text (the `prevent_thread_lock=` kwarg line + TensorBoard import vs the
+  `"js": (` entry + `def launch_gradio(`) and are order-independent; `patch_browse_buttons`'s
+  insertions collide with none of the three existing `tabs/train/train.py` patchers. Tests:
+  `tests/test_applio_a11y.py`, `test_native_picker.py`, `test_browse_ui.py`, `test_progress_api.py`,
+  `test_patch_fixtures.py`, `test_applio_i18n.py` (+ `test_menu_spec.py` covers the submenu keys).
+- **Deferred to Phase 3:** error surfacing with full log tails (terminal announcements carry status
+  words; full tails need upstream `gr.Error` routing); typed-path on-change validation for the
+  remaining fields (Browse's `expanduser` is the partial Phase 2 fix); upstream Applio + gradio PRs
+  for the semantic gaps found in audit §5 [U]/§6 (repo `docs/superpowers/plans/` a11y audit).
+
 **GitHub releases:**
 - Repo name for releases: `froggeric/applio-macOS-native-app`
 - `gh release create` needs `workflow` scope; use `gh api` as fallback
