@@ -1422,12 +1422,42 @@ class ApplioApp:
             if self.window:
                 logging.info("Transitioning to main UI...")
                 self.window.load_url(f"http://{self.server_host}:{self.server_port}")
+                self._post_layout_changed()
         else:
             logging.error("Backend timeout period exceeded.")
             if self.window:
                 self.window.load_html(
                     "<h1>Startup Error</h1><p>The server failed to respond in time.</p>"
                 )
+
+    def _post_layout_changed(self):
+        """Marshal to main thread — monitor_transition runs on a daemon thread."""
+        try:
+            from PyObjCTools import AppHelper
+
+            AppHelper.callAfter(self._do_post_layout_changed)
+        except Exception:
+            pass
+
+    def _do_post_layout_changed(self):
+        """Force VoiceOver AX-tree resync after the full page swap.
+
+        WKWebView accessibility trees can fall out of sync on async loads
+        (Apple forums thread 809541 / FB21257352); LayoutChanged is the
+        documented workaround.
+        """
+        try:
+            from AppKit import (
+                NSAccessibilityPostNotification,
+                NSAccessibilityLayoutChangedNotification,
+            )
+
+            wv = self.window.native.contentView()
+            NSAccessibilityPostNotification(
+                wv, NSAccessibilityLayoutChangedNotification
+            )
+        except Exception:
+            pass
 
     def run_until_window_created(self):
         """Start helper/backend threads and create the pywebview window.
@@ -1468,6 +1498,10 @@ class ApplioApp:
 
         # Always create the pywebview menu (Progress Monitor entry, etc.).
         webview.settings["SHOW_DEFAULT_MENUS"] = False  # suppress auto View/Edit menus
+        # gr.File download links (model export, F0 txt) are silently cancelled without this.
+        # NOTE (intended behavior change): any non-displayable response now offers a
+        # save panel instead of doing nothing — that is exactly the export journey fix.
+        webview.settings["ALLOW_DOWNLOADS"] = True
 
     def run(self):
         # Convenience: window bootstrap + blocking webview loop. Requires start_gui() to have run

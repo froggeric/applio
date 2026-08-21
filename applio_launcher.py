@@ -4914,6 +4914,7 @@ class ApplioLauncher:
                     NSApp.setDelegate_(self._app_delegate)
                 NSApp.setMainMenu_(self._build_native_menu())
                 self._update_menu_state()  # apply dynamic state now (else ~2 s till next timer tick)
+                self._enable_webview_keyboard_access()
                 logging.info(
                     "[Launcher] Re-asserted delegate + native menu after webview.start"
                 )
@@ -4923,6 +4924,40 @@ class ApplioLauncher:
                 logging.exception("[Launcher] _reassert_menu_and_delegate failed")
 
         AppHelper.callAfter(_do)
+
+    def _enable_webview_keyboard_access(self):
+        """Tab must reach buttons/checkboxes in the WKWebView.
+
+        WKPreferences.tabFocusesLinks defaults to False and pywebview never
+        sets it (verified against venv_macos webview/platforms/cocoa.py);
+        without this, Tab moves only between text inputs. Idempotent: the
+        flag is set only on success, so the heartbeat retries until the
+        webview exists. Verified: pywebview's cocoa backend sets the
+        WebKitHost (a WKWebView subclass) as the window's contentView at
+        didFinishNavigation (cocoa.py:381), so contentView() IS the webview.
+        """
+        if getattr(self, "_webview_kb_done", False):
+            return
+        try:
+            from AppKit import NSApp
+            from WebKit import WKWebView
+        except Exception:
+            return
+        try:
+            for win in NSApp.windows():
+                cv = win.contentView()
+                if isinstance(cv, WKWebView):
+                    try:
+                        cv.configuration().preferences().setTabFocusesLinks_(True)
+                        self._webview_kb_done = True
+                        logging.info("[A11y] WKWebView tab traversal enabled")
+                    except Exception:
+                        logging.debug(
+                            "[A11y] setTabFocusesLinks_ failed", exc_info=True
+                        )
+                    return
+        except Exception:
+            logging.debug("[A11y] webview enumeration failed", exc_info=True)
 
     def _start_menu_update_timer(self):
         """Start timer to periodically update menu state."""
@@ -4948,6 +4983,7 @@ class ApplioLauncher:
             except Exception as e:
                 logging.warning(f"[Launcher] dashboard heartbeat failed: {e}")
         self._a11y_heartbeat()
+        self._enable_webview_keyboard_access()
 
     def _check_show_progress_monitor_signal(self):
         """Check if wrapper requested to show Progress Monitor via IPC.
