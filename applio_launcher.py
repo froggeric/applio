@@ -1435,6 +1435,17 @@ class ProgressWindowController:
             self.window.contentView().addSubview_(value)
             self.stats_values.append(value)
 
+        # Accessibility: label the live-zone fields for screen readers. The
+        # Unicode block bar is pure glyph noise by ear, so hide it instead.
+        self.phase_label.setAccessibilityLabel_("Current phase")
+        self.progress_percent.setAccessibilityLabel_("Phase progress")
+        self.visual_progress.setAccessibilityHidden_(True)  # '█░░█…' is SR noise
+        for field, ax_label in zip(
+            self.stats_values,
+            ("Speed", "Estimated time remaining", "Phase time", "Items"),
+        ):
+            field.setAccessibilityLabel_(ax_label)
+
         y -= row3_height + 4
 
         # Status card background box (adds visual separation)
@@ -1889,6 +1900,11 @@ class ProgressWindowController:
         self.phase_label.setStringValue_(
             f"{icon}  {phase.upper()}  •  {current} of {total} {total_label}"
         )
+        # AX value mirrors the line above minus the emoji, which screen
+        # readers pronounce as noise ("face with monocle" etc.).
+        self.phase_label.setAccessibilityValue_(
+            f"{phase} — {current} of {total} {total_label}"
+        )
 
         # Update visual progress bar (50 chars = 100%)
         percent = tqdm_data.get("percent", 0)
@@ -2048,6 +2064,10 @@ class ProgressWindowController:
                 if self._log_phase_completion():
                     # Reset Rich Status Card to waiting state
                     self.phase_label.setStringValue_("Waiting for progress...")
+                    # The explicit AX value set in _update_live_zone stops
+                    # tracking setStringValue_, so reset it here too or the
+                    # last progress value outlives the visual reset.
+                    self.phase_label.setAccessibilityValue_("Waiting for progress...")
                     self.visual_progress.setStringValue_(
                         "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░"
                     )
