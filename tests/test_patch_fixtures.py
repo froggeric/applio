@@ -87,10 +87,25 @@ def test_upload_scan_bounded_to_function_body():
     assert status == "patched" and "gr.Info" in content
 
 
+def test_progress_routes_patch():
+    routes = _load("patch_progress_routes", "patches/patch_progress_routes.py")
+    src = open(os.path.join(REPO, "app.py"), encoding="utf8").read()
+    patched, status = routes.patch_app(src)
+    assert status in ("patched", "already")
+    assert "prevent_thread_lock=True,  # _APPLIO_A11Y_ROUTES_" in patched
+    block = patched.find("applio_progress_api.register_routes(app)")
+    tb = patched.find("from rvc.lib.tools.launch_tensorboard import get_tb_url")
+    assert block != -1 and tb != -1 and block < tb
+    keepalive = patched.find("while True:", block)
+    guard = patched.find("if not client_mode:", block)
+    assert guard != -1 and keepalive != -1 and guard < keepalive
+
+
 def run_all():
     test_history_written_before_untrack()
     test_upload_scan_bounded_to_function_body()
-    print("All patch fixture tests passed (2).")
+    test_progress_routes_patch()
+    print("All patch fixture tests passed (3).")
 
 
 if __name__ == "__main__":

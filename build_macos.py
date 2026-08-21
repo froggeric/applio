@@ -868,6 +868,12 @@ def pre_build_patch():
             "inference.py - announced audio-upload feedback",
             "dir",
         ),
+        (
+            "patches/patch_progress_routes.py",
+            "app.py",
+            "app.py - a11y progress route",
+            "file",
+        ),
     ]
 
     # Validate patch order matches dependencies
