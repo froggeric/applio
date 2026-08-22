@@ -7,6 +7,32 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Added
 
+- **Accessibility, Phase 4 (VoiceOver-pass fixes).** The five findings from the 2026-08-22
+  manual VoiceOver pass, each addressed fork-side:
+  - **Job lifecycle toasts.** Long actions now announce themselves through gradio toasts — the
+    one channel the pass verified VoiceOver reads: single-file conversion and TTS
+    (start/finish/error), training start, preprocessing and feature extraction (start; failures
+    via an error-or-failed check on the result), and model downloads.
+  - **Batch conversion progress toasts.** Batch inference announces "started: N files",
+    25/50/75 % milestones (batches of 8+ files), and completion with file counts and elapsed
+    time; failures toast at both raise sites, including starting a second batch while one is
+    already running.
+  - **Active Processes menu as a live progress surface.** The Process menu lists every running
+    job — batch inference included (it runs in-process and previously never appeared) — with
+    live titles ("Inference: batch — 43% (2/3 files)", "Training: voice — epoch 34/200"),
+    refreshed every ~2 seconds; selecting an entry opens the dashboard.
+  - **Process Dashboard readable by VoiceOver.** Run rows announce their summary (epoch, best
+    loss, ETA; inference file counts), the loss chart announces its extent and best point, the
+    detail progress bar reads "Epoch N of M, P percent" instead of a bare percentage, selecting
+    a row announces its summary, and Tab leaves the runs list for the action buttons and cycles
+    back.
+  - **Announcements: Auto (recommended) — new mode and default.** In-app speech routes through
+    the web live region instead of window-level VoiceOver posts, which the pass never heard
+    with the VoiceOver cursor inside the web content. "Announcements: Native (experimental)"
+    opts back into the old engine; dock attention, sound cues, and the `[A11y]` log lines are
+    unchanged either way, and a `mode=` field in the `[A11y] post` diagnostic line records the
+    active mode.
+  - New test suites `tests/test_menu_jobs.py` and `tests/test_dashboard_ax.py`.
 - **Accessibility, Phase 3 (fork-local hardening).** Seven targeted fixes from the Phase 2 review,
   all fork-side (no upstream files), each with tests:
   - **Localized native strings, completed.** The remaining native English clusters — boot loading
@@ -70,6 +96,13 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Changed
 
+- **Announcements default flipped native → Auto (web) — maintainer-facing behavior change.**
+  In-app job speech now comes from the web live region (plus toasts) rather than native
+  window-level accessibility posts, which the VoiceOver pass never heard; "Announcements:
+  Native (experimental)" in the Accessibility submenu restores the old engine. Under Auto, a
+  job start/terminal is heard as both a toast and a short live-region line — deliberate
+  redundancy; if the next VoiceOver pass reads it as spam, the planned follow-up gates the
+  JavaScript start/terminal announcements in-app (not a revert).
 - **Build now fails on a missed patch anchor — maintainer-facing behavior change.** A patcher
   that cannot find its anchor after an upstream sync exits with code `2` and the build stops,
   listing every failure; previously an anchor miss could pass silently (exit `1` was read as

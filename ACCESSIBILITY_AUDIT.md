@@ -765,3 +765,54 @@ ACCEPT by the final review (one — the browse docstring — already fixed on-br
 - **Gate status: pass returned findings → NOT clean → upstream Applio/gradio PRs remain
   blocked** per the owner's ruling. Findings are pre-existing gaps (Phase 1/2 surfaces) or
   new enhancement requests, not Phase 3 regressions (submenu diagnosis pending).
+
+### Phase 4 (fork-local) delivery (2026-08-22, `feat/a11y-phase4`) — pass findings resolved
+Each of the five findings above now has a fork-side fix; the re-test checklist below is the
+next manual VoiceOver pass (on the Phase 4 build) that re-gates the upstream PR program.
+- **Toasts: WORK — the foundation, not a finding to fix.** Every Phase 4 announcement channel
+  is a gradio toast or the web live region (the channels the pass verified as speaking);
+  nothing new bets on window-level AX posts for in-app speech.
+- **Job-start announcements: NOT heard — RESOLVED** (`c2558c8e` + `dce0c18d` + `95061f6f`).
+  Two channels now fire at start: lifecycle toasts at handler entry for single-file inference,
+  TTS, training, preprocess, extract, and downloads (`patches/patch_job_toasts.py`), and the
+  batch engine's own "Batch conversion started: N files" toast
+  (`patches/patch_inference_progress.py`). The routing question is also answered by default:
+  Announce mode **Auto** (`c2558c8e`) routes in-app speech through the web live region instead
+  of the unheard window-level NSAccessibility post — attention/sound/`[A11y]` log lines kept —
+  with **Native (experimental)** opt-in for re-testing the old engine.
+- **Progress monitoring: no easy way mid-job — RESOLVED, two surfaces** (`95061f6f` +
+  `0be42737`). Batch conversion toasts 25/50/75 % milestones (first-crossing, batches of 8+
+  files) and a terminal toast with counts + elapsed; the Active Processes menu shows every live
+  job with progress text on the 2 s heartbeat.
+- **Active Processes menu: NEVER shows anything — RESOLVED** (`0be42737`,
+  `tests/test_menu_jobs.py`). `_merged_live_procs` feeds the menu the same merged view as the
+  dashboard — the in-process batch inference job now appears — with live titles
+  ("Inference: batch — 43% (2/3 files)", "Training: voice — epoch 34/200", paused/stopping
+  variants), and the skip-rebuild guard fixed so the submenu stays enabled.
+- **Process Dashboard: unusable for blind users — RESOLVED** (`8bdc6c7c`,
+  `tests/test_dashboard_ax.py`). Per-row AX summaries via a dual row hook (guaranteed
+  `willDisplayCell`; "epoch 34 of 200, best loss …, ETA …"), module-level
+  `_row_ax_summary`/`_chart_ax_summary`, template progress values ("Epoch N of M, P percent")
+  + indeterminate-bar fix, a key-view loop so Tab exits the runs list to the action buttons and
+  cycles back, and a selection announcement.
+- **Maintainer-facing behavior change:** the announce default flipped native → Auto (web live
+  region). Under Auto, a job start/terminal is heard as BOTH a toast and the live-region line —
+  deliberate redundancy and the judgment item in the checklist below; the pre-agreed follow-up
+  (if it reads as spam) gates the JS start/terminal announcements on `client != native`, NOT a
+  revert.
+
+### Phase 4 re-test checklist (next manual VoiceOver pass, on the Phase 4 build)
+1. **Batch conversion (≥ 8 files):** toasts announce start, 25/50/75 % milestones, and
+   completion with counts; VoiceOver reads them.
+2. **Menu:** Process → Active Processes shows the batch LIVE with % and file counts; a training
+   run shows "epoch N/M"; entries update every ~2 s; clicking opens the dashboard.
+3. **Dashboard:** rows announce metrics (epoch/loss/ETA); Tab exits the runs list to the buttons
+   and cycles back; selecting a row announces its summary; the progress bar says
+   "Epoch N of M, P percent", not a bare percent.
+4. **Accessibility submenu:** "Announcements: Auto (recommended)" shows the checkmark; under
+   Auto, job start/finish speech comes from the web content (live region/toasts).
+5. **Judgment item:** does hearing BOTH the toast and the live-region line for start/finish
+   read as spam? (If yes → the pre-agreed follow-up gates the JS start/terminal announcements
+   in-app.)
+6. **Diagnostics:** the `[A11y] post mode=… vo=… element=…` line lands in
+   `~/Library/Logs/Applio/applio_launcher.log` during a job.

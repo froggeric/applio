@@ -282,7 +282,7 @@ history browsing.
 - No microphone entitlement needed - pywebview wrapper doesn't capture audio; Gradio handles it via browser
 - **Patcher escape sequences:** In triple-quoted strings, `\\n` produces literal newline. Use `chr(10)` for newlines in patched code.
 - Patches in `patches/` are applied to source files before PyInstaller, then source files are restored to pristine state
-- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (3 patchers touch it: dataset_paths, train_44100, refinegan_legacy_train). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
+- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (4 patchers touch it: dataset_paths, train_44100, refinegan_legacy_train, job_toasts). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
 - PyInstaller cleans `dist/` at start - never delete while builds running
 - Before `rm -rf dist build`: no `Applio` process may run from `dist/` (it holds file handles, so `rm` fails with "Directory not empty"). Quit it (`osascript -e 'tell application "Applio" to quit'`) + `sleep 3` first
 - Build size: ~1.6GB lite (post-3.6.3 dependency stack; ~2GB models download on first launch)
@@ -496,11 +496,13 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
 - **Patcher order note:** the two `app.py` patchers (`patch_progress_routes`, `patch_web_a11y_payload`)
   anchor on DISJOINT text (the `prevent_thread_lock=` kwarg line + TensorBoard import vs the
   `"js": (` entry + `def launch_gradio(`) and are order-independent; `patch_browse_buttons`'s
-  insertions collide with none of the three existing `tabs/train/train.py` patchers. Tests:
+  insertions collide with none of the other `tabs/train/train.py` patchers (Phase 4's
+  `patch_job_toasts` also touches it — see the Phase 4 paragraph). Tests:
   `tests/test_applio_a11y.py`, `test_native_picker.py`, `test_browse_ui.py`, `test_progress_api.py`,
   `test_patch_fixtures.py`, `test_applio_i18n.py`, `test_a11y_js_invariants.py` (Phase 3: payload-JS
-  invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract) —
-  (+ `test_menu_spec.py` covers the submenu keys).
+  invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract),
+  `test_menu_jobs.py` (Phase 4: live menu titles), `test_dashboard_ax.py` (Phase 4: dashboard AX
+  summaries) — (+ `test_menu_spec.py` covers the submenu keys).
 - **Deferred to Phase 3:** error surfacing with full log tails (terminal announcements carry status
   words; full tails need upstream `gr.Error` routing); typed-path on-change validation for the
   remaining fields (Browse's `expanduser` is the partial Phase 2 fix); upstream Applio + gradio PRs
@@ -523,6 +525,38 @@ fork-side; full-tail routing via upstream `gr.Error` stays with the upstream pro
 Applio + gradio PR program is DEFERRED to its own plan until the manual VoiceOver pass comes back
 clean (audit §7 checklist step 4 bisect still pending) — owner's gate: "no PR until we have
 everything 100% test, verified, and confirmed working with 0 regression bug."
+
+**Accessibility (a11y) Phase 4 — VoiceOver-pass fixes (shipped 2026-08-22, `feat/a11y-phase4`):**
+The five 2026-08-22 manual-pass findings (audit §7, resolutions + re-test checklist there) fixed
+fork-side. **Announce mode Auto (the new default):** in-app speech routes through the WEB live
+region — `_a11y_post` SKIPS the window-level NSAccessibility post (unheard when the VO cursor is
+in web content) but KEEPS dock attention, sound cues, and `[A11y]` log lines; "Native
+(experimental)" opts back into the old engine. Menu keys `a11y.announce.auto`/`a11y.announce.native`,
+persisted as `a11y.announce_mode` in NSUserDefaults; `_apply_announce_mode` maps auto→owner "web" /
+native→owner "native" via `applio_progress_api.set_announce_owner`, the payload settings echo carries
+`announce_mode`, and every AX post logs `[A11y] post mode=… vo=… element=…` for pass bisecting.
+**Batch-toast split rule:** TAB-side toasts (`patches/patch_job_toasts.py`, registered as 4 dir-type
+tuples — inference.py, tts.py, train.py, download.py) cover single-file inference, tts
+(start/finish/error), train START, preprocess/extract wrappers (error|failed predicate), and
+downloads — jobs whose mid-run progress the tab thread cannot see; ENGINE-side toasts (in
+`patches/patch_inference_progress.py`, `_infer_toast` lazy-imports gradio so the engine module top
+stays gradio-free) cover batch start / 25-50-75 % milestones (total≥8, threshold-FIRST-crossing;
+terminal suppresses the 100 % milestone) / terminal (counts+elapsed) + errors at BOTH raise sites
+(incl. the concurrent-run RuntimeError, which fires BEFORE the try). **Frozen-safe enrichment
+rule:** launcher-side metrics use `_last_training_metrics` (seek-tail + backwards
+`_parse_training_log_line`) and `applio_inference_stats` (bundled) — NEVER
+`applio_progress_api.enrich_jobs`, which imports `rvc.lib.tools.process_log_parser` (ships only as
+a DATA file in the frozen bundle, not importable from the launcher). Menu: `_merged_live_procs` is
+the ONE merge (subprocess jobs + synthesized inference batch) for the menu AND both dashboard merge
+sites; `_menu_job_title` renders live titles (name capped 30 chars, line 64); the submenu
+skip-rebuild guard requires titles unchanged AND parent isEnabled() (a titles-only skip leaves the
+status parent disabled from the static spec). Dashboard AX: module-level
+`_row_ax_summary`/`_chart_ax_summary` + a DUAL row hook (the guaranteed `willDisplayCell` path
+stamps what the delegate hook can miss), template progress values ("Epoch N of M, P percent") +
+indeterminate-bar fix, key-view loop (process_table → stop → pause → reveal → open → back), and a
+selection announcement. The toast + live-region layering at job start/terminal under Auto is
+DELIBERATE redundancy; the pre-agreed follow-up if the pass calls it spam: gate the JS
+start/terminal announcements on client!=native (NOT a revert).
 
 **GitHub releases:**
 - Repo name for releases: `froggeric/applio-macOS-native-app`
