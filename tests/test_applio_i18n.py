@@ -137,6 +137,8 @@ WRAPPED_FORMS = [
     ("macos_wrapper.py", '_t("Initializing environment...")'),
     ("macos_wrapper.py", '_t("Loading Neural Networks...")'),
     ("macos_wrapper.py", '_t("Launching User Interface...")'),
+    ("macos_wrapper.py", '_t("Unpacking {basename}")'),
+    ("macos_wrapper.py", '_t("Synchronizing Assets")'),
     ("applio_launcher.py", '_t("Status: Running")'),
     ("applio_launcher.py", '_t("Pause")'),
     ("applio_launcher.py", '_t("Stopping…")'),

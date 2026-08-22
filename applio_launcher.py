@@ -1167,7 +1167,7 @@ class ProgressWindowController:
         self.type_label = NSTextField.alloc().initWithFrame_(
             NSMakeRect(padding, y - 24, window_width - 2 * padding, 24)
         )
-        model_name = self.process_info.get("model_name", "Unknown")
+        model_name = self.process_info.get("model_name", _t("Unknown"))
         self.type_label.setStringValue_(
             f"{self.process_type.capitalize()}: {model_name}"
         )

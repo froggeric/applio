@@ -1173,7 +1173,7 @@ class ApplioApp:
         self.loading_port = 5678
         self.window = None
         self.is_ready = False
-        self.heading = "System Calibration"
+        self.heading = _t("System Calibration")
         self.sub_heading = _t("Initializing environment...")
         self.technical_detail = _t("Allocating memory...")
         self.progress = 0
@@ -1291,7 +1291,7 @@ class ApplioApp:
                         # 1. Downloads
                         if p_dl_percent.search(line):
                             self.stage = "2/4"
-                            self.heading = "Synchronizing Assets"
+                            self.heading = _t("Synchronizing Assets")
                             match = p_dl_percent.search(line)
                             val = int(match.group(1))
                             if val > self.progress:
@@ -1299,24 +1299,30 @@ class ApplioApp:
 
                         elif p_dl_file.search(line):
                             self.stage = "2/4"
-                            self.heading = "Synchronizing Assets"
+                            self.heading = _t("Synchronizing Assets")
                             fname = p_dl_file.search(line).group(1)
                             self.sub_heading = _t("Fetching {basename}").format(
                                 basename=os.path.basename(fname)
                             )
-                            self.technical_detail = f"Network Request: {fname}"
+                            self.technical_detail = _t(
+                                "Network Request: {fname}"
+                            ).format(fname=fname)
 
                         # 2. Operations
                         elif p_extract.search(line):
                             self.stage = "2/4"
-                            self.heading = "Decompressing Resources"
+                            self.heading = _t("Decompressing Resources")
                             fname = p_extract.search(line).group(1)
-                            self.sub_heading = f"Unpacking {os.path.basename(fname)}"
-                            self.technical_detail = f"IO Operation: {fname}"
+                            self.sub_heading = _t("Unpacking {basename}").format(
+                                basename=os.path.basename(fname)
+                            )
+                            self.technical_detail = _t("IO Operation: {fname}").format(
+                                fname=fname
+                            )
 
                         elif p_pip_install.search(line):
                             self.stage = "2/4"
-                            self.heading = "Building Environment"
+                            self.heading = _t("Building Environment")
                             pkgs = p_pip_install.search(line).group(1)
                             if len(pkgs) > 30:
                                 pkgs = pkgs[:27] + "..."
@@ -1326,35 +1332,41 @@ class ApplioApp:
                         # 3. Initialization
                         elif p_prereq.search(line):
                             self.stage = "1/4"
-                            self.heading = "System Validation"
+                            self.heading = _t("System Validation")
                             self.sub_heading = _t("Checking Prerequisites...")
                             if self.progress < 10:
                                 self.progress = 10
 
                         elif p_device.search(line):
-                            self.heading = "Hardware Optimization"
+                            self.heading = _t("Hardware Optimization")
                             device = p_device.search(line).group(1)
                             self.sub_heading = _t("Accelerating with {device}").format(
                                 device=device
                             )
-                            self.technical_detail = f"Device allocation: {device}"
+                            self.technical_detail = _t(
+                                "Device allocation: {device}"
+                            ).format(device=device)
 
                         # 4. Boot
                         elif p_init_app.search(line):
                             self.stage = "3/4"
-                            self.heading = "Booting Inference Engine"
+                            self.heading = _t("Booting Inference Engine")
                             self.sub_heading = _t("Loading Neural Networks...")
-                            self.technical_detail = "Initializing pytorch contexts..."
+                            self.technical_detail = _t(
+                                "Initializing pytorch contexts..."
+                            )
                             if self.progress < 80:
                                 self.progress = 80
 
                         elif p_load_model.search(line):
-                            self.heading = "Loading Models"
+                            self.heading = _t("Loading Models")
                             model = p_load_model.search(line).group(1)
                             self.sub_heading = _t("Hydrating {model}...").format(
                                 model=model
                             )
-                            self.technical_detail = f"Memory mapping {model}"
+                            self.technical_detail = _t("Memory mapping {model}").format(
+                                model=model
+                            )
 
                         # 5. Success
                         elif (
@@ -1363,7 +1375,7 @@ class ApplioApp:
                             or "Gradio backend is responsive" in line
                         ):
                             self.stage = "4/4"
-                            self.heading = "Initialization Complete"
+                            self.heading = _t("Initialization Complete")
                             self.sub_heading = _t("Launching User Interface...")
                             self.progress = 100
                             self.is_ready = True
