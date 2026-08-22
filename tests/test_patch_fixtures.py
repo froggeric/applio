@@ -229,6 +229,8 @@ def test_job_toasts_patch():
         ],
         "tabs/train/train.py": [
             'gr.Info(i18n("Training started..."))  # _APPLIO_TOASTS_TRAIN_START',
+            "result = run_train_script(*args)  # _APPLIO_TOASTS_TRAIN_END",
+            'if "error" in result.lower() or "failed" in result.lower():',
             "def _applio_preprocess_toast(*args):  # _APPLIO_TOASTS_TRAIN_PRE",
             'gr.Info(i18n("Preprocessing dataset..."))',
             "result = run_preprocess_script(*args)",
@@ -245,6 +247,38 @@ def test_job_toasts_patch():
             "result = run_download_script(*args)",
             'if "error" in result.lower() or "failed" in result.lower():',
             "fn=_applio_download_toast,",
+        ],
+        "tabs/voice_blender/voice_blender.py": [
+            "gr.Info(  # _APPLIO_TOASTS_BLEND_DROP",
+            "def _applio_blend_toast(*args):  # _APPLIO_TOASTS_BLENDER",
+            'gr.Info(i18n("Blending models..."))',
+            "result = run_model_blender_script(*args)",
+            "message = result[0] if isinstance(result, tuple) else result",
+            'if "error" in message.lower() or "failed" in message.lower():',
+            "fn=_applio_blend_toast,",
+        ],
+        "tabs/plugins/plugins.py": [
+            "def _applio_plugin_toast(dropbox):  # _APPLIO_TOASTS_PLUGINS",
+            'gr.Info(i18n("Installing plugin..."))',
+            "return plugins_core.save_plugin_dropbox(dropbox)",
+            "except gr.Error:",
+            "fn=_applio_plugin_toast,",
+        ],
+        "tabs/realtime/realtime.py": [
+            "def _applio_realtime_toast(terms_accepted, *args):  #"
+            " _APPLIO_TOASTS_REALTIME",
+            'gr.Info(i18n("Starting real-time conversion..."))',
+            "for update in enforce_terms(terms_accepted, *args):",
+            "fn=_applio_realtime_toast,",
+        ],
+        "tabs/extra/sections/processing.py": [
+            "def _applio_model_info_toast(pth_path):  # _APPLIO_TOASTS_MODEL_INFO",
+            "result = run_model_information_script(pth_path)",
+            'gr.Info(i18n("Model information loaded."))',
+            "fn=_applio_model_info_toast,",
+        ],
+        "tabs/tensorboard/tensorboard.py": [
+            'gr.Info(i18n("TensorBoard ready."))  # _APPLIO_TOASTS_TENSORBOARD',
         ],
     }
     out = {}
@@ -283,6 +317,22 @@ def test_job_toasts_patch():
     assert download.index("def _applio_download_toast") < download.index(
         "fn=_applio_download_toast,"
     )
+    for rel, wrapper in (
+        ("tabs/voice_blender/voice_blender.py", "_applio_blend_toast"),
+        ("tabs/plugins/plugins.py", "_applio_plugin_toast"),
+        ("tabs/realtime/realtime.py", "_applio_realtime_toast"),
+        ("tabs/extra/sections/processing.py", "_applio_model_info_toast"),
+    ):
+        patched = out[rel]
+        assert patched.index(f"def {wrapper}") < patched.index(
+            f"fn={wrapper},"
+        ), f"{rel}: wrapper def must precede its fn= registration"
+    # TensorBoard toast sits INSIDE launch_and_get_url's success branch:
+    # after the URL resolves, before the return it guards.
+    tb = out["tabs/tensorboard/tensorboard.py"]
+    assert tb.index("url = launch_tensorboard()") < tb.index(
+        'gr.Info(i18n("TensorBoard ready."))'
+    ) < tb.index("return (")
     # Batch inference gets NO toasts here (Task 3 announces it engine-side):
     # no marker may appear inside enforce_terms_batch's body.
     inference = out["tabs/inference/inference.py"]
