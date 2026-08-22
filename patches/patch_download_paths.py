@@ -113,4 +113,4 @@ def patch_download_py(base_path: str) -> bool:
 
 if __name__ == "__main__":
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
-    sys.exit(0 if patch_download_py(base_path) else 1)
+    sys.exit(0 if patch_download_py(base_path) else 2)

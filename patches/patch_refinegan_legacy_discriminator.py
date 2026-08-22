@@ -218,4 +218,4 @@ if __name__ == "__main__":
 
     base_path = sys.argv[1]
     success = patch_discriminators(base_path)
-    sys.exit(0 if success else 1)
+    sys.exit(0 if success else 2)

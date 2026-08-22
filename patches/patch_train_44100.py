@@ -257,10 +257,10 @@ def main():
 
     if not file_path.exists():
         print(f"✗ File not found: {file_path}")
-        sys.exit(1)
+        sys.exit(2)
 
     success = patch_file(file_path, args.dry_run)
-    sys.exit(0 if success else 1)
+    sys.exit(0 if success else 2)
 
 
 if __name__ == "__main__":

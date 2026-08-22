@@ -226,4 +226,4 @@ if __name__ == "__main__":
         sys.exit(0)
     else:
         print(f"[patch_dataset_paths] No patches applied")
-        sys.exit(1)
+        sys.exit(2)

@@ -131,6 +131,12 @@ after an upstream sync" below), because upstream rewrites the source our `patche
 - Each patcher prints `Pattern not found` / `patch failed` when upstream changed its anchor;
   re-point the regex/string to the new code, then verify the patched file `py_compile`s and the
   injected code is correctly placed before committing.
+- **Patcher exit codes:** `0` = patched/already applied, `2` = anchor miss (fatal), `1` = usage
+  guard (fires only when run standalone without an argument - never in the build loop).
+  `pre_build_patch()` fails the build on ANY nonzero patcher exit (plus missing patcher/source
+  file), listing every failure. A miss can no longer silently skip. Guarded by
+  `tests/test_patcher_exit_codes.py`; `patches/download_pretraineds.py` is exempt (model
+  downloader, its own invocation path).
 - **Patcher indent capture:** in `patch_process_tracking.py` capture the leading indent with
   `\n+([ \t]+)` (horizontal only), NOT `(\n\s+)`. `patch_preflight_validation` runs first and
   leaves a blank line before `result = subprocess.run(...)`, so `(\n\s+)` grabs that newline and

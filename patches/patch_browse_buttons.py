@@ -8,6 +8,7 @@ Inserts one factory call after each of the 13 path-field definitions across
     ...
     _applio_browse_output_path = applio_browse_ui.browse_button(
         "file", output_path, elem_id="browse-output_path")
+    applio_browse_ui.attach_path_validation(output_path, "file")
 
 The two "Folder Name" embedder fields (tabs/train/train.py:574,
 tabs/inference/inference.py:1148) are EXCLUDED by design: their handler takes
@@ -16,7 +17,7 @@ os.path.basename, so a picked full path would be silently truncated.
 Run standalone from the repo root:
     venv_macos/bin/python patches/patch_browse_buttons.py tabs/train/train.py
 build_macos.py invokes it once per file with the source path (type "file").
-Exit codes: 0 patched/already, 1 anchor miss. Idempotent per file via the
+Exit codes: 0 patched/already, 2 anchor miss. Idempotent per file via the
 trailing "# _APPLIO_BROWSE_<STEM>" marker (checked with `marker in content`,
 so a manual marker-line strip is also honored).
 """
@@ -195,4 +196,4 @@ if __name__ == "__main__":
         if len(sys.argv) > 1
         else os.path.join(REPO, "tabs/train/train.py")
     )
-    sys.exit(0 if apply(target) else 1)
+    sys.exit(0 if apply(target) else 2)

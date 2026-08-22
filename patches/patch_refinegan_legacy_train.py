@@ -195,4 +195,4 @@ if __name__ == "__main__":
         sys.exit(1)
     base_path = sys.argv[1]
     success = patch_train(base_path)
-    sys.exit(0 if success else 1)
+    sys.exit(0 if success else 2)

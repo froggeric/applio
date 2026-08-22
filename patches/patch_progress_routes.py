@@ -61,4 +61,4 @@ if __name__ == "__main__":
         print(f"patch_app: {status}")
         sys.exit(0)
     print(f"patch_app: {status}")
-    sys.exit(1)
+    sys.exit(2)

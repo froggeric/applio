@@ -135,4 +135,4 @@ if __name__ == "__main__":
 
     base_path = sys.argv[1] if len(sys.argv) > 1 else "."
     success = patch_pretrained_selector(base_path)
-    sys.exit(0 if success else 1)
+    sys.exit(0 if success else 2)

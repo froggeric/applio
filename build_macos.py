@@ -939,14 +939,15 @@ def pre_build_patch():
                         )
 
     patched_files = {}  # Maps source_file -> original content
+    patch_failures = []  # (description, exit code) — any nonzero fails the build
 
     for patcher_path, source_file, description, patcher_type in patches_to_apply:
         if not os.path.exists(patcher_path):
-            print(f"  SKIPPED: {description} (patcher not found)")
+            patch_failures.append((description, "patcher not found"))
             continue
 
         if not os.path.exists(source_file):
-            print(f"  SKIPPED: {description} (source file not found)")
+            patch_failures.append((description, "source file not found"))
             continue
 
         # Read and store original content ONLY if not already stored
@@ -971,8 +972,19 @@ def pre_build_patch():
             if line:
                 print(f"    {line}")
 
-        if result.returncode not in [0, 1]:  # 0 = patched, 1 = already patched
-            print(f"    WARNING: Patcher returned {result.returncode}")
+        if result.returncode != 0:
+            # 0 = patched or already applied. 2 = anchor miss (upstream moved
+            # the anchor); anything else is a crash or invocation failure.
+            # Both ship a broken app if skipped.
+            patch_failures.append((description, str(result.returncode)))
+
+    if patch_failures:
+        for description, why in patch_failures:
+            print(f"  PATCH FAILURE: {description} ({why})")
+        raise SystemExit(
+            "Patchers failed (anchor miss = exit 2, see CLAUDE.md "
+            "'Re-pointing patches after an upstream sync')."
+        )
 
     return patched_files
 

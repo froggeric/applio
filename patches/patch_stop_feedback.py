@@ -109,4 +109,4 @@ if __name__ == "__main__":
         if len(sys.argv) > 1
         else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     )
-    sys.exit(0 if apply(base) else 1)
+    sys.exit(0 if apply(base) else 2)
