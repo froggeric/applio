@@ -681,6 +681,108 @@ def _synthesize_inference_proc():
     }
 
 
+def _merged_live_procs():
+    """Tracked subprocess jobs + the synthesized in-app batch, one list.
+
+    The single merge the Process Dashboard (refresh_process_list /
+    update_process_list) and the Active-Processes menu both need: subprocess
+    jobs from active_processes.json (get_active_processes) plus the
+    batch-inference proc synthesized from inference_progress.json
+    (_synthesize_inference_proc) — disjoint sources, no dedupe.
+    """
+    procs = get_active_processes()
+    inf = _synthesize_inference_proc()
+    if inf:
+        procs.append(inf)
+    return procs
+
+
+def _annotate_paused(procs):
+    """Stamp live SIGSTOP state (``_ps_stopped``) on each proc dict.
+
+    Module-level mirror of ProcessDashboardController._annotate_pause_state
+    so the menu's status-submenu rebuild can derive " — paused" titles
+    without a controller instance. Procs without a live pid — e.g. the
+    synthesized inference proc — stay False (an in-process batch cannot be
+    SIGSTOPped, so "running" is the truthful word).
+    """
+    for proc in procs:
+        proc["_ps_stopped"] = False
+        pid = proc.get("pid")
+        started = proc.get("started_at")
+        if pid and PSUTIL_AVAILABLE and verify_process_identity(pid, started):
+            try:
+                proc["_ps_stopped"] = (
+                    psutil.Process(pid).status() == psutil.STATUS_STOPPED
+                )
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+
+def _menu_job_title(proc, training_epoch=None):
+    """Compose an Active-Processes menu title for a live job (AppKit-free).
+
+    Does NO I/O of its own: inference pct comes from
+    applio_inference_stats.compute_inference_stats (bundled, frozen-safe) over
+    the synthesized proc's fields, and the training epoch is supplied by the
+    CALLER via ``training_epoch`` (from _last_training_metrics). i18n is
+    resolved at CALL TIME via applio_i18n.native_tr so a locale change shows
+    on the next 2 s menu tick. Formats (name capped at 30 chars + "…", the
+    composed line at 64):
+
+      inference   "Inference: batch — 43% (2/3 files)"
+                  "Inference: batch — stopping… (2/3 files)"   (cancelling)
+      training    "Training: voice — epoch 34/200"
+                  "Training: voice — starting…"  (no status line logged yet)
+      preprocess/extract   model name only
+      tts         "TTS: active job"  (tracked bare: no model_name/log_file)
+
+    A paused job (caller stamped ``_ps_stopped`` via _annotate_paused)
+    appends " — paused".
+    """
+    import applio_i18n
+    from applio_inference_stats import compute_inference_stats
+
+    _t = applio_i18n.native_tr
+
+    def _short(raw):
+        n = (raw or "").strip()
+        return n[:30] + "…" if len(n) > 30 else n
+
+    ptype = (proc.get("type") or "process").lower()
+    if ptype == "inference":
+        name = _short(proc.get("model_name")) or "batch"
+        processed = proc.get("processed", 0) or 0
+        total = proc.get("total", 0) or 0
+        if proc.get("status") == "cancelling":
+            seg = _t("stopping…")
+        else:
+            pct = int(round(compute_inference_stats(proc, time.time())["pct"]))
+            seg = f"{pct}%"
+        title = (
+            f"{_t('Inference')}: {name} — {seg} ({processed}/{total} {_t('files')})"
+        )
+    elif ptype == "training":
+        name = _short(proc.get("model_name"))
+        total_epoch = proc.get("total_epoch")
+        if training_epoch is None:
+            seg = _t("starting…")
+        elif total_epoch:
+            seg = f"{_t('epoch')} {training_epoch}/{total_epoch}"
+        else:
+            seg = f"{_t('epoch')} {training_epoch}"
+        title = f"{_t('Training')}: {name} — {seg}"
+    elif ptype in ("preprocess", "extract"):
+        title = _short(proc.get("model_name")) or ptype.capitalize()
+    elif ptype == "tts":
+        title = _t("TTS: active job")
+    else:
+        title = _short(proc.get("model_name")) or ptype.capitalize()
+    if proc.get("_ps_stopped"):
+        title = f"{title} — {_t('paused')}"
+    return title[:64]
+
+
 def _sweep_stale_inference_progress():
     """Mark a stale 'running' inference record (app crashed/quit mid-batch) as
     'interrupted' so the dashboard never shows a phantom running job. Appends a
@@ -1062,6 +1164,43 @@ def _parse_training_log_line(line):
             "best_epoch": None,
             "best_step": None,
         }
+    return None
+
+
+def _last_training_metrics(log_path, max_bytes=262144):
+    """Last parseable training status line from a training.log tail.
+
+    One tail-scan reader, two consumers: the Process Dashboard's per-proc
+    metrics (ProcessDashboardController._parse_training_metrics, which keeps
+    its historical-snapshot branch and delegates here) and the menu's live
+    "epoch N/M" titles (which use the default 256 KB cap so the 2 s menu
+    tick costs at most one bounded read + regex per training proc). Frozen-
+    safe: scans with the module-level _parse_training_log_line — never
+    rvc.lib.tools.process_log_parser (data file in the frozen bundle, not
+    importable). Returns the metrics dict, or None for a missing/unreadable
+    log or one with no status lines yet.
+    """
+    if not log_path:
+        return None
+    try:
+        if not os.path.exists(log_path) or not os.access(log_path, os.R_OK):
+            return None
+        size = os.path.getsize(log_path)
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+                content = f.read()
+                nl = content.find("\n")
+                if nl >= 0:
+                    content = content[nl + 1 :]  # drop the partial first line
+            else:
+                content = f.read()
+        for line in reversed(content.splitlines()):
+            parsed = _parse_training_log_line(line)
+            if parsed:
+                return parsed
+    except Exception as e:
+        logging.debug(f"[Launcher] training metrics tail-scan failed: {e}")
     return None
 
 
@@ -3677,8 +3816,9 @@ class ProcessDashboardController(NSObject):
         Returns the metrics dict {epoch, step, training_speed, best_epoch,
         best_loss, best_step} for the most recent status line, or None when
         there is no log / the process is not training / nothing has been logged
-        yet. Uses the module-level _parse_training_log_line helper (shared with
-        ProgressWindowController) - frozen-safe, no rvc import.
+        yet. Delegates the live-log tail-scan to the module-level
+        _last_training_metrics helper (shared with the menu's live titles;
+        regex via _parse_training_log_line) - frozen-safe, no rvc import.
 
         For a HISTORICAL (completed) process, prefers the durability snapshot
         stored in its history entry (best_epoch/best_loss/final_epoch written by
@@ -3707,32 +3847,13 @@ class ProcessDashboardController(NSObject):
             except (TypeError, ValueError):
                 pass  # Malformed snapshot -> fall back to live log parse
 
-        log_path = proc.get("log_file") or proc.get("log_path")
-        if not log_path:
-            return None
-        try:
-            if not os.path.exists(log_path) or not os.access(log_path, os.R_OK):
-                return None
-            # Read only the tail (cap at 1MB) and scan backwards for the last
-            # status line - cheap on the ~1s refresh timer.
-            max_size = 1024 * 1024
-            size = os.path.getsize(log_path)
-            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                if size > max_size:
-                    f.seek(size - max_size)
-                    content = f.read()
-                    nl = content.find("\n")
-                    if nl >= 0:
-                        content = content[nl + 1 :]
-                else:
-                    content = f.read()
-            for line in reversed(content.splitlines()):
-                parsed = _parse_training_log_line(line)
-                if parsed:
-                    return parsed
-        except Exception as e:
-            logging.debug(f"[Dashboard] training metrics parse failed: {e}")
-        return None
+        # Live-log tail-scan lives in the module-level _last_training_metrics
+        # (shared with the menu's live titles). Keep the dashboard's 1 MB cap
+        # — the detail panel refreshes on its ~1 s timer and wants the fuller
+        # tail; the menu's default 256 KB is plenty for "epoch N/M".
+        return _last_training_metrics(
+            proc.get("log_file") or proc.get("log_path"), max_bytes=1024 * 1024
+        )
 
     def _collect_epoch_points(self, proc: dict):
         """Return [(epoch, best_loss), ...] for the loss-vs-epoch chart.
@@ -3921,13 +4042,12 @@ class ProcessDashboardController(NSObject):
         Handles errors gracefully - on error, keeps existing data.
         """
         try:
-            self._active_processes = get_active_processes()
+            # Subprocess jobs + the synthesized in-app batch, one merge
+            # (_merged_live_procs — shared with the Active-Processes menu).
+            self._active_processes = _merged_live_procs()
         except Exception as e:
             logging.warning(f"[Dashboard] Could not refresh active processes: {e}")
             # Keep existing data on error
-        _inf_proc = _synthesize_inference_proc()
-        if _inf_proc:
-            self._active_processes.append(_inf_proc)
 
         # Probe SIGSTOP state once per refresh so row cells render truthfully
         # without a psutil call per visible cell (see _annotate_pause_state).
@@ -4438,18 +4558,15 @@ class ProcessDashboardController(NSObject):
         """
         # Capture pre-transition state for idle->active detection (Feature 2).
         was_active = self._current_state == "active"
+        # Subprocess jobs + the synthesized in-app batch, one merge
+        # (_merged_live_procs — shared with the Active-Processes menu) so the
+        # sidebar / idle->active auto-show / detail panel all light up for an
+        # in-app batch with no PID of its own.
         try:
-            self._active_processes = get_active_processes()
+            self._active_processes = _merged_live_procs()
         except Exception as e:
             logging.warning(f"[Dashboard] Could not get active processes: {e}")
             self._active_processes = []
-
-        # Synthesize the batch-inference proc on top of the subprocess procs so
-        # the sidebar / idle->active auto-show / detail panel all light up for
-        # an in-app batch with no PID of its own.
-        _inf_proc = _synthesize_inference_proc()
-        if _inf_proc:
-            self._active_processes.append(_inf_proc)
 
         # Probe SIGSTOP state once per refresh so row cells render truthfully
         # without a psutil call per visible cell (see _annotate_pause_state).
@@ -5314,11 +5431,12 @@ class ApplioLauncher:
         if not dyn:
             return
 
-        # process.status — live jobs submenu, rebuilt every cycle (each job item
-        # opens the dashboard). model_name from active_processes.json (no epoch/ETA;
-        # those require log parsing that belongs in the dashboard, not the menu).
+        # process.status — live jobs submenu (subprocess jobs + the in-app
+        # batch, with live progress titles), rebuilt each cycle; each job item
+        # opens the dashboard. Internally skips the NSMenu rebuild when the
+        # title tuple is unchanged AND the parent item is still enabled.
         if dyn.get("process.status"):
-            self._refresh_status_submenu(get_active_processes())
+            self._refresh_status_submenu()
 
         first_run = self._first_run_done()
         data_dir = self._resolve_data_dir() if first_run else None
@@ -5341,14 +5459,24 @@ class ApplioLauncher:
         if sdl is not None:
             sdl.setEnabled_(first_run)
 
-    def _refresh_status_submenu(self, procs):
-        """Rebuild the Process→Active Processes submenu from tracked jobs.
+    def _refresh_status_submenu(self):
+        """Rebuild the Process→Active Processes submenu from ALL live jobs.
 
-        Each job item dispatches through the SAME entry as the Open Progress
-        Dashboard item (runDispatch: + _menu_handler + its recorded tag), so the
-        dispatch table never grows. setSubmenu_ REPLACES the previous submenu
-        (no accumulation); a fresh NSMenu per rebuild is autoreleased, not a
-        leak. Exception-guarded: the 2 s menu timer must never die.
+        Merged list (_merged_live_procs: subprocess jobs + the in-app batch) so
+        the menu finally shows an in-process inference too, with live progress
+        titles (_menu_job_title; training epoch via a bounded tail-scan of the
+        run's training.log through _last_training_metrics — at most one 256 KB
+        read + regex per training proc on this 2 s tick). Each job item
+        dispatches through the SAME entry as the Open Progress Dashboard item
+        (runDispatch: + _menu_handler + its recorded tag), so the dispatch
+        table never grows. setSubmenu_ REPLACES the previous submenu (no
+        accumulation); a fresh NSMenu per rebuild is autoreleased, not a leak.
+        The NSMenu rebuild is SKIPPED only when the title tuple is unchanged
+        AND the parent item is enabled — after a full _build_native_menu pass
+        (the pywebview menu re-wipe path) the status parent is rebuilt
+        DISABLED from the static spec, and a titles-only skip would leave it
+        disabled with a dead submenu. Exception-guarded: the 2 s menu timer
+        must never die.
         """
         entry = getattr(self, "_dynamic_items", {}).get("process.status")
         if not entry:
@@ -5357,21 +5485,35 @@ class ApplioLauncher:
         try:
             from AppKit import NSMenu, NSMenuItem
 
+            procs = _merged_live_procs()
+            _annotate_paused(procs)
+            titles = []
+            for proc in procs:
+                epoch = None
+                if (proc.get("type") or "").lower() == "training":
+                    metrics = _last_training_metrics(
+                        proc.get("log_file") or proc.get("log_path")
+                    )
+                    epoch = metrics.get("epoch") if metrics else None
+                titles.append(_menu_job_title(proc, training_epoch=epoch))
+            if (
+                titles == getattr(self, "_last_status_titles", None)
+                and item.isEnabled()
+            ):
+                return  # nothing changed and the parent is still enabled
+            self._last_status_titles = titles
+
             sub = NSMenu.alloc().init()
             tag = getattr(self, "_key_to_tag", {}).get("process.open_dashboard")
             handler = self._menu_handler  # MenuActionHandler (NSObject proxy)
-            if not procs:
+            if not titles:
                 ni = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                     "No active processes", None, ""
                 )
                 ni.setEnabled_(False)
                 sub.addItem_(ni)
             else:
-                for proc in procs:
-                    title = (
-                        f"{(proc.get('type') or 'process').capitalize()}: "
-                        f"{proc.get('model_name') or 'active job'}"
-                    ).strip()
+                for title in titles:
                     ni = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                         title,
                         "runDispatch:" if handler and tag is not None else None,
