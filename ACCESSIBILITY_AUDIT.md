@@ -816,3 +816,12 @@ next manual VoiceOver pass (on the Phase 4 build) that re-gates the upstream PR 
    in-app.)
 6. **Diagnostics:** the `[A11y] post mode=… vo=… element=…` line lands in
    `~/Library/Logs/Applio/applio_launcher.log` during a job.
+
+### Phase 4 final-review notes (2026-08-22, whole-branch review, MERGE-READY)
+Two accepted minor observations, remedies pre-documented: (1) the module-level pause probe
+(`_annotate_paused`) identity-checks via verify_process_identity while the controller's
+`_annotate_pause_state` does not — menu slightly stricter, both best-effort per tick; (2) menu
+titles (incl. the 256 KB training tail scan) are composed every 2 s even when the skip-rebuild
+fires — by design (the skip needs the titles to compare), bounded, documented. All task-level
+deferred minors triaged ACCEPT (rationale in the final review). Patches/-in-bundle AC was a plan
+defect — the Resources marker checks are the shipping mechanism (7/7).
