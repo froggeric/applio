@@ -783,6 +783,69 @@ def _menu_job_title(proc, training_epoch=None):
     return title[:64]
 
 
+def _row_ax_summary(proc, metrics=None, total_epoch=None, eta=None):
+    """One-line VoiceOver summary of a dashboard row's live state (AppKit-free).
+
+    The visible cell text stays short; this is the FULL value a screen reader
+    speaks from the row view (stamped by _apply_row_ax) or the selection
+    announcement. Shapes:
+
+      training   "epoch {cur} of {total}, best loss {best}, ETA {eta}"
+                 best is "{:.4g}" or "--" before the first evaluation
+                 (best_loss is None); eta defaults "--" — the CONTROLLER
+                 caller passes the derived string via self._derive_eta(...)
+      inference  "{processed} of {total} files converted, {pct:.0f} percent"
+                 (pct via applio_inference_stats.compute_inference_stats, the
+                 same math the detail panel uses)
+      other      "" — unknown types / missing metrics carry nothing to add;
+                 callers skip stamping a value.
+
+    Consumes the metrics shapes _last_training_metrics returns
+    (epoch/step/training_speed/best_loss/best_epoch/best_step) and the
+    synthesized inference proc's fields (total/processed/converted). English
+    keys are wrapped in applio_i18n.native_tr at call time; i18n and stats
+    imports are local (fork-owned bundled modules — frozen-safe).
+    """
+    import applio_i18n
+    from applio_inference_stats import compute_inference_stats
+
+    _t = applio_i18n.native_tr
+
+    if not proc:
+        return ""
+    ptype = (proc.get("type") or "").lower()
+    if ptype == "training":
+        if not metrics:
+            return ""
+        cur = metrics.get("epoch")
+        total = total_epoch if total_epoch is not None else proc.get("total_epoch")
+        try:
+            total = int(total) if total not in (None, "") else None
+        except (ValueError, TypeError):
+            total = None
+        if not cur:
+            return ""
+        # No total recorded (a history snapshot without one) -> bare "epoch N".
+        head = (
+            f"{_t('epoch')} {cur} {_t('of')} {total}"
+            if total
+            else f"{_t('epoch')} {cur}"
+        )
+        best = metrics.get("best_loss")
+        best_str = f"{best:.4g}" if best is not None else "--"
+        eta_str = eta if eta else "--"
+        return f"{head}, {_t('best loss')} {best_str}, {_t('ETA')} {eta_str}"
+    if ptype == "inference":
+        total = proc.get("total", 0) or 0
+        processed = proc.get("processed", 0) or 0
+        pct = compute_inference_stats(proc, time.time())["pct"]
+        return (
+            f"{processed} {_t('of')} {total} {_t('files converted')}, "
+            f"{pct:.0f} {_t('percent')}"
+        )
+    return ""
+
+
 def _sweep_stale_inference_progress():
     """Mark a stale 'running' inference record (app crashed/quit mid-batch) as
     'interrupted' so the dashboard never shows a phantom running job. Appends a
@@ -2524,6 +2587,43 @@ def _significant_improvements(points):
     return sig
 
 
+def _chart_ax_summary(points):
+    """VoiceOver summary of the loss chart's plotted curve (AppKit-free).
+
+    Module-level (NOT a LossChartView method — PyObjC validates every method
+    on an NSView subclass as an ObjC selector; see the _chart_text_attr note).
+    LossChartView.set_points publishes this as the view's AX value: a
+    custom-drawn chart is invisible to VoiceOver, so the value string is the
+    only readable channel. The improvement count comes from the SAME
+    _significant_improvements the green drawRect_ highlights use, so the
+    spoken count matches the drawn markers. Fewer than 2 evaluated points is
+    the chart's placeholder case (no line is drawn either) -> "no data yet".
+    Malformed points are skipped by the same coercion set_points applies.
+    """
+    import applio_i18n
+
+    _t = applio_i18n.native_tr
+
+    pts = []
+    for p in points or []:
+        try:
+            pts.append((int(p[0]), float(p[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if len(pts) < 2:
+        return f"{_t('Loss chart')}: {_t('no data yet')}."
+    first_ep, first_loss = pts[0]
+    last_ep, last_loss = pts[-1]
+    best = min(pts, key=lambda t: t[1])
+    n_impr = len(_significant_improvements(pts))
+    return (
+        f"{_t('Loss chart')}: {len(pts)} {_t('epochs plotted')}, "
+        f"{first_ep}–{last_ep}. {_t('Loss fell from')} {first_loss:.4g} "
+        f"{_t('to')} {last_loss:.4g}. {_t('Best')} {best[1]:.4g} @ {best[0]}. "
+        f"{n_impr} {_t('significant improvements')}."
+    )
+
+
 class LossChartView(NSView):
     """Compact loss-vs-epoch line chart for the dashboard detail panel (Feature 3).
 
@@ -2568,20 +2668,11 @@ class LossChartView(NSView):
         self._points = cleaned
         self.setNeedsDisplay_(True)
         # VoiceOver cannot read a custom-drawn chart; publish a text summary
-        # of the plotted data as the view's AX value. Points are (epoch, loss)
-        # tuples — see the cleaning loop above.
+        # of the plotted curve as the view's AX value. The builder is
+        # module-level (_chart_ax_summary) — see the class docstring note
+        # about PyObjC selector validation on NSView subclasses.
         try:
-            pts = self._points or []
-            if pts:
-                best = min(pts, key=lambda t: t[1])
-                summary = (
-                    f"Loss chart: {len(pts)} epochs plotted. Best loss "
-                    f"{best[1]:.4g} at epoch {best[0]}. Latest: loss "
-                    f"{pts[-1][1]:.4g} at epoch {pts[-1][0]}."
-                )
-            else:
-                summary = "Loss chart: no data yet."
-            self.setAccessibilityValue_(summary)
+            self.setAccessibilityValue_(_chart_ax_summary(self._points))
         except Exception:
             pass
 
@@ -3012,7 +3103,7 @@ class ProcessDashboardController(NSObject):
         self.detail_status.setBezeled_(False)
         self.detail_status.setDrawsBackground_(False)
         self.detail_status.setEditable_(False)
-        self._set_detail_status("No process selected", badge_text="Idle")
+        self._set_detail_status("No process selected")
         self.detail_status.setAccessibilityLabel_("Process status")
         self.detail_panel.contentView().addSubview_(self.detail_status)
 
@@ -3168,23 +3259,29 @@ class ProcessDashboardController(NSObject):
             setattr(self, attr, btn)
             self.detail_panel.contentView().addSubview_(btn)
 
+        # Key-view loop (Phase 4 a11y), set ONCE here — _create_sidebar (and
+        # with it process_table) runs before _create_detail_panel, so all five
+        # views exist by this point. Tab out of the runs list walks the action
+        # bar and returns to the list: a keyboard user can always LEAVE the
+        # table (a list-only focus loop is the classic table a11y trap).
+        self.process_table.setNextKeyView_(self.stop_btn)
+        self.stop_btn.setNextKeyView_(self.pause_btn)
+        self.pause_btn.setNextKeyView_(self.reveal_btn)
+        self.reveal_btn.setNextKeyView_(self.open_btn)
+        self.open_btn.setNextKeyView_(self.process_table)
+
         # Initially hidden
         self.detail_panel.setHidden_(True)
 
-    def _set_detail_status(self, display, badge_text=None):
+    def _set_detail_status(self, display):
         """Single choke point for every detail-status write.
 
-        Writes the status line and, when this controller has a status badge,
-        the badge together so the two can never drift apart. ``badge_text``
-        overrides the badge string when it should differ from the status
-        line (e.g. the idle default).
+        Writes the dashboard's status line. (The dashboard has no status
+        badge — that is a ProgressWindowController element; the badge branch
+        that used to live here never fired and was removed.)
         """
         if hasattr(self, "detail_status") and self.detail_status:
             self.detail_status.setStringValue_(display)
-        if hasattr(self, "status_badge") and self.status_badge:
-            self.status_badge.setStringValue_(
-                badge_text if badge_text is not None else display
-            )
 
     def _update_detail_panel(self):
         """Update detail panel with selected process info.
@@ -3194,6 +3291,10 @@ class ProcessDashboardController(NSObject):
         - Log file deleted while viewing
         - Null/missing UI elements
         """
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         # Safety check: ensure window still exists
         if not self.window:
             return
@@ -3326,17 +3427,25 @@ class ProcessDashboardController(NSObject):
                     self.detail_progress.stopAnimation_(None)
                     self.detail_progress.setIndeterminate_(False)
                     self.detail_progress.setDoubleValue_(frac * 100.0)
+                    # Template text, not a bare percentage: VoiceOver reads
+                    # this verbatim, so it must say WHAT is at that percentage.
                     self.detail_progress.setAccessibilityValue_(
-                        f"{int(frac * 100)} percent"
+                        f"{_t('Epoch')} {cur_ep} of {total_epoch}, "
+                        f"{int(frac * 100)} {_t('percent')}"
                     )
                     pct_txt = f"Epoch {cur_ep}/{total_epoch}  ({int(frac * 100)}%)"
                 elif status == "running":
                     # No metrics yet (just started) or non-training: spin to
                     # show activity. startAnimation_ is required for an
-                    # indeterminate bar to actually move.
+                    # indeterminate bar to actually move. The AX value is
+                    # RESET here — without this it kept the last known
+                    # percentage while the bar spun (stale-value bug).
                     self.detail_progress.setDoubleValue_(0.0)
                     self.detail_progress.setIndeterminate_(True)
                     self.detail_progress.startAnimation_(None)
+                    self.detail_progress.setAccessibilityValue_(
+                        _t("Working, no metrics yet")
+                    )
                     pct_txt = "--"
                 else:
                     # Not running and no metrics -> empty bar
@@ -3556,8 +3665,11 @@ class ProcessDashboardController(NSObject):
                 self.detail_progress.stopAnimation_(None)
                 self.detail_progress.setIndeterminate_(False)
                 self.detail_progress.setDoubleValue_(stats["pct"])
+                # Template text, not a bare percentage (matches the training
+                # branch): VoiceOver reads this verbatim.
                 self.detail_progress.setAccessibilityValue_(
-                    f"{int(stats['pct'])} percent"
+                    f"{processed} of {total} {_t('files')}, "
+                    f"{int(stats['pct'])} {_t('percent')}"
                 )
             if hasattr(self, "detail_progress_text") and self.detail_progress_text:
                 self.detail_progress_text.setStringValue_(
@@ -4016,6 +4128,10 @@ class ProcessDashboardController(NSObject):
 
     def tableViewSelectionDidChange_(self, notification):
         """Handle row selection."""
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         row = self.process_table.selectedRow()
         if row < 0:
             self._selected_process = None
@@ -4035,6 +4151,123 @@ class ProcessDashboardController(NSObject):
 
         # Update detail panel with selected process info
         self._update_detail_panel()
+
+        # Announce the selected row's summary (Phase 4): VoiceOver focus stays
+        # on the table after a selection change, so without this the user has
+        # no signal that the detail pane refreshed — with THESE numbers. Fires
+        # while the DASHBOARD window is focused with native VO focus on the
+        # table (the configuration where AX posts demonstrably work); selection
+        # changes arrive on the main thread, as AX posts require. Gated on VO
+        # running and verbosity != "off" (the launcher's persisted setting —
+        # the dashboard itself has no verbosity attr), and must never break
+        # selection: any failure is swallowed.
+        try:
+            verbosity = getattr(
+                getattr(self, "_launcher", None), "_a11y_verbosity", "standard"
+            )
+            if (
+                verbosity != "off"
+                and self._selected_process
+                and NSWorkspace.sharedWorkspace().isVoiceOverEnabled()
+            ):
+                summary = self._ax_summary_for(self._selected_process)
+                note = _t("Detail pane updated.")
+                message = f"{summary}. {note}" if summary else note
+                applio_a11y.post_announcement(self.process_table, message)
+        except Exception as e:
+            logging.debug(f"[Dashboard] selection announcement failed: {e}")
+
+    # =================================================================
+    # Row accessibility (Phase 4): full per-row values for VoiceOver
+    # =================================================================
+
+    def _ax_summary_for(self, proc):
+        """Controller-side _row_ax_summary caller (derives the context).
+
+        The module-level builder is pure and I/O-free; only the controller can
+        supply what the training shape needs: the run's parsed metrics
+        (_parse_training_metrics — live log or history snapshot), the
+        int-coerced total_epoch, and the ETA via _derive_eta. Inference and
+        unknown types need no context.
+        """
+        if not proc or (proc.get("type") or "").lower() != "training":
+            return _row_ax_summary(proc)
+        metrics = self._parse_training_metrics(proc)
+        total_epoch = proc.get("total_epoch")
+        try:
+            total_epoch = int(total_epoch) if total_epoch not in (None, "") else None
+        except (ValueError, TypeError):
+            total_epoch = None
+        return _row_ax_summary(
+            proc,
+            metrics=metrics,
+            total_epoch=total_epoch,
+            eta=self._derive_eta(metrics, total_epoch),
+        )
+
+    def _apply_row_ax(self, table, row, view=None):
+        """Stamp AX label + value on one runs-list row (Phase 4 a11y).
+
+        The visible cell text stays short ("Running — Training: voice");
+        VoiceOver reads the row view's label + value instead, which carries
+        the live metrics summary. ``view`` is the freshly added row view from
+        the didAddRowView hook; when None (the willDisplayCell path) it is
+        resolved via rowViewAtRow_. Skips silently when the row/proc/view
+        cannot be resolved or the row view is already stamped (the two hooks
+        can both fire for the same row). Re-fires on each 3 s reloadData.
+        Non-training/inference rows are left to their cell text (verbatim
+        already) — only rows with metrics get a value.
+        """
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
+        try:
+            if row < 0:
+                return
+            n_active = len(self._active_processes)
+            if row < n_active:
+                proc = self._active_processes[row]
+            else:
+                idx = row - n_active
+                if idx >= len(self._recent_processes):
+                    return
+                proc = self._recent_processes[idx]
+            rv = view if view is not None else table.rowViewAtRow_(row)
+            if rv is None:
+                return  # row not realized yet; the next display pass retries
+            if rv.accessibilityLabel():
+                return  # already stamped by the first hook (dedupe)
+            ptype = (proc.get("type") or "").lower()
+            if ptype == "training":
+                prefix = _t("Training run")
+            elif ptype == "inference":
+                prefix = _t("Inference batch")
+            else:
+                return
+            name = (proc.get("model_name") or "").strip()
+            rv.setAccessibilityLabel_(f"{prefix} {name}" if name else prefix)
+            rv.setAccessibilityValue_(self._ax_summary_for(proc))
+        except Exception as e:
+            logging.debug(f"[Dashboard] row AX stamp failed: {e}")
+
+    def tableView_didAddRowView_forRow_(self, table, view, row):
+        """Delegate hook (view-based tables): stamp the freshly added row view.
+
+        The runs list is CELL-based, so this is NOT guaranteed to fire here —
+        kept because it is the documented channel when the table ever moves to
+        view-based rows and it costs nothing; willDisplayCell below is the
+        guaranteed cell-based channel.
+        """
+        self._apply_row_ax(table, row, view=view)
+
+    def tableView_willDisplayCell_forTableColumn_row_(self, table, cell, column, row):
+        """Delegate hook (GUARANTEED for cell-based tables): stamp before draw.
+
+        Passes view=None so _apply_row_ax resolves the row view itself; the
+        helper's dedupe skips rows the didAddRowView hook already stamped.
+        """
+        self._apply_row_ax(table, row)
 
     def refresh_process_list(self):
         """Refresh the process list from current state.
