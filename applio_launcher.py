@@ -1147,6 +1147,10 @@ class ProgressWindowController:
 
     def _create_ui(self):
         """Create UI elements with accessibility support."""
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         window_width = 500
         padding = 15
         y = 660 - padding  # Updated from 580 to match new window height
@@ -1186,7 +1190,7 @@ class ProgressWindowController:
                 window_width - padding - badge_width, y - 22, badge_width, badge_height
             )
         )
-        self.status_badge.setStringValue_("Running")
+        self.status_badge.setStringValue_(_t("Running"))
         self.status_badge.setBezeled_(False)
         self.status_badge.setDrawsBackground_(True)
         self.status_badge.setBackgroundColor_(
@@ -1991,6 +1995,10 @@ class ProgressWindowController:
 
     def processQueueUpdates_(self, timer):
         """Process pending updates from background thread (runs on main thread)."""
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         # Update elapsed time
         elapsed = datetime.datetime.now() - self.start_time
         hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
@@ -2044,9 +2052,9 @@ class ProgressWindowController:
         started_at = self.process_info.get("started_at")
         if pid and not verify_process_identity(pid, started_at):
             current_status = self.status_label.stringValue()
-            if "Running" in current_status or "Paused" in current_status:
-                self.status_label.setStringValue_("Status: Completed")
-                self.status_badge.setStringValue_("Completed")
+            if _t("Running") in current_status or _t("Paused") in current_status:
+                self.status_label.setStringValue_(_t("Status: Completed"))
+                self.status_badge.setStringValue_(_t("Completed"))
                 if self._total_epoch:
                     self.progress_bar.setDoubleValue_(self._total_epoch)
                 else:
@@ -2190,6 +2198,10 @@ class ProgressWindowController:
 
     def togglePause_(self, sender):
         """Toggle pause/resume."""
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         pid = self.process_info.get("pid")
         started_at = self.process_info.get("started_at")
         if not pid or not verify_process_identity(pid, started_at):
@@ -2198,10 +2210,10 @@ class ProgressWindowController:
         try:
             if self.paused:
                 os.kill(pid, signal.SIGCONT)
-                self.pause_btn.setTitle_("Pause")
+                self.pause_btn.setTitle_(_t("Pause"))
                 self.pause_btn.setAccessibilityLabel_("Pause process")
-                self.status_label.setStringValue_("Status: Running")
-                self.status_badge.setStringValue_("Running")
+                self.status_label.setStringValue_(_t("Status: Running"))
+                self.status_badge.setStringValue_(_t("Running"))
                 self._add_log_line(
                     f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process resumed"
                 )
@@ -2212,10 +2224,10 @@ class ProgressWindowController:
                 )
             else:
                 os.kill(pid, signal.SIGSTOP)
-                self.pause_btn.setTitle_("Resume")
+                self.pause_btn.setTitle_(_t("Resume"))
                 self.pause_btn.setAccessibilityLabel_("Resume process")
-                self.status_label.setStringValue_("Status: Paused")
-                self.status_badge.setStringValue_("Paused")
+                self.status_label.setStringValue_(_t("Status: Paused"))
+                self.status_badge.setStringValue_(_t("Paused"))
                 self._add_log_line(
                     f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Process paused"
                 )
@@ -2227,8 +2239,8 @@ class ProgressWindowController:
             self.paused = not self.paused
         except (ProcessLookupError, PermissionError, OSError) as e:
             logging.warning(f"[ProgressWindow] Could not toggle pause: {e}")
-            self.status_label.setStringValue_("Status: Error controlling process")
-            self.status_badge.setStringValue_("Error")
+            self.status_label.setStringValue_(_t("Status: Error controlling process"))
+            self.status_badge.setStringValue_(_t("Error"))
 
     def openLogsFolder_(self, sender):
         """Open logs folder in Finder."""
@@ -3352,6 +3364,10 @@ class ProcessDashboardController(NSObject):
         """
         from applio_inference_stats import compute_inference_stats
 
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         try:
             self.detail_panel.setHidden_(False)
             if hasattr(self, "placeholder_view") and self.placeholder_view:
@@ -3362,7 +3378,7 @@ class ProcessDashboardController(NSObject):
                     f"Inference: {model_name}" if model_name else "Inference"
                 )
             status = proc.get("status", "running")
-            label = {"running": "Running", "cancelling": "Stopping…"}.get(
+            label = {"running": _t("Running"), "cancelling": _t("Stopping…")}.get(
                 status, status.title()
             )
             if hasattr(self, "detail_status") and self.detail_status:
@@ -3507,6 +3523,10 @@ class ProcessDashboardController(NSObject):
         REGRESSION GUARD: inference procs have no pid, so the pid-based logic
         below would DISABLE Stop and break the cooperative cancel. Branch first.
         """
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         if proc is not None and proc.get("_is_inference"):
             is_running = proc.get("status") in ("running", "cancelling")
             has_output = bool(proc.get("output_folder"))
@@ -3515,8 +3535,8 @@ class ProcessDashboardController(NSObject):
             if hasattr(self, "pause_btn") and self.pause_btn:
                 # Pause is meaningless for an in-process batch (no PID to SIGSTOP)
                 self.pause_btn.setEnabled_(False)
-                self.pause_btn.setTitle_("Pause")
-                self.pause_btn.setAccessibilityLabel_("Pause")
+                self.pause_btn.setTitle_(_t("Pause"))
+                self.pause_btn.setAccessibilityLabel_(_t("Pause"))
             if hasattr(self, "reveal_btn") and self.reveal_btn:
                 self.reveal_btn.setEnabled_(has_output)
             if hasattr(self, "open_btn") and self.open_btn:
@@ -3536,7 +3556,7 @@ class ProcessDashboardController(NSObject):
             self.stop_btn.setEnabled_(pid_alive)
         if hasattr(self, "pause_btn") and self.pause_btn:
             self.pause_btn.setEnabled_(pid_alive)
-            new_title = "Resume" if is_stopped else "Pause"
+            new_title = _t("Resume") if is_stopped else _t("Pause")
             self.pause_btn.setTitle_(new_title)
             self.pause_btn.setAccessibilityLabel_(new_title)
 
@@ -3554,6 +3574,10 @@ class ProcessDashboardController(NSObject):
         patcher's loop checks between files. MUST branch BEFORE the pid
         early-return (inference procs have no pid).
         """
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         proc = getattr(self, "_current_proc", None) or self._selected_process
         if proc is not None and proc.get("_is_inference"):
             if proc.get("status") not in ("running", "cancelling"):
@@ -3564,7 +3588,7 @@ class ProcessDashboardController(NSObject):
                 os.makedirs(os.path.dirname(flag), exist_ok=True)
                 Path(flag).touch()
                 if hasattr(self, "detail_status") and self.detail_status:
-                    self._set_detail_status("Stopping…")
+                    self._set_detail_status(_t("Stopping…"))
                 if hasattr(self, "stop_btn") and self.stop_btn:
                     self.stop_btn.setEnabled_(False)
                 logging.info("[Dashboard] Wrote inference cancel flag")
@@ -3590,7 +3614,7 @@ class ProcessDashboardController(NSObject):
             if hasattr(self, "pause_btn") and self.pause_btn:
                 self.pause_btn.setEnabled_(False)
             if hasattr(self, "detail_status") and self.detail_status:
-                self._set_detail_status("Stopping…")
+                self._set_detail_status(_t("Stopping…"))
         except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError) as e:
             logging.warning(f"[Dashboard] Could not stop process: {e}")
 
@@ -3600,6 +3624,10 @@ class ProcessDashboardController(NSObject):
         Direction is derived from the live status (STATUS_STOPPED -> resume),
         so the action is correct even if the label/view is momentarily stale.
         """
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         proc = getattr(self, "_current_proc", None) or self._selected_process
         pid = self._current_pid(proc)
         if not pid or not PSUTIL_AVAILABLE:
@@ -3609,14 +3637,14 @@ class ProcessDashboardController(NSObject):
             os.kill(pid, signal.SIGCONT if is_stopped else signal.SIGSTOP)
             now_stopped = not is_stopped
             if sender is not None and hasattr(sender, "setTitle_"):
-                new_title = "Resume" if now_stopped else "Pause"
+                new_title = _t("Resume") if now_stopped else _t("Pause")
                 sender.setTitle_(new_title)
                 sender.setAccessibilityLabel_(new_title)
             logging.info(
                 f"[Dashboard] Process pid {pid} {'paused' if now_stopped else 'resumed'}"
             )
             if hasattr(self, "detail_status") and self.detail_status:
-                self._set_detail_status("Paused" if now_stopped else "Running")
+                self._set_detail_status(_t("Paused") if now_stopped else _t("Running"))
         except (ProcessLookupError, PermissionError, OSError) as e:
             logging.warning(f"[Dashboard] Could not toggle pause: {e}")
 
@@ -3825,15 +3853,19 @@ class ProcessDashboardController(NSObject):
         A cancelling batch shows "Stopping" — checked BEFORE the probe,
         which synthesized inference procs force to False (never paused).
         """
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         if row < len(self._active_processes):
             proc = self._active_processes[row]
             if proc.get("status") == "cancelling":
-                word = "Stopping"
+                word = _t("Stopping")
             elif proc.get("_ps_stopped"):
-                word = "Paused"
+                word = _t("Paused")
             else:
-                word = "Running"
-            proc_type = proc.get("type", "Unknown").capitalize()
+                word = _t("Running")
+            proc_type = proc.get("type", _t("Unknown")).capitalize()
             model_name = proc.get("model_name", "")
             return f"{word} — {proc_type}: {model_name}"
         else:
@@ -3841,15 +3873,18 @@ class ProcessDashboardController(NSObject):
             if recent_idx < len(self._recent_processes):
                 proc = self._recent_processes[recent_idx]
                 status = (proc.get("status") or "completed").lower()
+                # 'failed' and 'error' share ONE translated word so a single
+                # override covers both.
+                _failed = _t("Failed")
                 word = {
-                    "completed": "Completed",
-                    "failed": "Failed",
-                    "error": "Failed",
-                    "cancelled": "Cancelled",
-                    "canceled": "Cancelled",
-                    "interrupted": "Interrupted",
-                }.get(status, status.capitalize() or "Completed")
-                proc_type = proc.get("type", "Unknown").capitalize()
+                    "completed": _t("Completed"),
+                    "failed": _failed,
+                    "error": _failed,
+                    "cancelled": _t("Cancelled"),
+                    "canceled": _t("Cancelled"),
+                    "interrupted": _t("Interrupted"),
+                }.get(status, status.capitalize() or _t("Completed"))
+                proc_type = proc.get("type", _t("Unknown")).capitalize()
                 model_name = proc.get("model_name", "")
                 return f"{word} — {proc_type}: {model_name}"
         return ""
@@ -5796,6 +5831,10 @@ class ApplioLauncher:
         try:
             from AppKit import NSAlert, NSAlertStyleInformational, NSApp
 
+            import applio_i18n
+
+            _t = applio_i18n.native_tr
+
             # Single source of truth: applio_update_check.VERSION reads
             # Contents/Resources/build_info.json -> "3.6.3.5" (multi-root search).
             version = _update_check().VERSION
@@ -5803,10 +5842,15 @@ class ApplioLauncher:
             alert.setMessageText_("Applio")
             alert.setInformativeText_(
                 f"Version {version}\n\n"
-                "Voice Conversion Application\n"
-                "Based on RVC (Retrieval-Based Voice Conversion)\n\n"
-                "Native macOS port by Frédéric Guigand\n"
-                "© 2024-2026 IA Hispano"
+                + "\n".join(
+                    [
+                        _t("Voice Conversion Application"),
+                        _t("Based on RVC (Retrieval-Based Voice Conversion)"),
+                        "",
+                        _t("Native macOS port by Frédéric Guigand"),
+                        _t("© 2024-2026 IA Hispano"),
+                    ]
+                )
             )
             alert.setAlertStyle_(NSAlertStyleInformational)
             alert.addButtonWithTitle_("OK")

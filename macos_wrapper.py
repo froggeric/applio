@@ -1164,14 +1164,18 @@ class ApplioApp:
     DATA_PATH = None  # Set after initialization
 
     def __init__(self, launcher=None):
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         self.server_host = "127.0.0.1"
         self.server_port = 6969
         self.loading_port = 5678
         self.window = None
         self.is_ready = False
         self.heading = "System Calibration"
-        self.sub_heading = "Initializing environment..."
-        self.technical_detail = "Allocating memory..."
+        self.sub_heading = _t("Initializing environment...")
+        self.technical_detail = _t("Allocating memory...")
         self.progress = 0
         self.stage = "1/4"
         self.log_file = os.path.expanduser("~/Library/Logs/Applio/applio_wrapper.log")
@@ -1234,6 +1238,10 @@ class ApplioApp:
         """Expert Log Observer with Real-Time Technical Feed."""
         import re
 
+        import applio_i18n
+
+        _t = applio_i18n.native_tr
+
         logging.info("Starting Granular Log Observer...")
 
         # Regex patterns for real activity
@@ -1293,7 +1301,9 @@ class ApplioApp:
                             self.stage = "2/4"
                             self.heading = "Synchronizing Assets"
                             fname = p_dl_file.search(line).group(1)
-                            self.sub_heading = f"Fetching {os.path.basename(fname)}"
+                            self.sub_heading = _t("Fetching {basename}").format(
+                                basename=os.path.basename(fname)
+                            )
                             self.technical_detail = f"Network Request: {fname}"
 
                         # 2. Operations
@@ -1310,28 +1320,30 @@ class ApplioApp:
                             pkgs = p_pip_install.search(line).group(1)
                             if len(pkgs) > 30:
                                 pkgs = pkgs[:27] + "..."
-                            self.sub_heading = f"Installing {pkgs}"
+                            self.sub_heading = _t("Installing {pkgs}").format(pkgs=pkgs)
                             self.technical_detail = line
 
                         # 3. Initialization
                         elif p_prereq.search(line):
                             self.stage = "1/4"
                             self.heading = "System Validation"
-                            self.sub_heading = "Checking Prerequisites..."
+                            self.sub_heading = _t("Checking Prerequisites...")
                             if self.progress < 10:
                                 self.progress = 10
 
                         elif p_device.search(line):
                             self.heading = "Hardware Optimization"
                             device = p_device.search(line).group(1)
-                            self.sub_heading = f"Accelerating with {device}"
+                            self.sub_heading = _t("Accelerating with {device}").format(
+                                device=device
+                            )
                             self.technical_detail = f"Device allocation: {device}"
 
                         # 4. Boot
                         elif p_init_app.search(line):
                             self.stage = "3/4"
                             self.heading = "Booting Inference Engine"
-                            self.sub_heading = "Loading Neural Networks..."
+                            self.sub_heading = _t("Loading Neural Networks...")
                             self.technical_detail = "Initializing pytorch contexts..."
                             if self.progress < 80:
                                 self.progress = 80
@@ -1339,7 +1351,9 @@ class ApplioApp:
                         elif p_load_model.search(line):
                             self.heading = "Loading Models"
                             model = p_load_model.search(line).group(1)
-                            self.sub_heading = f"Hydrating {model}..."
+                            self.sub_heading = _t("Hydrating {model}...").format(
+                                model=model
+                            )
                             self.technical_detail = f"Memory mapping {model}"
 
                         # 5. Success
@@ -1350,7 +1364,7 @@ class ApplioApp:
                         ):
                             self.stage = "4/4"
                             self.heading = "Initialization Complete"
-                            self.sub_heading = "Launching User Interface..."
+                            self.sub_heading = _t("Launching User Interface...")
                             self.progress = 100
                             self.is_ready = True
                             return
@@ -1367,9 +1381,9 @@ class ApplioApp:
                                 if (
                                     self.stage == "1/4"
                                     and self.sub_heading
-                                    == "Initializing environment..."
+                                    == _t("Initializing environment...")
                                 ):
-                                    self.sub_heading = "Configuring Runtime..."
+                                    self.sub_heading = _t("Configuring Runtime...")
 
                         self._sync_title_to_heading()
             except Exception as e:

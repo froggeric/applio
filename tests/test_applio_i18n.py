@@ -123,6 +123,55 @@ def test_corrupt_overrides_json_falls_back():
     assert tr2("finished") == "finito"
 
 
+CLUSTER_KEYS = [
+    ("macos_wrapper.py", "Initializing environment..."),
+    ("macos_wrapper.py", "Loading Neural Networks..."),
+    ("applio_launcher.py", "Status: Running"),
+    ("applio_launcher.py", "Stopping…"),
+    ("applio_launcher.py", "Based on RVC (Retrieval-Based Voice Conversion)"),
+]
+
+# Wrapped-form expectations: (file, snippet that must exist after wrapping).
+# This is the FAILING half of the test pre-implementation.
+WRAPPED_FORMS = [
+    ("macos_wrapper.py", '_t("Initializing environment...")'),
+    ("macos_wrapper.py", '_t("Loading Neural Networks...")'),
+    ("macos_wrapper.py", '_t("Launching User Interface...")'),
+    ("applio_launcher.py", '_t("Status: Running")'),
+    ("applio_launcher.py", '_t("Pause")'),
+    ("applio_launcher.py", '_t("Stopping…")'),
+    ("applio_launcher.py", '_t("Failed")'),
+    ("applio_launcher.py", '_t("Voice Conversion Application")'),
+]
+
+
+def test_native_clusters_translatable_and_stable():
+    tmp = _make_tree("en_US", extra_keys={})
+    overrides = {
+        "en_US": {
+            "Initializing environment...": "Inicializando entorno...",
+            "Loading Neural Networks...": "Cargando redes neuronales...",
+        }
+    }
+    with open(
+        os.path.join(tmp, "assets", "applio_i18n_overrides.json"), "w", encoding="utf8"
+    ) as fh:
+        json.dump(overrides, fh, ensure_ascii=False)
+    tr = applio_i18n.NativeI18n(base_paths=[tmp])
+    assert tr("Initializing environment...") == "Inicializando entorno..."
+    assert tr("Loading Neural Networks...") == "Cargando redes neuronales..."
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # (b) raw literals stay verbatim in their owning files so the keys (and
+    # any overrides written against them) never drift.
+    for fname, literal in CLUSTER_KEYS:
+        with open(os.path.join(repo, fname), encoding="utf8") as fh:
+            assert literal in fh.read(), f"{fname} lost key {literal!r}"
+    # (c) the wrapping itself exists — representative sites in wrapped form.
+    for fname, snippet in WRAPPED_FORMS:
+        with open(os.path.join(repo, fname), encoding="utf8") as fh:
+            assert snippet in fh.read(), f"{fname} missing wrapped form {snippet!r}"
+
+
 def run_all():
     test_override_locale_and_format()
     test_missing_key_falls_back_to_key()
@@ -132,7 +181,8 @@ def run_all():
     test_system_locale_prefix_glob()
     test_corrupt_locale_json_falls_back()
     test_corrupt_overrides_json_falls_back()
-    print("All applio_i18n tests passed (8).")
+    test_native_clusters_translatable_and_stable()
+    print("All applio_i18n tests passed (9).")
 
 
 if __name__ == "__main__":
