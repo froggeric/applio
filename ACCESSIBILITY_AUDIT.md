@@ -742,3 +742,26 @@ i18n follow-up; (2) history JSON read twice per request (`_collect_words` +
 (3) the build's patch loop prints patcher stdout but not stderr — a crashing patcher (exit 1)
 reports "PATCH FAILURE" without its traceback. All 19 task-level deferred minors triaged
 ACCEPT by the final review (one — the browse docstring — already fixed on-branch).
+
+### Manual VoiceOver pass results (2026-08-22, user-run, Phase 2+3 build)
+- **Toasts: WORK.** gradio toasts are announced by VoiceOver (matches §6's verification — the
+  one gradio channel that announces).
+- **Job-start announcements: NOT heard** — the step-4 silence persists across Phase 1→3 builds
+  (bisect data — A11y log lines, VO-cursor position — not captured this run). Pragmatic fix
+  direction per the user: route job lifecycle through the channel that WORKS (gr.Info startup
+  toasts — fork-patchable at handler entry, = §5 ps-10), rather than blocking on the
+  NSAccessibility routing question.
+- **Progress monitoring: no easy way mid-job** — user proposes toasts at regular intervals
+  (milestones, not spam).
+- **Process menu → Active Processes: NEVER shows anything** during runs — fix or remove
+  (confusing as-is). User proposal, strongly better: live entries WITH progress text
+  ("inference batch audio 43% — 2/3 files processed"). AppKit menu items are natively
+  VoiceOver-accessible — the menu is potentially the most screen-reader-friendly progress
+  surface in the whole app.
+- **Process Dashboard: unusable for blind users** — no easy way to read the custom views;
+  user gets stuck on the current/previous runs list pane. Matches §6's known gap (custom
+  NSViews need explicit accessibilityValue/labels; the audit's §6 NSTableView item predicted
+  exactly this).
+- **Gate status: pass returned findings → NOT clean → upstream Applio/gradio PRs remain
+  blocked** per the owner's ruling. Findings are pre-existing gaps (Phase 1/2 surfaces) or
+  new enhancement requests, not Phase 3 regressions (submenu diagnosis pending).
