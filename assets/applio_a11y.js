@@ -101,9 +101,22 @@
   }
 
   function healRecordToggles() {
-    document.querySelectorAll("button").forEach(function (btn) {
+    // Scoped to the realtime "Record Audio (Optional)" accordion: the
+    // fork-injected Browse button for record_audio_path is the only stable
+    // fork-controlled DOM anchor in it (the record toggle itself has no
+    // elem_id), and the toggle is a SIBLING of the path field's column, so
+    // the accordion is the smallest correct scope (verified against gradio
+    // 6.20.0: Column renders div.column, Button has no .form wrapper, and
+    // gradio-column does not exist). The engine Start/Stop pair at the top
+    // of the tab is momentary, NOT a toggle, lives outside every accordion,
+    // and must not receive aria-pressed.
+    var anchor = document.querySelector("#browse-record_audio_path");
+    if (!anchor) { return; }
+    var scope = anchor.closest(ACCORDION_BLOCK);
+    if (!scope) { return; }
+    scope.querySelectorAll("button").forEach(function (btn) {
       var t = (btn.textContent || "").trim().toLowerCase();
-      if (t === "start" || t === "stop") {  // realtime record toggle ("Start"/"Stop")
+      if (t === "start" || t === "stop") {
         btn.setAttribute("aria-pressed", String(t === "stop"));
       }
     });
