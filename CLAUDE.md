@@ -282,7 +282,7 @@ history browsing.
 - No microphone entitlement needed - pywebview wrapper doesn't capture audio; Gradio handles it via browser
 - **Patcher escape sequences:** In triple-quoted strings, `\\n` produces literal newline. Use `chr(10)` for newlines in patched code.
 - Patches in `patches/` are applied to source files before PyInstaller, then source files are restored to pristine state
-- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (4 patchers touch it: dataset_paths, train_44100, refinegan_legacy_train, job_toasts). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
+- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (4 patchers touch it: dataset_paths, train_44100, browse_buttons, job_toasts). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
 - PyInstaller cleans `dist/` at start - never delete while builds running
 - Before `rm -rf dist build`: no `Applio` process may run from `dist/` (it holds file handles, so `rm` fails with "Directory not empty"). Quit it (`osascript -e 'tell application "Applio" to quit'`) + `sleep 3` first
 - Build size: ~1.6GB lite (post-3.6.3 dependency stack; ~2GB models download on first launch)
