@@ -733,3 +733,12 @@ landed fork-side below):
   VoiceOver pass comes back clean — the "Checklist results" subsection above still records that
   pass as pending (step 4 bisect procedure). Owner's gate, verbatim: "no PR until we have
   everything 100% test, verified, and confirmed working with 0 regression bug."
+
+### Phase 3 (fork-local) final-review follow-ups (2026-08-22, whole-branch review, MERGE-READY)
+Non-blocking, routed to the post-pass follow-up queue: (1) AX labels `Pause process`/`Resume
+process` (applio_launcher.py:2214,2228) unwrapped while visible titles are — candidate for the
+i18n follow-up; (2) history JSON read twice per request (`_collect_words` +
+`_recent_error_tails`, applio_progress_api.py:287-289) — negligible at 2 s poll, unifiable;
+(3) the build's patch loop prints patcher stdout but not stderr — a crashing patcher (exit 1)
+reports "PATCH FAILURE" without its traceback. All 19 task-level deferred minors triaged
+ACCEPT by the final review (one — the browse docstring — already fixed on-branch).
