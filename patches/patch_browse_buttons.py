@@ -119,6 +119,7 @@ def patch_file(content, fields, marker):
         line = (
             f"\n{indent}_applio_browse_{var} = applio_browse_ui.browse_button("
             f'"{mode}", {var}, elem_id="browse-{var}")\n'
+            f'{indent}applio_browse_ui.attach_path_validation({var}, "{mode}")\n'
         )
         patched = patched[:end] + line + patched[end:]
         inserted += 1

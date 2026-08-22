@@ -126,6 +126,11 @@ def test_browse_buttons_patch():
                 f'_applio_browse_{var} = applio_browse_ui.browse_button("{mode}", {var},'
             )
             assert line in patched, f"{rel}: wrong mode/target on {var}"
+            # The validation-attach line must NOT contain "_applio_browse_"
+            # (the count assertion above pins that substring to exactly one
+            # carrier per field: the assignment var).
+            vline = f'applio_browse_ui.attach_path_validation({var}, "{mode}")'
+            assert vline in patched, f"{rel}: validation not attached to {var}"
             m = re.search(
                 rf"^(?P<indent>[ \t]*){re.escape(var)} = gr\.(?:Textbox|Dropdown)\(",
                 patched,

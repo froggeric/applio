@@ -46,6 +46,33 @@ def _make_handler(mode):
     return _browse
 
 
+def _make_validator(mode):
+    def _validate(current_value):
+        import os
+
+        import gradio as gr
+
+        if not current_value or not str(current_value).strip():
+            return current_value
+        value = os.path.expanduser(str(current_value).strip())
+        if not os.path.exists(value):
+            gr.Warning(f"Path does not exist: {value}")
+        elif mode == "folder" and not os.path.isdir(value):
+            gr.Warning(f"Not a folder: {value}")
+        elif mode in ("file", "pth") and not os.path.isfile(value):
+            gr.Warning(f"Not a file: {value}")
+        return value
+
+    return _validate
+
+
+def attach_path_validation(target, mode):
+    """Blur-time validation for a path field: expands ~, warns (announced
+    toast channel) when the typed path is missing or the wrong type. Wired
+    by patch_browse_buttons next to every Browse button."""
+    target.blur(fn=_make_validator(mode), inputs=[target], outputs=[target])
+
+
 def browse_button(mode, target, elem_id=None):
     import gradio as gr
 
