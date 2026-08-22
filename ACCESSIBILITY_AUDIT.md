@@ -698,11 +698,38 @@ All 15 plan tasks + final whole-branch review + fix wave complete. Cert-free bui
 
 ### Phase 3 additions born during Phase 2 execution (2026-08-21, feat/a11y-phase2 final review)
 - Patcher anchor-miss exit-code hardening: the build loop tolerates exit 1 as "already patched", so a post-sync anchor miss never fails the build — 3 new patchers now inherit that silence; give miss a distinct exit code and fail the build on it.
+  **DELIVERED (`b5d036bd`)** — anchor miss exits `2`; `pre_build_patch()` now fails the build on ANY
+  nonzero patcher exit (plus missing patcher/source file), listing every failure. Convention +
+  exemption notes in CLAUDE.md "Patcher exit codes"; guarded by `tests/test_patcher_exit_codes.py`.
 - `assets/applio_a11y.js` healRecordToggles stamps aria-pressed on ANY Start/Stop-labeled button — scope it to the realtime record toggle's container (the engine Start/Stop pair at realtime.py:941-942 are momentary, not toggles).
+  **DELIVERED (`3cc24700`)** — scoped to the record accordion via `#browse-record_audio_path`;
+  invariant pinned in the new `tests/test_a11y_js_invariants.py`.
 - applio_i18n: system-locale candidate list misses upstream's prefix-glob semantics for non-xx_XX locales; add an isinstance(dict) guard for corrupt language JSONs.
+  **DELIVERED (`cfa2b955`)** — upstream-accurate prefix-glob candidates + corrupt-JSON guards
+  (i18n suite 5→8).
 - applio_progress_api._collect_words duplicates the launcher's _a11y_terminal_words mapping (two sync points for word_key) — unify behind one shared helper.
+  **DELIVERED (`cb745b53`)** — both call sites delegate to the shared `terminal_words_from_history`
+  (one `word_key` sync point).
 - Native-string i18n remaining English clusters: loading.html stages, dashboard status strings, About alert, dynamic process.status titles (applio_i18n plumbing is in place; wrap + translate via overrides file).
+  **DELIVERED (`62a511e4` + `26385528`)** — loading stages + headings + technical_details, dashboard
+  statuses, About alert, status-title maps wrapped (i18n suite → 9).
 
 - Announcements arg-order alignment; badge excluding paused jobs; same-type:name key collision (needs pid in snapshot); live-status tuple vs TERMINAL_STATUSES complement; LayoutChanged re-post on async navigation; "cancelling" as a sidebar row state; AX `{phase}` vs `{phase.upper()}`; patch_upload scan bound.
 - History-write race (stale terminal word possible in a millisecond window) and the per-heartbeat history-JSON read (compute lazily on disappearance).
 - The web-side work: `/api/progress` + injected JS live region, `js_api` FileBridge + Browse buttons, Accessibility settings submenu, native-string i18n, persistent "Last result" region, upstream Applio/gradio PRs.
+
+### Phase 3 (fork-local) delivery (2026-08-22, `feat/a11y-phase3`)
+All seven deliverables shipped with tests (the five bullets above, plus the two Phase 2 deferrals
+landed fork-side below):
+- **Failure log tails — fork side (`4bf27536`)**: the Phase 2 "error surfacing with log tails"
+  deferral landed bounded — the payload exposes `errors` (≤2 entries, 1200-char tails) and the JS
+  appends them to the "Last result" region; spoken announcements unchanged (full-tail routing via
+  upstream `gr.Error` stays with the upstream program). Tests: `test_progress_api` 8→11,
+  `test_a11y_js_invariants` 1→2.
+- **Typed-path validation — fork side (`e636927c`)**: the Phase 2 "on-change validation" deferral
+  landed as blur-time validation on all 13 Browse fields (`attach_path_validation` in
+  `applio_browse_ui.py`; `gr.Warning` announced toasts; `expanduser` first). Tests: browse suite 5→9.
+- **Upstream Applio/gradio PR program: PENDING.** Deferred to its own plan AFTER the manual
+  VoiceOver pass comes back clean — the "Checklist results" subsection above still records that
+  pass as pending (step 4 bisect procedure). Owner's gate, verbatim: "no PR until we have
+  everything 100% test, verified, and confirmed working with 0 regression bug."

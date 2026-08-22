@@ -7,6 +7,22 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Added
 
+- **Accessibility, Phase 3 (fork-local hardening).** Seven targeted fixes from the Phase 2 review,
+  all fork-side (no upstream files), each with tests:
+  - **Localized native strings, completed.** The remaining native English clusters — boot loading
+    stages, headings and technical details, dashboard statuses, the About alert, dynamic
+    process-status titles — resolve through the app language; locale matching now follows
+    upstream's prefix-glob semantics, and a corrupt language file is skipped instead of crashing.
+  - **Scoped record-toggle healing.** The injected `aria-pressed` repair no longer stamps every
+    Start/Stop-labeled button; it is scoped to the realtime record toggle.
+  - **One terminal-words map.** The web payload and the native announcer share a single helper,
+    removing a two-place sync point.
+  - **Failure log tails in the web UI.** Failed jobs append a bounded log tail (last 1200
+    characters, at most 2 jobs) to the "Last result" region — readable with a screen reader;
+    spoken announcements are unchanged.
+  - **Path validation on every Browse field.** All 13 path fields warn on blur when the typed
+    path does not exist (an announced toast), after `~/…` expansion.
+  - New test suites `tests/test_a11y_js_invariants.py` and `tests/test_patcher_exit_codes.py`.
 - **Accessibility, Phase 2 (web UI, pickers, settings, i18n).** Screen-reader support now reaches
   inside the Gradio web UI, and path fields get native pickers:
   - **Announcements in the web UI.** A live region + "Last result" region are injected into the
@@ -51,6 +67,14 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   Running". First run without a chosen data location now asks instead of silently defaulting.
 - **Announced Stop/upload feedback.** Stop and file-upload actions in the web UI post
   spoken/spoken-equivalent feedback via a build-time patch instead of failing silently.
+
+### Changed
+
+- **Build now fails on a missed patch anchor — maintainer-facing behavior change.** A patcher
+  that cannot find its anchor after an upstream sync exits with code `2` and the build stops,
+  listing every failure; previously an anchor miss could pass silently (exit `1` was read as
+  "already patched"). Exit `1` remains the standalone usage guard, and `patches/download_pretraineds.py`
+  (model downloader, own invocation path) is exempt.
 
 ---
 

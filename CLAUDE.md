@@ -498,11 +498,31 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   `"js": (` entry + `def launch_gradio(`) and are order-independent; `patch_browse_buttons`'s
   insertions collide with none of the three existing `tabs/train/train.py` patchers. Tests:
   `tests/test_applio_a11y.py`, `test_native_picker.py`, `test_browse_ui.py`, `test_progress_api.py`,
-  `test_patch_fixtures.py`, `test_applio_i18n.py` (+ `test_menu_spec.py` covers the submenu keys).
+  `test_patch_fixtures.py`, `test_applio_i18n.py`, `test_a11y_js_invariants.py` (Phase 3: payload-JS
+  invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract) —
+  (+ `test_menu_spec.py` covers the submenu keys).
 - **Deferred to Phase 3:** error surfacing with full log tails (terminal announcements carry status
   words; full tails need upstream `gr.Error` routing); typed-path on-change validation for the
   remaining fields (Browse's `expanduser` is the partial Phase 2 fix); upstream Applio + gradio PRs
   for the semantic gaps found in audit §5 [U]/§6 (repo `docs/superpowers/plans/` a11y audit).
+
+**Accessibility (a11y) Phase 3 — fork-local hardening (shipped 2026-08-22, `feat/a11y-phase3`):**
+Seven review-driven fixes, all fork-side, each with tests: `applio_i18n` locale matching mirrors
+upstream's prefix-glob semantics + guards corrupt language JSONs (`cfa2b955`); `healRecordToggles`
+in `assets/applio_a11y.js` scoped to the realtime record accordion via `#browse-record_audio_path`
+(`3cc24700`); ONE shared `terminal_words_from_history` helper — `applio_progress_api._collect_words`
+and the launcher's `_a11y_terminal_words` both delegate (`cb745b53`); bounded failure log tails in
+the web payload (`payload.errors`, ≤2 entries, 1200-char tails) appended to the JS "Last result"
+region, spoken announcements unchanged (`4bf27536`); blur-time path validation on all 13 Browse
+fields (`attach_path_validation` in `applio_browse_ui.py`, `gr.Warning` announced toasts)
+(`e636927c`); the remaining native English clusters i18n-wrapped (loading stages + headings +
+technical_details, dashboard statuses, About alert, status-title maps; `62a511e4` + `26385528`);
+patcher anchor-miss exit codes (`b5d036bd` — convention documented at "Patcher exit codes" above).
+The first two deferrals listed above (log tails, typed-path validation) are thereby delivered
+fork-side; full-tail routing via upstream `gr.Error` stays with the upstream program. The upstream
+Applio + gradio PR program is DEFERRED to its own plan until the manual VoiceOver pass comes back
+clean (audit §7 checklist step 4 bisect still pending) — owner's gate: "no PR until we have
+everything 100% test, verified, and confirmed working with 0 regression bug."
 
 **GitHub releases:**
 - Repo name for releases: `froggeric/applio-macOS-native-app`
