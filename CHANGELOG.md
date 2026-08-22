@@ -33,6 +33,24 @@ All notable changes to this macOS-native fork of Applio. Versions follow
     unchanged either way, and a `mode=` field in the `[A11y] post` diagnostic line records the
     active mode.
   - New test suites `tests/test_menu_jobs.py` and `tests/test_dashboard_ax.py`.
+- **Accessibility, Phase 4b wave — completion toasts on every job.** Per the 2026-08-22 owner
+  ruling ("we should get a toast when something finishes as well; this is important for
+  improving upstream accessibility which does not have a native wrapper"), toast coverage now
+  spans every job surface (full table in `ACCESSIBILITY_AUDIT.md` §7):
+  - **Training completion toast.** The training handler blocks until training ends, so toasting
+    its return announces completion — success or error — the moment a possibly hours-long run
+    finishes.
+  - **Newly covered surfaces.** Voice blending (start/finish/error, plus "Model added"
+    confirmations on both model dropboxes), plugin install (start and error; the success toast
+    is upstream's own), realtime engine start/failure — failure detection broadened to the
+    yielded validation statuses (invalid audio devices, missing model path) so first-use
+    mistakes are no longer silent — model information (loaded), and TensorBoard (ready).
+    Download-tab dropbox saves already toasted upstream and are untouched.
+  - **Single conversions tracked, not just batches.** A one-file conversion now writes
+    start/finish entries into the same progress file the menu, dashboard, and accessibility
+    payload read — so a single conversion is visible and its completion announced even when
+    the in-app toast stream is unavailable (the failure mode the built app exhibited; batches
+    keep exclusive write priority over the progress file).
 - **Accessibility, Phase 3 (fork-local hardening).** Seven targeted fixes from the Phase 2 review,
   all fork-side (no upstream files), each with tests:
   - **Localized native strings, completed.** The remaining native English clusters — boot loading
@@ -84,6 +102,11 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Fixed
 
+- **Converted outputs now load in the UI (built app).** Gradio serves output files only from
+  its allowed set (working directory + temp), and the packaged app's working directory is the
+  bundle — so a conversion wrote the audio file but the output component never loaded it. The
+  app now allows the user's home directory and the configured data directory (resolved at
+  launch), covering every location outputs are written to by default or picked via Browse.
 - **Truthful accessibility labels.** Dashboard labels track Pause/Resume, inference mode, and
   real status; dashboard rows, the loss chart, and progress bars expose their values to
   VoiceOver; the progress window's live log zone reads as words instead of glyph noise.

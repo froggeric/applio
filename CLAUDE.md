@@ -535,14 +535,30 @@ in web content) but KEEPS dock attention, sound cues, and `[A11y]` log lines; "N
 persisted as `a11y.announce_mode` in NSUserDefaults; `_apply_announce_mode` maps auto→owner "web" /
 native→owner "native" via `applio_progress_api.set_announce_owner`, the payload settings echo carries
 `announce_mode`, and every AX post logs `[A11y] post mode=… vo=… element=…` for pass bisecting.
-**Batch-toast split rule:** TAB-side toasts (`patches/patch_job_toasts.py`, registered as 4 dir-type
-tuples — inference.py, tts.py, train.py, download.py) cover single-file inference, tts
-(start/finish/error), train START, preprocess/extract wrappers (error|failed predicate), and
-downloads — jobs whose mid-run progress the tab thread cannot see; ENGINE-side toasts (in
-`patches/patch_inference_progress.py`, `_infer_toast` lazy-imports gradio so the engine module top
-stays gradio-free) cover batch start / 25-50-75 % milestones (total≥8, threshold-FIRST-crossing;
-terminal suppresses the 100 % milestone) / terminal (counts+elapsed) + errors at BOTH raise sites
-(incl. the concurrent-run RuntimeError, which fires BEFORE the try). **Frozen-safe enrichment
+**Batch-toast split rule (Phase 4b wave, 2026-08-22/23):** TAB-side toasts
+(`patches/patch_job_toasts.py`, registered as 9 dir-type tuples — inference.py, tts.py, train.py,
+download.py, voice_blender.py, plugins.py, realtime.py, processing.py (model info), tensorboard.py)
+cover single-file inference, tts (start/finish/error), train start + TERMINAL (owner ruling
+2026-08-22: `run_train_script` blocks the handler thread for hours, so toasting its return
+announces completion), preprocess/extract/download wrappers (error|failed predicate), blender mix
++ both drop confirmations, plugins start/error (finish is upstream's own gr.Info),
+realtime start/failure (GENERATOR wrapper scanning yielded statuses — broadened predicate:
+error/failed/stopping/aborting/"please select"/"not provided"; benign yields silent), model-info
+finish, and TensorBoard ready — jobs whose mid-run progress the tab thread cannot see;
+ENGINE-side toasts (in `patches/patch_inference_progress.py`, `_infer_toast` lazy-imports gradio
+so the engine module top stays gradio-free) cover batch start / 25-50-75 % milestones (total≥8,
+threshold-FIRST-crossing; terminal suppresses the 100 % milestone) / terminal (counts+elapsed) +
+errors at BOTH raise sites (incl. the concurrent-run RuntimeError, which fires BEFORE the try).
+SINGLE conversions are ALSO tracked engine-side (Phase 4b): `_infer_single_begin/_infer_single_end`
+wrap `convert_audio`'s body (endpoints: after `get_vc`, before the `elapsed_time` tail) writing
+`scope: "single"` records + history rows into `inference_progress.json` — SSE-independent (the
+built app's single-inference silence; see audit §7 Phase 4b wave); batch guard = an existing
+running/cancelling record with `scope != "single"` skips ALL single writes, which also no-ops the
+batch loop's per-file `convert_audio` calls. `patch_progress_routes.py` additionally injects
+`allowed_paths=[expanduser("~"), APPLIO_DATA_PATH]` (launch-time, `if p`-filtered — a raw None
+would stringify to a bogus `<cwd>/None` entry in gradio's abspath, not crash) into the launch
+kwargs; WITHOUT it the FROZEN app's converted outputs never load in the UI (gradio serves only
+cwd+temp; frozen cwd is the bundle → InvalidPathError in postprocess). **Frozen-safe enrichment
 rule:** launcher-side metrics use `_last_training_metrics` (seek-tail + backwards
 `_parse_training_log_line`) and `applio_inference_stats` (bundled) — NEVER
 `applio_progress_api.enrich_jobs`, which imports `rvc.lib.tools.process_log_parser` (ships only as

@@ -102,7 +102,8 @@ def test_progress_routes_patch():
     # default data dir (~/Applio) + user-picked paths under ~; the env entry
     # covers a data location chosen OUTSIDE home (macos_wrapper sets
     # APPLIO_DATA_PATH in-process before Gradio). The `if p` filter matters:
-    # a None entry would TypeError inside gradio's is_in_or_equal.
+    # gradio's abspath stringifies a None into a bogus `<cwd>/None` entry
+    # (no crash; hygiene).
     assert "allowed_paths=[" in patched
     assert 'os.path.expanduser("~")' in patched
     assert 'os.environ.get("APPLIO_DATA_PATH")' in patched

@@ -853,3 +853,62 @@ independent): extend patch_inference_progress to write single-conversion start/f
 the same progress file the dashboard/a11y payload already consumes. Bonus hardening found: the
 built app's default output path fails gradio postprocess (InvalidPathError — file written, output
 audio never loads in the UI) — add allowed_paths to the launch kwargs.
+
+### Phase 4b wave (2026-08-22/23, `feat/a11y-phase4`): completion toasts on every job, SSE-independent singles, allowed_paths
+Owner rulings, verbatim (2026-08-22): "we should get a toast when something finishes as well;
+this is important for improving upstream accessibility which does not have a native wrapper" —
+and the Wave C approval ("Wave C approved"), green-lighting the allowed_paths launch-kwarg fix
+surfaced by the single-inference repro above. Four commits: `b679b0ee` (coverage expansion),
+`cb5c69ea` (realtime yield predicate), `bc96c58a` (single-conversion tracking), `16c72f86`
+(allowed_paths).
+
+**Toast coverage table** — every job surface after the wave. Tab-side = `patch_job_toasts.py`
+(9 registered targets: inference.py, tts.py, train.py, download.py, voice_blender.py, plugins.py,
+realtime.py, processing.py, tensorboard.py); engine-side = `patch_inference_progress.py`.
+
+| Job surface | Start | Finish | Error |
+|---|---|---|---|
+| Single inference | tab-side toast | tab-side toast | tab-side toast — plus engine-side progress tracking (below) |
+| Batch inference | engine-side "started: N files" | engine-side terminal (counts+elapsed; 25/50/75 % milestones en route) | engine-side, ×2 raise sites (incl. the concurrent-run RuntimeError) |
+| TTS | tab-side toast | tab-side toast | tab-side toast |
+| Training | tab-side toast (Phase 4) | **TERMINAL toast per the ruling** — `run_train_script` blocks the handler thread for hours; toasting its return lands the announcement the moment training ends | error/failed predicate on the returned string |
+| Preprocess / extract | wrapper toasts ("Preprocessing dataset…" / "Extracting features…") | result predicate | result predicate (error\|failed substring) |
+| Model download (download tab) | wrapper toast ("Downloading model…") | result predicate | result predicate |
+| Voice blender | "Blending models…" | result[0] predicate | warning + re-raise (script raises on every failure path) |
+| — blender model drops ×2 | — | "Model added. It is now selected…" — ONE shared handler feeds both dropboxes | — |
+| Plugins | "Installing plugin…" | **already upstream** — `plugins_core.save_plugin_dropbox` gr.Infos "{name} plugin installed…! Restarting applio…"; no second success toast (would double-announce) | gr.Warning + re-raise for non-gradio failures; `gr.Error` re-raised untouched (gradio announces it natively) |
+| Realtime | toast, gated on terms_accepted (the terms-rejected path already upstream-toasts) | — (long-running engine) | broadened yield predicate (`cb5c69ea`): error / failed / stopping / aborting / "please select" / "not provided" — covers the 4 first-use validation yields (invalid input/output device, invalid monitor, missing model path, malformed device); benign yields ("Warming up…", "Latency: …") stay silent; propagating exceptions also warn |
+| Model info | — (near-instant) | "Model information loaded." — the report is ALWAYS ~10 lines, so the full text stays in the Output Information Textbox; the toast is the simple branch | raise path untouched |
+| TensorBoard | — | "TensorBoard ready." — only when the URL resolves (failure branch stays quiet; follow-up candidate) | — |
+| Download-tab dropbox saves | — | **already upstream** — `save_drop_model` gr.Infos "{file} saved in {path}" (tabs/download/download.py:53); no patch | — |
+
+**Single-conversion tracking (`bc96c58a`)** — the resilient, SSE-independent fix the repro
+verdict (previous subsection) prescribed. `patch_inference_progress.py` now also wraps
+`VoiceConverter.convert_audio`'s body between two stable endpoints (after `self.get_vc(...)`,
+before the `elapsed_time` tail): `_infer_single_begin`/`_infer_single_end` write a
+`scope: "single"` start record and a terminal record (completed/error, total 1) into
+`inference_progress.json` plus a schema-compatible history row — so the menu, dashboard, and
+a11y payload show a running single conversion even when no toast stream is live, a crash-orphaned
+record is swept to "interrupted" at next launch (same as batch), and the a11y terminal words
+cover single runs. Tracking failures are swallowed — conversion can never be broken by tracking.
+**Batch guard:** any existing record with status running/cancelling and `scope != "single"`
+skips ALL single writes (start and terminal) — one atomic-write owner at a time; batch records
+carry no `scope` key, so the same guard makes the batch loop's per-file `convert_audio` calls
+tracking no-ops. Reviewer-noted behaviors, both accepted: (1) **TTS runs funnel through
+`convert_audio`**, so their convert phase logs an inference-typed progress record + history row —
+cosmetic cross-labeling, accepted; (2) **the dashboard Stop is a no-op for a running SINGLE** —
+the cancel flag is checked only in the batch loop.
+
+**allowed_paths (`16c72f86`)** — the built app's converted outputs existed on disk but never
+loaded in the UI: gradio serves output files only from its allowed set (cwd + temp), and the
+frozen cwd is the bundle → `InvalidPathError` in postprocess. `patch_progress_routes.py` rides
+its existing launch-kwarg anchor with `allowed_paths` resolved at LAUNCH time: **frozen** =
+`APPLIO_DATA_PATH` (set in-process by macos_wrapper before Gradio) + `~`; **dev** = `~` (the
+unset env entry is `if p`-filtered — gradio's `abspath` stringifies a raw None into a bogus
+`<cwd>/None` entry; the filter is hygiene against that, not a crash guard). **Security decision,
+recorded:** allowing `~` lets the 127.0.0.1-bound gradio server serve any file under the user's
+home to local clients — accepted trust domain because the files at issue are picked by the user
+via the native NSOpenPanel; whitelisting `/` was rejected (gradio would serve any local file).
+**Residual:** input audio browsed from outside `~` (e.g. an external volume) still writes its
+output outside the allowed set → unserved; the nontrivial follow-up is a per-session allowlist
+of picker-chosen directories.

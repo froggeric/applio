@@ -16,8 +16,8 @@ in the UI. Resolved at LAUNCH time: home covers the default data dir
 (~/Applio) and user-picked paths under ~; the env entry covers a first-run
 data location chosen OUTSIDE home (macos_wrapper sets APPLIO_DATA_PATH
 in-process before Gradio runs). The `if p` filter drops the None when the
-env is unset (dev) — a None entry would TypeError inside gradio's
-is_in_or_equal.
+env is unset (dev) — gradio's abspath stringifies a None into a bogus
+`<cwd>/None` entry (no crash; the filter is hygiene against that).
 Run standalone: venv_macos/bin/python patches/patch_progress_routes.py app.py
 """
 
