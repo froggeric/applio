@@ -912,3 +912,14 @@ via the native NSOpenPanel; whitelisting `/` was rejected (gradio would serve an
 **Residual:** input audio browsed from outside `~` (e.g. an external volume) still writes its
 output outside the allowed set → unserved; the nontrivial follow-up is a per-session allowlist
 of picker-chosen directories.
+
+### Phase 4b wave gate (2026-08-23, user-ordered gate re-validated independently)
+93/93 suites; cert-free BUILD COMPLETE with all 42 patch entries (9/9 job_toasts patched, 0 miss);
+bundle markers verified per target + `_infer_single_begin/end` + `allowed_paths`. DECISIVE: on the
+BUILT app, the single-conversion SSE capture got BOTH toast frames on the FIRST click ("Converting
+audio..." + success, 119.4 s) — confirming the earlier in-app silence was the transient dead-stream
+artifact the repro predicted; the scope:single progress record + history entry landed (tracking
+fallback live); allowed_paths PROVEN with controls (user-dir output → HTTP 200, 20,150,444 bytes;
+/etc/hosts → 403 "File not allowed"). Build-log trap for future validators: stdout block-buffering
+reorders the last job_toasts blocks AFTER the PyInstaller lines — a mid-build grep sees 5/9; tally
+the COMPLETE log.
