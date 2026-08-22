@@ -40,6 +40,46 @@ def read_log_tail(path, max_bytes=LOG_TAIL_MAX_BYTES):
         return ""
 
 
+RECENT_ERRORS_LIMIT = 2
+ERROR_TAIL_BYTES = 4096
+ERROR_TAIL_CHARS = 1200
+
+
+def _recent_error_tails(launcher):
+    """Bounded failure tails from history for the web payload's errors list."""
+    try:
+        entries = launcher.get_recent_processes(20)
+    except Exception:
+        return []
+    out = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        status = (entry.get("status") or "").strip().lower()
+        if status not in ("failed", "error"):
+            continue
+        log = entry.get("log_path") or entry.get("log_file")
+        tail = ""
+        if log and os.path.exists(log):
+            try:
+                tail = read_log_tail(log, max_bytes=ERROR_TAIL_BYTES)[
+                    -ERROR_TAIL_CHARS:
+                ]
+            except Exception:
+                tail = ""
+        out.append(
+            {
+                "type": entry.get("type") or "process",
+                "name": entry.get("model_name") or "job",
+                "status": status,
+                "tail": tail,
+            }
+        )
+        if len(out) >= RECENT_ERRORS_LIMIT:
+            break
+    return out
+
+
 def set_settings(settings):
     with _lock:
         _state["settings"] = dict(settings)
@@ -115,15 +155,16 @@ def enrich_jobs(jobs, now):
     return out
 
 
-def build_progress_payload(jobs, settings, announce_owner, now, words=None):
+def build_progress_payload(
+    jobs, settings, announce_owner, now, words=None, errors=None
+):
     return {
         "now": now,
         "announce": {"owner": announce_owner},
         "settings": dict(settings),
         "words": dict(words or {}),
-        "jobs": [
-            {k: v for k, v in job.items() if k != "log_tail"} for job in jobs
-        ],
+        "errors": list(errors or []),
+        "jobs": [{k: v for k, v in job.items() if k != "log_tail"} for job in jobs],
     }
 
 
@@ -244,7 +285,8 @@ def handle_progress(nav=None, client=None, now=None):
         launcher = _resolve_launcher()
         jobs = enrich_jobs(_collect_jobs(), now)
         words = _collect_words(launcher) if launcher else {}
-        payload = build_progress_payload(jobs, settings, owner, now, words)
+        errors = _recent_error_tails(launcher) if launcher else None
+        payload = build_progress_payload(jobs, settings, owner, now, words, errors)
         _last_good_payload = payload
         return payload
     except Exception:

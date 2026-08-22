@@ -224,12 +224,24 @@
     return (job.type || "process") + " " + (job.name || "");
   }
 
+  function failedTail(errors, job) {
+    var list = errors || [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      if (e.type === job.type && e.name === job.name && e.tail) {
+        return String(e.tail).slice(-400);
+      }
+    }
+    return "";
+  }
+
   function handlePayload(payload) {
     var owner = payload && payload.announce && payload.announce.owner;
     var verbosity = (payload && payload.settings && payload.settings.verbosity) || "standard";
     verbosityNow = verbosity;
     var words = (payload && payload.words) || {};
     var jobs = (payload && payload.jobs) || [];
+    var errors = (payload && payload.errors) || [];
     var current = {};
     jobs.forEach(function (job) { current[job.key] = job; });
 
@@ -253,7 +265,9 @@
       if (!(key in current) && (prev.status === "running" || prev.status === "paused")) {
         var info = prev.info || {};
         var word = words[info.word_key] || "finished";
-        announcements.push(["terminal", jobLabel(info) + " " + word]);
+        var tail = (word === "failed" || word === "error")
+          ? failedTail(errors, info) : "";
+        announcements.push(["terminal", jobLabel(info) + " " + word, tail]);
         delete seen[key];  // announce ONCE, then forget
       }
     });
@@ -268,7 +282,9 @@
           // only REAL terminal words (a "cancelling" status is not terminal —
           // the final word arrives via the disappearance branch or stays silent,
           // matching applio_a11y's LIVE/TERMINAL partition on the native side)
-          announcements.push(["terminal", jobLabel(job) + " " + job.status]);
+          var tail = (job.status === "failed" || job.status === "error")
+            ? failedTail(errors, job) : "";
+          announcements.push(["terminal", jobLabel(job) + " " + job.status, tail]);
         }
         if (verbosity === "verbose" && typeof job.pct === "number" &&
             job.status === "running") {
@@ -292,7 +308,9 @@
     // client (visual, not spoken — no doubling with native announcements);
     // the spoken live-region announcements run only for web-owner clients.
     announcements.forEach(function (a) {
-      if (a[0] === "terminal") { persistResult(a[1]); }
+      if (a[0] === "terminal") {
+        persistResult(a[2] ? a[1] + " — " + a[2] : a[1]);
+      }
     });
     if (owner === "web" && verbosity !== "off") {
       announcements.forEach(function (a) { announce(a[1]); });

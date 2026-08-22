@@ -123,6 +123,75 @@ def test_terminal_words_from_history_shared_helper():
     assert api.terminal_words_from_history([]) == {}
 
 
+def _fake_launcher(history):
+    class L:
+        def get_recent_processes(self, limit=20):
+            return history
+
+    return L()
+
+
+def test_recent_error_tails_bounded_and_filtered(tmp_path=None):
+    import os
+    import tempfile
+
+    logdir = tempfile.mkdtemp()
+    log = os.path.join(logdir, "train.log")
+    with open(log, "w", encoding="utf8") as fh:
+        fh.write("x" * 9000 + "TAIL-MARKER")
+    history = [
+        {
+            "type": "training",
+            "model_name": "voice",
+            "status": "failed",
+            "log_path": log,
+        },
+        {
+            "type": "extract",
+            "model_name": "e",
+            "status": "completed",
+            "log_path": log,
+        },  # not an error -> excluded
+        {
+            "type": "tts",
+            "model_name": "t",
+            "status": "error",
+            "log_path": os.path.join(logdir, "missing.log"),
+        },  # no file -> empty tail
+    ]
+    errors = api._recent_error_tails(_fake_launcher(history))
+    assert [e["name"] for e in errors] == ["voice", "t"]
+    assert errors[0]["tail"].endswith("TAIL-MARKER")
+    assert len(errors[0]["tail"]) <= 1200
+    assert errors[1]["tail"] == ""
+
+
+def test_recent_error_tails_limit_two():
+    history = [
+        {"type": "t", "model_name": f"n{i}", "status": "failed", "log_path": None}
+        for i in range(5)
+    ]
+    errors = api._recent_error_tails(_fake_launcher(history))
+    assert len(errors) == 2 and errors[0]["name"] == "n0"  # newest-first, capped
+
+
+def test_payload_carries_errors_key():
+    payload = api.build_progress_payload(
+        jobs=[],
+        settings={},
+        announce_owner="web",
+        now=1.0,
+        words=None,
+        errors=[
+            {"type": "training", "name": "voice", "status": "failed", "tail": "boom"}
+        ],
+    )
+    assert payload["errors"][0]["tail"] == "boom"
+    assert "errors" in api.build_progress_payload(
+        jobs=[], settings={}, announce_owner="web", now=1.0
+    )  # default empty list
+
+
 def run_all():
     test_inference_stats_enrichment()
     test_training_metrics_enrichment()
@@ -132,7 +201,10 @@ def run_all():
     test_log_tail_read_by_seek()
     test_handle_progress_never_raises()
     test_terminal_words_from_history_shared_helper()
-    print("All progress API tests passed (8).")
+    test_recent_error_tails_bounded_and_filtered()
+    test_recent_error_tails_limit_two()
+    test_payload_carries_errors_key()
+    print("All progress API tests passed (11).")
 
 
 if __name__ == "__main__":

@@ -36,9 +36,18 @@ def test_heal_record_toggles_scoped_to_browse_anchor():
     )
 
 
+def test_failed_tail_wiring_present():
+    # Guards the persistResult enrichment contract (Task 4).
+    with open(JS, encoding="utf8") as fh:
+        src = fh.read()
+    assert "failedTail" in src, "failedTail helper must exist (log-tail surfacing)"
+    assert 'a[1] + " — " + a[2]' in src, "persist loop must append the tail"
+
+
 def run_all():
     test_heal_record_toggles_scoped_to_browse_anchor()
-    print("All a11y JS invariant tests passed (1).")
+    test_failed_tail_wiring_present()
+    print("All a11y JS invariant tests passed (2).")
 
 
 if __name__ == "__main__":
