@@ -4827,6 +4827,7 @@ class ApplioLauncher:
         # a NATIVE_APIS_AVAILABLE fallback path), so fall back to defaults.
         self._a11y_verbosity = "standard"
         self._a11y_sound_cues = False
+        self._a11y_announce_mode = "auto"
         try:
             from Foundation import NSUserDefaults
 
@@ -4835,16 +4836,22 @@ class ApplioLauncher:
             if verbosity in ("off", "standard", "verbose"):
                 self._a11y_verbosity = verbosity
             self._a11y_sound_cues = bool(defaults.boolForKey_("a11y.sound_cues"))
+            mode = defaults.stringForKey_("a11y.announce_mode") or "auto"
+            if mode in ("auto", "native"):
+                self._a11y_announce_mode = mode
         except Exception:
             logging.debug("[A11y] settings read failed", exc_info=True)
         self._push_a11y_settings()
-        # Native owns announcements (the in-app WKWebView client is silenced by
-        # the web payload's owner flag); web-side layout changes are marshaled
-        # to the main thread and posted as an AX layout-changed notification.
+        # Announce mode (Task 1, Phase 4): "auto" (default) routes in-app
+        # speech through the web live region — window-level AX posts were
+        # unheard across 3 builds when VO focus sits in the WKWebView, while
+        # toasts on the same channel worked. "native" opts back into the
+        # AX-post engine. Web-side layout changes are marshaled to the main
+        # thread and posted as an AX layout-changed notification either way.
         try:
             import applio_progress_api
 
-            applio_progress_api.set_announce_owner("native")
+            self._apply_announce_mode()
             applio_progress_api.set_layout_changed_callback(
                 lambda: AppHelper.callAfter(self._post_webview_layout_changed)
             )
@@ -5500,7 +5507,23 @@ class ApplioLauncher:
             element = (
                 NSApp.keyWindow() or NSApp.mainWindow() or self._main_window.native
             )
-            applio_a11y.post_announcement(element, msg)
+            try:  # _APPLIO_AX_DIAGNOSTIC — settles routing questions from logs
+                from AppKit import NSWorkspace
+
+                logging.info(
+                    "[A11y] post mode=%s vo=%s element=%r",
+                    self._a11y_announce_mode,
+                    NSWorkspace.sharedWorkspace().isVoiceOverEnabled(),
+                    element,
+                )
+            except Exception:
+                pass
+            if self._a11y_announce_mode != "native":
+                pass  # Auto: window-level AX posts are unheard when VO focus is
+                # in the WKWebView (3 builds of evidence); the web live region
+                # owns speech. Attention/sound/log below still run.
+            else:
+                applio_a11y.post_announcement(element, msg)
             if kind == "terminal":
                 bad = any(w in msg for w in ("fail", "error", "cancel", "interrupt"))
                 NSApp.requestUserAttention_(
@@ -5534,10 +5557,43 @@ class ApplioLauncher:
             import applio_progress_api
 
             applio_progress_api.set_settings(
-                {"verbosity": self._a11y_verbosity, "sound": self._a11y_sound_cues}
+                {
+                    "verbosity": self._a11y_verbosity,
+                    "sound": self._a11y_sound_cues,
+                    "announce_mode": self._a11y_announce_mode,
+                }
             )
         except Exception:
             pass
+
+    def _apply_announce_mode(self):
+        """Map the persisted announce mode onto the web payload's owner flag.
+
+        "auto" -> "web": the in-app client announces via its live region (and
+        _a11y_post skips the window-level AX post). "native" -> "native": the
+        engine posts AX announcements and the per-request owner rule silences
+        the in-app client. Exception-safe: called from __init__ and the menu.
+        """
+        try:
+            import applio_progress_api
+
+            applio_progress_api.set_announce_owner(
+                "native" if self._a11y_announce_mode == "native" else "web"
+            )
+        except Exception:
+            logging.debug("[A11y] announce-mode apply failed", exc_info=True)
+
+    def _set_a11y_announce_mode(self, mode):
+        """Persist + apply an Announce-mode choice (radio behavior)."""
+        from Foundation import NSUserDefaults
+
+        self._a11y_announce_mode = mode
+        defaults = NSUserDefaults.standardUserDefaults()
+        defaults.setObject_forKey_(mode, "a11y.announce_mode")
+        defaults.synchronize()
+        self._apply_announce_mode()
+        self._push_a11y_settings()
+        self._refresh_a11y_submenu()
 
     def _set_a11y_verbosity(self, value):
         """Persist + apply an Announcements choice (radio behavior)."""
@@ -5584,6 +5640,8 @@ class ApplioLauncher:
                 "a11y.verbosity.standard",
                 "a11y.verbosity.verbose",
                 "a11y.sound_cues",
+                "a11y.announce.auto",
+                "a11y.announce.native",
             ):
                 row = self._find_item_by_key(key, menu=menu)
                 if not row:
@@ -5592,6 +5650,12 @@ class ApplioLauncher:
                     row.setState_(
                         AppKit.NSOnState
                         if key == current_verbosity
+                        else AppKit.NSOffState
+                    )
+                elif key.startswith("a11y.announce."):
+                    row.setState_(
+                        AppKit.NSOnState
+                        if key == f"a11y.announce.{self._a11y_announce_mode}"
                         else AppKit.NSOffState
                     )
                 else:
@@ -5714,6 +5778,8 @@ class ApplioLauncher:
         d["a11y.verbosity.standard"] = lambda: self._set_a11y_verbosity("standard")
         d["a11y.verbosity.verbose"] = lambda: self._set_a11y_verbosity("verbose")
         d["a11y.sound_cues"] = self._toggle_a11y_sound
+        d["a11y.announce.auto"] = lambda: self._set_a11y_announce_mode("auto")
+        d["a11y.announce.native"] = lambda: self._set_a11y_announce_mode("native")
         d["file.set_data_location"] = lambda: self.setDataLocation_(None)
         d["process.open_dashboard"] = lambda: self.showProgressMonitor_(None)
         d["process.open_logs"] = self._open_training_logs  # already zero-arg

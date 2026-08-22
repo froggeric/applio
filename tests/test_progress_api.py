@@ -67,6 +67,20 @@ def test_payload_shape_and_settings_echo():
     assert "log_tail" not in payload["jobs"][0]  # never leaked to the wire
 
 
+def test_settings_echo_announce_mode():
+    payload = api.build_progress_payload(
+        jobs=[],
+        settings={"verbosity": "standard", "sound": False, "announce_mode": "auto"},
+        announce_owner="web",
+        now=1.0,
+    )
+    assert payload["settings"]["announce_mode"] == "auto"
+    # The default state carries the key too, so the echo exists before the
+    # launcher's first set_settings push (Task 1).
+    api.set_settings(api.DEFAULT_SETTINGS)
+    assert api.handle_progress(nav=None, now=1.0)["settings"]["announce_mode"] == "auto"
+
+
 def test_nav_token_fires_callback_once():
     fired = []
     api.set_layout_changed_callback(lambda: fired.append(1))
@@ -196,6 +210,7 @@ def run_all():
     test_inference_stats_enrichment()
     test_training_metrics_enrichment()
     test_payload_shape_and_settings_echo()
+    test_settings_echo_announce_mode()
     test_nav_token_fires_callback_once()
     test_owner_per_request()
     test_log_tail_read_by_seek()
@@ -204,7 +219,7 @@ def run_all():
     test_recent_error_tails_bounded_and_filtered()
     test_recent_error_tails_limit_two()
     test_payload_carries_errors_key()
-    print("All progress API tests passed (11).")
+    print("All progress API tests passed (12).")
 
 
 if __name__ == "__main__":

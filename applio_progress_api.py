@@ -18,8 +18,11 @@ NAV_FIRE_MIN_INTERVAL_S = 5.0
 LOG_TAIL_MAX_BYTES = 262144
 
 _lock = threading.Lock()
+# Default a11y settings echoed to the web payload. announce_mode ("auto" |
+# "native") rides here so the echo exists before the launcher's first push.
+DEFAULT_SETTINGS = {"verbosity": "standard", "sound": False, "announce_mode": "auto"}
 _state = {
-    "settings": {"verbosity": "standard", "sound": False},
+    "settings": dict(DEFAULT_SETTINGS),
     "announce_owner": "web",
     "layout_cb": None,
     "last_nav": None,
@@ -293,9 +296,7 @@ def handle_progress(nav=None, client=None, now=None):
         logging.exception("[ProgressAPI] handle_progress failed")
         if _last_good_payload is not None:
             return _last_good_payload  # transient error: keep owner/jobs stable
-        return build_progress_payload(
-            [], {"verbosity": "standard", "sound": False}, "web", now
-        )
+        return build_progress_payload([], dict(DEFAULT_SETTINGS), "web", now)
 
 
 def register_routes(app):

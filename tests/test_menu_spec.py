@@ -154,6 +154,39 @@ def test_a11y_keys_sets():
     assert "a11y.menu" in menu_spec.DISPLAY_KEYS
 
 
+def test_a11y_announce_mode_items():
+    import menu_spec
+
+    # Task 1 (Phase 4): the two announce-mode leaves ride with the a11y
+    # children — launcher-dispatched radio items, never in the static
+    # wrapper menu (the standalone wrapper has no announcement engine).
+    for key in ("a11y.announce.auto", "a11y.announce.native"):
+        assert key in menu_spec.A11Y_CHILD_KEYS
+        assert key in menu_spec.LAUNCHER_ACTION_KEYS
+        assert key not in menu_spec.WRAPPER_ACTION_KEYS
+    a11y = next(mi for mi in menu_spec.MENU[0].submenu if mi.key == "a11y.menu")
+    by_key = {mi.key: mi for mi in a11y.submenu}
+    assert by_key["a11y.announce.auto"].title == "Announcements: Auto (recommended)"
+    assert (
+        by_key["a11y.announce.native"].title == "Announcements: Native (experimental)"
+    )
+
+
+def test_a11y_submenu_order():
+    import menu_spec
+
+    # verbosity radio, then announce-mode radio, then the sound-cues toggle
+    a11y = next(mi for mi in menu_spec.MENU[0].submenu if mi.key == "a11y.menu")
+    assert [mi.key for mi in a11y.submenu] == [
+        "a11y.verbosity.off",
+        "a11y.verbosity.standard",
+        "a11y.verbosity.verbose",
+        "a11y.announce.auto",
+        "a11y.announce.native",
+        "a11y.sound_cues",
+    ]
+
+
 def test_app_menu_const():
     assert PYWEBVIEW_APP_KEY == "__app__"
     assert APP_NAME == "Applio"

@@ -71,7 +71,7 @@ EDIT_KEYS = {
     "edit.paste",
     "edit.select_all",
 }
-# Accessibility settings (App menu > Accessibility). The four children are
+# Accessibility settings (App menu > Accessibility). The six children are
 # regular dispatch leaves (the launcher's announcement engine drives them);
 # the parent (a11y.menu) is display-only, like process.status.
 A11Y_CHILD_KEYS = {
@@ -79,6 +79,8 @@ A11Y_CHILD_KEYS = {
     "a11y.verbosity.standard",
     "a11y.verbosity.verbose",
     "a11y.sound_cues",
+    "a11y.announce.auto",
+    "a11y.announce.native",
 }
 A11Y_KEYS = A11Y_CHILD_KEYS | {"a11y.menu"}
 TAXONOMY = (
@@ -164,6 +166,14 @@ MENU = [
                     MenuItem(
                         key="a11y.verbosity.verbose",
                         title="Announcements: Verbose",
+                    ),
+                    MenuItem(
+                        key="a11y.announce.auto",
+                        title="Announcements: Auto (recommended)",
+                    ),
+                    MenuItem(
+                        key="a11y.announce.native",
+                        title="Announcements: Native (experimental)",
                     ),
                     MenuItem(key="a11y.sound_cues", title="Sound Cues"),
                 ],
