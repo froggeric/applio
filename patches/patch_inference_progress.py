@@ -18,6 +18,13 @@ This patch:
      the concurrent-run raise is BEFORE the try, so it gets its own toast).
 3. Removes the broken infer_pid.txt logic (frozen-CWD write was wrong; and in
    single-process os.getpid() == the whole app, so PID-kill quit the app).
+4. (a11y phase 4b) Wraps VoiceConverter.convert_audio's body in a try/except so
+   SINGLE conversions also write start/terminal records into the same
+   inference_progress.json (SSE-independent: the menu/dashboard/a11y payload
+   see them even when the in-app WKWebView's toast stream is dead). The begin
+   helper skips every write while a non-single record is running/cancelling, so
+   a concurrent batch is never clobbered (and the batch loop's nested
+   self.convert_audio calls become tracking no-ops via the same guard).
 
 Modeled on patches/patch_refinegan_legacy_infer.py (same base_path arg contract:
 opens os.path.join(base_path, "infer.py")).
@@ -28,6 +35,9 @@ import re
 
 _HELPERS_MARKER = "# === Inference Progress Tracking (injected by patch) ==="
 _BATCH_MARKER = "_infer_cancel_requested()"
+# Present only in the injected convert_audio body (the helpers define
+# _infer_single_begin/_infer_single_end, never this variable).
+_SINGLE_MARKER = "_infer_single_ctx"
 
 
 INFER_PROGRESS_HELPERS = r'''
@@ -118,6 +128,88 @@ def _infer_toast(msg):
         gr.Info(msg)
     except Exception:
         print(msg)
+
+def _infer_single_begin(model_path, audio_input_path, audio_output_path):
+    """Single-conversion tracking (a11y phase 4b): claim inference_progress.json
+    for a one-file convert_audio run so the menu/dashboard/a11y payload see it
+    even when the toast SSE stream is dead. Returns a ctx dict when this call
+    owns the file, else None (every single write is then skipped): a competing
+    record with status running/cancelling AND scope != "single" - i.e. a batch,
+    whose records carry no scope - must never be clobbered (one atomic-write
+    owner at a time). The batch loop's nested self.convert_audio calls hit this
+    same guard and become tracking no-ops. Never raises."""
+    try:
+        existing = _read_infer_progress()
+        if (
+            existing
+            and existing.get("status") in ("running", "cancelling")
+            and existing.get("scope") != "single"
+        ):
+            return None
+        started_at = _infer_time.time()
+        # NOTE on line packing: the processed/converted/skipped keys are
+        # deliberately split across lines - the batch tests locate the batch's
+        # initial write via an exact first-occurrence substring of those three
+        # keys on ONE line, and this helpers block sits EARLIER in the file.
+        record = {
+            "version": 1, "type": "inference", "status": "running",
+            "scope": "single",
+            "model_name": _infer_os.path.basename(model_path or ""),
+            "input_folder": _infer_os.path.dirname(audio_input_path or "") or None,
+            "output_folder": _infer_os.path.dirname(audio_output_path or "") or None,
+            "total": 1,
+            "processed": 0,
+            "converted": 0, "skipped": 0,
+            "current_file": _infer_os.path.basename(audio_input_path or ""),
+            "started_at": started_at, "ended_at": None, "elapsed": None,
+            "error": None,
+        }
+        _write_infer_progress(record)
+        return {
+            "model_name": record["model_name"],
+            "output_folder": record["output_folder"],
+            "started_at": started_at,
+        }
+    except Exception:
+        return None
+
+def _infer_single_end(ctx, error=None):
+    """Terminal write + schema-compatible history append for a single
+    conversion. ctx None => no-op (begin skipped: a batch owns the file, or
+    begin itself failed). Best-effort: never raises, never breaks the
+    conversion itself. elapsed/ended_at mirror the batch record schema the
+    launcher reader (_synthesize_inference_proc) and the startup sweep use;
+    the history entry carries completed_at (ISO), like the batch's."""
+    if not ctx:
+        return
+    try:
+        status = "error" if error else "completed"
+        ended_at = _infer_time.time()
+        started_at = ctx["started_at"]
+        converted = 0 if error else 1
+        _write_infer_progress({
+            "version": 1, "type": "inference", "status": status,
+            "scope": "single",
+            "model_name": ctx["model_name"],
+            "input_folder": None, "output_folder": ctx["output_folder"],
+            "total": 1, "processed": converted, "converted": converted,
+            "skipped": 0, "current_file": "",
+            "started_at": started_at, "ended_at": ended_at,
+            "elapsed": ended_at - started_at, "error": error,
+        })
+        # Built in a variable rather than passed inline as a dict literal: the
+        # batch tests locate the batch's FIRST history call by an exact
+        # substring ending in an opening brace, and this block sits earlier.
+        entry = {
+            "type": "inference", "scope": "single",
+            "model_name": ctx["model_name"],
+            "started_at": _infer_dt.datetime.fromtimestamp(started_at).isoformat(),
+            "completed_at": _infer_dt.datetime.fromtimestamp(ended_at).isoformat(),
+            "status": status, "total": 1, "converted": converted, "skipped": 0,
+        }
+        _infer_add_to_history(entry)
+    except Exception:
+        pass
 # === End Inference Progress Tracking ===
 '''
 
@@ -291,8 +383,57 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
 """
 
 
+# Single-conversion seam (a11y phase 4b): wrap convert_audio's body in a
+# try/except so single conversions write start/terminal records via the
+# _infer_single_* helpers. Light two-endpoint seam rather than a whole-body
+# rewrite: the anchor pins only get_vc (head; after the docstring + model_path
+# guard, before any failure-prone work) and the elapsed_time tail - the body
+# BETWEEN them is captured and re-emitted verbatim at +4 indent, so upstream
+# edits between the endpoints survive the patch. Both endpoints are unique to
+# convert_audio file-wide (the batch opens with `pid = os.getpid()` and its
+# timing lines use `_infer_time`/different indentation after step (b)).
+INFER_SINGLE_ANCHOR = re.compile(
+    r"        self\.get_vc\(model_path, sid\)\n"
+    r"\n"
+    r"        start_time = time\.time\(\)\n"
+    r"(.*?)"
+    r"        elapsed_time = time\.time\(\) - start_time\n",
+    re.DOTALL,
+)
+
+
+def _infer_single_wrap(m):
+    """re.sub callable for INFER_SINGLE_ANCHOR: re-emit convert_audio's body
+    wrapped in the single-conversion tracking try/except. The bare re-raise
+    preserves the pristine traceback; tracking helpers swallow their own
+    errors, so a tracking failure can never break the conversion. Blank lines
+    stay blank; every other captured line gains exactly 4 leading spaces
+    (uniform re-indent preserves Python block structure; the wrapped region
+    contains no multi-line strings whose content would change)."""
+    reindented = "".join(
+        ("    " + ln) if ln.strip() else ln
+        for ln in m.group(1).splitlines(keepends=True)
+    )
+    return (
+        "        self.get_vc(model_path, sid)\n"
+        "\n"
+        "        _infer_single_ctx = _infer_single_begin(\n"
+        "            model_path, audio_input_path, audio_output_path\n"
+        "        )\n"
+        "        start_time = time.time()\n"
+        "        try:\n"
+        + reindented
+        + "        except Exception as _infer_single_exc:\n"
+        "            _infer_single_end(_infer_single_ctx, error=str(_infer_single_exc))\n"
+        "            raise\n"
+        "        _infer_single_end(_infer_single_ctx)\n"
+        "        elapsed_time = time.time() - start_time\n"
+    )
+
+
 def patch_infer_py(base_path: str) -> bool:
-    """Patch infer.py to add batch-inference progress tracking + cancel + history.
+    """Patch infer.py to add batch-inference progress tracking + cancel +
+    history, and single-conversion start/terminal tracking.
 
     Args:
         base_path: Directory containing infer.py (e.g., rvc/infer/)
@@ -309,12 +450,17 @@ def patch_infer_py(base_path: str) -> bool:
     with open(infer_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Idempotency: both the helpers marker AND the batch-rewrite marker must be
-    # present to consider the file fully patched. Use the patcher's OWN specific
-    # markers (NOT a shared early-return marker).
-    helpers_done = _HELPERS_MARKER in content
+    # Idempotency: the helpers marker (incl. the single-conversion helpers),
+    # the batch-rewrite marker, AND the single-seam marker must ALL be present
+    # to consider the file fully patched. Use the patcher's OWN specific
+    # markers (NOT a shared early-return marker). helpers_done additionally
+    # requires def _infer_single_begin so a file patched by an OLDER version of
+    # this patcher (helpers without the single fns) gets the helpers re-injected
+    # instead of silently NameError-ing at runtime.
+    helpers_done = _HELPERS_MARKER in content and "def _infer_single_begin(" in content
     batch_done = _BATCH_MARKER in content
-    if helpers_done and batch_done:
+    single_done = _SINGLE_MARKER in content
+    if helpers_done and batch_done and single_done:
         print("[infer.py inference-progress] Already patched, skipping.")
         return True
 
@@ -341,6 +487,17 @@ def patch_infer_py(base_path: str) -> bool:
         if n == 0:
             print(
                 "[infer.py inference-progress] Could not find convert_audio_batch anchor"
+            )
+            return False
+        content = new_content
+        changed = True
+
+    # (c) Wrap convert_audio's body for single-conversion tracking.
+    if not single_done:
+        new_content, n = INFER_SINGLE_ANCHOR.subn(_infer_single_wrap, content, count=1)
+        if n == 0:
+            print(
+                "[infer.py inference-progress] Could not find convert_audio single-tracking anchor"
             )
             return False
         content = new_content
