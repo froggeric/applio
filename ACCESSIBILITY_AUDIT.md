@@ -829,3 +829,13 @@ defect — the Resources marker checks are the shipping mechanism (7/7).
 ### Re-test partial results (2026-08-22, user-run, Phase 4 build 21:31)
 - Batch inference toasts + VoiceOver: WORK (start/milestone/finish announced) — the primary fix confirmed.
 - Single inference: NO toast observed. Diagnosis pending (markers verified in bundle — wiring or delivery, not patching).
+
+### Owner ruling (2026-08-22): completion toasts on EVERY job
+"we should get a toast when something finishes as well; this is important for improving upstream
+accessibility which does not have a native wrapper." This supersedes Phase 4's training-start-only
+design (which leaned on fork-native surfaces — menu/dashboard/badge/live region — that DO NOT EXIST
+upstream). Gap analysis: single inference, batch, tts, preprocess, extract, download already carry
+terminal toasts; TRAINING is the gap (handler blocks for hours in _proc.wait(); the terminal toast
+delivers when the still-active event completes — contextvars stay set, verified during Phase 4
+exploration). Plugin install (tabs/plugins) is a secondary candidate. Follow-up lands on
+feat/a11y-phase4 before merge.
