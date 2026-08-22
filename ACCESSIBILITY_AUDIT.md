@@ -839,3 +839,17 @@ terminal toasts; TRAINING is the gap (handler blocks for hours in _proc.wait(); 
 delivers when the still-active event completes — contextvars stay set, verified during Phase 4
 exploration). Plugin install (tabs/plugins) is a secondary candidate. Follow-up lands on
 feat/a11y-phase4 before merge.
+
+### Single-inference toast silence: repro verdict (2026-08-22, dev headless + raw SSE)
+NOT the patch, NOT click-vs-.then, NOT gradio's protocol: the single event emits toast frames in
+every dev scenario (start, finish, and even before a failure; frames verbatim in the session log).
+/config shows the single and batch events identical; the frontend toast path is trigger-agnostic.
+Strongest hypothesis for the built app: the WKWebView's session SSE stream is dead/suspended at
+single-convert time (WKWebView suspends hidden streams; server clean_events reaps; the NEXT join
+re-registers — so "batch works, single doesn't" is likely a test-ORDER artifact). Single inference
+is uniquely silent because it is the one job NOT tracked in the progress file — no toast stream
+means NO channel at all (batch falls back to menu/dashboard/live-region). Fix (resilient, SSE-
+independent): extend patch_inference_progress to write single-conversion start/finish entries into
+the same progress file the dashboard/a11y payload already consumes. Bonus hardening found: the
+built app's default output path fails gradio postprocess (InvalidPathError — file written, output
+audio never loads in the UI) — add allowed_paths to the launch kwargs.
