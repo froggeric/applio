@@ -269,6 +269,15 @@ def test_job_toasts_patch():
             " _APPLIO_TOASTS_REALTIME",
             'gr.Info(i18n("Starting real-time conversion..."))',
             "for update in enforce_terms(terms_accepted, *args):",
+            # Broadened yield markers: start_realtime yields validation
+            # statuses that never raise (devices/monitor/model-path/
+            # bad-device-format) - pin each one so none silently drops.
+            "failures = (",
+            '                "stopping",',
+            '                "aborting",',
+            '                "please select",',
+            '                "not provided",',
+            "marker in status.lower() for marker in failures",
             "fn=_applio_realtime_toast,",
         ],
         "tabs/extra/sections/processing.py": [

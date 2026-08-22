@@ -32,9 +32,12 @@ Placement notes (load-bearing):
   (invalid zip) is re-raised untouched - gradio announces gr.Error
   natively; only NON-gradio failures get the added gr.Warning.
 - The realtime wrapper is a GENERATOR (enforce_terms yields): it scans
-  each yielded update and warns on error-looking statuses - start_realtime
+  each yielded update and warns on failure-looking statuses - start_realtime
   catches its own model-load exceptions and yields "Error: ..." into the
-  (unannounced) latency Textbox instead of raising.
+  (unannounced) latency Textbox instead of raising, and also emits
+  first-use validation yields ("Please select valid input/output
+  devices!" etc.) that never raise, so its marker set is broader than
+  the shared return-value predicate.
 - Drop confirmations: update_model_fusion feeds BOTH blender dropboxes.
   The download tab's save_drop_model needs nothing here - upstream
   already gr.Infos "{file} saved in {path}".
@@ -451,9 +454,14 @@ def patch_plugins(content):
 # Realtime: enforce_terms is the non-client-mode click handler and a
 # GENERATOR - the wrapper must yield too. It suppresses the start toast
 # when terms were not accepted (upstream already gr.Infos the terms
-# message) and warns on error-looking yielded statuses (start_realtime
-# catches model-load failures and yields "Error: ..." into an
-# unannounced Textbox instead of raising).
+# message). Yield scanning uses a BROADER marker set than the shared
+# return-value predicate: start_realtime both catches its model-load
+# exceptions into "Error: ..." yields AND emits first-use validation
+# statuses that never raise ("Please select valid input/output
+# devices!", "Please select a valid monitor device!", "Model path not
+# provided. Aborting conversion.", "Incorrectly formatted audio device.
+# Stopping.") - without the extra markers the user hears the start toast
+# and then silence.
 REALTIME_ANCHOR = (
     "        def enforce_terms(terms_accepted, *args):\n"
     "            if not terms_accepted:\n"
@@ -467,12 +475,19 @@ REALTIME_WRAPPER = (
     f"        def _applio_realtime_toast(terms_accepted, *args):  {REALTIME_MARKER}\n"
     f"            if terms_accepted:\n"
     f'                gr.Info(i18n("Starting real-time conversion..."))\n'
+    f"            failures = (\n"
+    f'                "error",\n'
+    f'                "failed",\n'
+    f'                "stopping",\n'
+    f'                "aborting",\n'
+    f'                "please select",\n'
+    f'                "not provided",\n'
+    f"            )\n"
     f"            try:\n"
     f"                for update in enforce_terms(terms_accepted, *args):\n"
     f"                    status = update[0] if isinstance(update, tuple) else update\n"
-    f"                    if isinstance(status, str) and (\n"
-    f'                        "error" in status.lower()\n'
-    f'                        or "failed" in status.lower()\n'
+    f"                    if isinstance(status, str) and any(\n"
+    f"                        marker in status.lower() for marker in failures\n"
     f"                    ):\n"
     f"                        gr.Warning(status)\n"
     f"                    yield update\n"
