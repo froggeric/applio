@@ -72,13 +72,67 @@ def test_overrides_layer_over_locale_map():
     # missing-key probe — use a key the locale file does not define)
 
 
+def test_system_locale_prefix_glob():
+    # Upstream semantics (assets/i18n/i18n.py:24-30): first AVAILABLE language
+    # whose name startswith(locale[:2]) wins. xx_ZZ must resolve to xx_YY.
+    import applio_i18n as _mod
+
+    tmp = _make_tree("en_US")
+    lang_dir = os.path.join(tmp, "assets", "i18n", "languages")
+    with open(os.path.join(lang_dir, "xx_YY.json"), "w", encoding="utf8") as fh:
+        json.dump({"finished": "finito xx"}, fh, ensure_ascii=False)
+    with open(os.path.join(tmp, "assets", "config.json"), "w", encoding="utf8") as fh:
+        json.dump({"lang": {}}, fh)  # no override -> system-locale path
+    orig = _mod._locale.getdefaultlocale
+    _mod._locale.getdefaultlocale = lambda: ("xx_ZZ", "UTF-8")
+    try:
+        tr = applio_i18n.NativeI18n(base_paths=[tmp])
+        assert tr.language == "xx_YY", tr.language
+        assert tr("finished") == "finito xx"
+    finally:
+        _mod._locale.getdefaultlocale = orig
+
+
+def test_corrupt_locale_json_falls_back():
+    tmp = _make_tree("xx_XX")
+    # Overwrite the locale file with a JSON list -> not a dict.
+    with open(
+        os.path.join(tmp, "assets", "i18n", "languages", "xx_XX.json"), "w",
+        encoding="utf8",
+    ) as fh:
+        fh.write("[1, 2, 3]")
+    tr = applio_i18n.NativeI18n(base_paths=[tmp])
+    assert tr.language == "en_US"
+    assert tr("finished") == "finished"  # English key fallback, no crash
+
+
+def test_corrupt_overrides_json_falls_back():
+    tmp = _make_tree("xx_XX")
+    with open(
+        os.path.join(tmp, "assets", "applio_i18n_overrides.json"), "w", encoding="utf8"
+    ) as fh:
+        fh.write('["not", "an", "object"]')
+    tr = applio_i18n.NativeI18n(base_paths=[tmp])
+    assert tr("finished") == "finito"  # locale map still loads; overrides skipped
+    # A dict overrides file whose per-locale layer is a list is skipped too.
+    with open(
+        os.path.join(tmp, "assets", "applio_i18n_overrides.json"), "w", encoding="utf8"
+    ) as fh:
+        json.dump({"xx_XX": ["bad", "layer"]}, fh)
+    tr2 = applio_i18n.NativeI18n(base_paths=[tmp])
+    assert tr2("finished") == "finito"
+
+
 def run_all():
     test_override_locale_and_format()
     test_missing_key_falls_back_to_key()
     test_missing_language_file_falls_back_english()
     test_policy_translator()
     test_overrides_layer_over_locale_map()
-    print("All applio_i18n tests passed (5).")
+    test_system_locale_prefix_glob()
+    test_corrupt_locale_json_falls_back()
+    test_corrupt_overrides_json_falls_back()
+    print("All applio_i18n tests passed (8).")
 
 
 if __name__ == "__main__":

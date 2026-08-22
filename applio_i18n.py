@@ -43,7 +43,10 @@ class NativeI18n:
             path = os.path.join(base, "assets", "i18n", "languages", f"{chosen}.json")
             try:
                 with open(path, "r", encoding="utf8") as fh:
-                    self._map = json.load(fh)
+                    data = json.load(fh)
+                if not isinstance(data, dict):
+                    raise ValueError(f"language file is not an object: {path}")
+                self._map = data
                 self.language = chosen
                 break
             except (OSError, ValueError):
@@ -55,7 +58,11 @@ class NativeI18n:
             try:
                 with open(override_path, "r", encoding="utf8") as fh:
                     overrides = json.load(fh)
-                self._map.update(overrides.get(self.language, {}))
+                if not isinstance(overrides, dict):
+                    raise ValueError(f"overrides file is not an object: {override_path}")
+                layer = overrides.get(self.language, {})
+                if isinstance(layer, dict):
+                    self._map.update(layer)
                 break
             except (OSError, ValueError):
                 continue
@@ -70,16 +77,27 @@ class NativeI18n:
                     lang = json.load(fh).get("lang", {})
                 if lang.get("override"):
                     return lang.get("selected_lang") or DEFAULT_LOCALE
-                sys_locale = _locale.getdefaultlocale()[0] or ""
+                sys_locale = (_locale.getdefaultlocale()[0] or "").replace("-", "_")
                 if sys_locale:
-                    prefix = sys_locale.split("_")[0]
-                    for cand in (sys_locale, f"{prefix}_{prefix.upper()}"):
-                        if os.path.exists(
-                            os.path.join(
-                                base, "assets", "i18n", "languages", f"{cand}.json"
-                            )
-                        ):
-                            return cand
+                    # Upstream semantics (assets/i18n/i18n.py:24-30): first
+                    # available language whose name startswith(locale[:2]).
+                    prefix = sys_locale.split("_")[0][:2]
+                    languages_dir = os.path.join(
+                        base, "assets", "i18n", "languages"
+                    )
+                    try:
+                        available = sorted(
+                            f[:-5]
+                            for f in os.listdir(languages_dir)
+                            if f.endswith(".json")
+                        )
+                    except OSError:
+                        available = []
+                    matching = [
+                        lang for lang in available if lang.startswith(prefix)
+                    ]
+                    if matching:
+                        return matching[0]
                 break
             except (OSError, ValueError):
                 continue
