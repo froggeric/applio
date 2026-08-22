@@ -136,19 +136,32 @@ def _resolve_launcher():
     return launcher
 
 
-def _collect_words(launcher):
-    """History-derived terminal words: f"{etype}:{name}" -> status (mirrors
-    applio_launcher._a11y_terminal_words). Live sources only ever report
-    'running', so these words are the ONLY way the web side learns 'failed'."""
+def terminal_words_from_history(entries):
+    """word_key -> terminal status from newest-first history entries.
+
+    Single source of truth for the "{type}:{name}" word_key format, shared
+    by the web payload (_collect_words) and the launcher's native
+    announcements (_a11y_terminal_words). Skips incomplete entries;
+    consumers apply their own display defaults for absent keys.
+    """
     words = {}
-    try:
-        for entry in launcher.get_recent_processes(20):
-            etype = entry.get("type") or "process"
-            name = entry.get("model_name") or "job"
-            words.setdefault(f"{etype}:{name}", entry.get("status") or "completed")
-    except Exception:
-        logging.debug("[ProgressAPI] history read failed", exc_info=True)
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        etype = (entry.get("type") or "").strip()
+        name = (entry.get("model_name") or "").strip()
+        status = (entry.get("status") or "").strip()
+        if etype and name and status:
+            words.setdefault(f"{etype}:{name}", status)
     return words
+
+
+def _collect_words(launcher):
+    try:
+        entries = launcher.get_recent_processes(20)
+    except Exception:
+        return {}
+    return terminal_words_from_history(entries)
 
 
 def _collect_jobs():

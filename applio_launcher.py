@@ -5410,18 +5410,14 @@ class ApplioLauncher:
         non-zero reaches the policy only as a disappearance. History (written
         in the same finally-block that untracks) carries the real outcome;
         feeding it to events() makes the announcement say "failed" instead of
-        the default "finished". History is newest-first, so the most recent
-        entry for a key wins.
+        the default "finished". The mapping itself now lives in
+        applio_progress_api.terminal_words_from_history (history is
+        newest-first, so the most recent entry for a key wins).
         """
         try:
-            words = {}
-            for entry in get_recent_processes(limit=20):
-                name = (entry.get("model_name") or "").strip()
-                etype = (entry.get("type") or "").strip()
-                status = (entry.get("status") or "").strip()
-                if name and etype and status:
-                    words.setdefault(f"{etype}:{name}", status)
-            return words
+            from applio_progress_api import terminal_words_from_history
+
+            return terminal_words_from_history(get_recent_processes(limit=20))
         except Exception:
             logging.debug("[A11y] terminal words lookup failed", exc_info=True)
             return {}

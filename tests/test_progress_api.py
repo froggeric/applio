@@ -109,6 +109,20 @@ def test_handle_progress_never_raises():
     assert "jobs" in payload and "settings" in payload
 
 
+def test_terminal_words_from_history_shared_helper():
+    entries = [
+        {"type": "training", "model_name": "voice", "status": "failed"},
+        {"type": "training", "model_name": "voice", "status": "completed"},  # older
+        {"type": "extract", "model_name": "", "status": "completed"},  # incomplete
+        {"type": "tts", "model_name": "x"},  # incomplete
+        None,
+    ]
+    words = api.terminal_words_from_history(entries)
+    assert words == {"training:voice": "failed"}  # setdefault keeps newest; skips gaps
+    assert api.terminal_words_from_history(None) == {}
+    assert api.terminal_words_from_history([]) == {}
+
+
 def run_all():
     test_inference_stats_enrichment()
     test_training_metrics_enrichment()
@@ -117,7 +131,8 @@ def run_all():
     test_owner_per_request()
     test_log_tail_read_by_seek()
     test_handle_progress_never_raises()
-    print("All progress API tests passed (7).")
+    test_terminal_words_from_history_shared_helper()
+    print("All progress API tests passed (8).")
 
 
 if __name__ == "__main__":
