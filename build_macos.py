@@ -918,6 +918,30 @@ def pre_build_patch():
             "app.py - inject a11y web payload",
             "file",
         ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/inference/inference.py",
+            "inference.py - lifecycle toasts (single conversion)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/tts/tts.py",
+            "tts.py - lifecycle toasts (TTS conversion)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/train/train.py",
+            "train.py - lifecycle toasts (train start, preprocess, extract)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/download/download.py",
+            "download.py - lifecycle toasts (model download)",
+            "dir",
+        ),
     ]
 
     # Validate patch order matches dependencies

@@ -208,13 +208,97 @@ def test_web_payload_patch():
         os.unlink(tf.name)
 
 
+def test_job_toasts_patch():
+    toasts = _load("patch_job_toasts", "patches/patch_job_toasts.py")
+    expected = {
+        "tabs/inference/inference.py": [
+            'gr.Info(i18n("Converting audio..."))  # _APPLIO_TOASTS_INFERENCE',
+            "result = run_infer_script(*args)",
+            "gr.Info(result[0])  # _APPLIO_TOASTS_INFERENCE",
+            "gr.Warning(  # _APPLIO_TOASTS_INFERENCE",
+            '"An error occurred during audio conversion. '
+            'Please check the console logs for more details.",',
+        ],
+        "tabs/tts/tts.py": [
+            'gr.Info(i18n("Starting text-to-speech..."))  # _APPLIO_TOASTS_TTS',
+            "result = run_tts_script(*args)",
+            "gr.Info(result[0])  # _APPLIO_TOASTS_TTS",
+            "gr.Warning(  # _APPLIO_TOASTS_TTS",
+            '"An error occurred during TTS conversion. '
+            'Please check the console logs for more details.",',
+        ],
+        "tabs/train/train.py": [
+            'gr.Info(i18n("Training started..."))  # _APPLIO_TOASTS_TRAIN_START',
+            "def _applio_preprocess_toast(*args):  # _APPLIO_TOASTS_TRAIN_PRE",
+            'gr.Info(i18n("Preprocessing dataset..."))',
+            "result = run_preprocess_script(*args)",
+            "def _applio_extract_toast(*args):  # _APPLIO_TOASTS_TRAIN_EXT",
+            'gr.Info(i18n("Extracting features..."))',
+            "result = run_extract_script(*args)",
+            'if "error" in result.lower() or "failed" in result.lower():',
+            "fn=_applio_preprocess_toast,",
+            "fn=_applio_extract_toast,",
+        ],
+        "tabs/download/download.py": [
+            "def _applio_download_toast(*args):  # _APPLIO_TOASTS_DOWNLOAD",
+            'gr.Info(i18n("Downloading model..."))',
+            "result = run_download_script(*args)",
+            'if "error" in result.lower() or "failed" in result.lower():',
+            "fn=_applio_download_toast,",
+        ],
+    }
+    out = {}
+    for repo_rel, basename, fn in toasts.TARGETS:
+        src = open(os.path.join(REPO, repo_rel), encoding="utf8").read()
+        assert "_APPLIO_TOASTS_" not in src, (
+            f"{repo_rel} is dirty (patched?) - restore first"
+        )
+        patched, status = fn(src)
+        assert status == "patched", f"{repo_rel}: status={status}"
+        for line in expected[repo_rel]:
+            assert line in patched, f"{repo_rel}: missing injected line {line!r}"
+        again, status2 = fn(patched)
+        assert status2 == "already" and again == patched, f"{repo_rel}: not idempotent"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf8"
+        ) as tf:
+            tf.write(patched)
+        try:
+            py_compile.compile(tf.name, doraise=True)
+        finally:
+            os.unlink(tf.name)
+        out[repo_rel] = patched
+    # Ordering regression (senior review): the wrapper DEFS must land at the
+    # head of the tab functions, syntactically BEFORE the fn= registrations
+    # that execute during tab build - anything later is an UnboundLocalError
+    # at app startup.
+    train = out["tabs/train/train.py"]
+    assert train.index("def _applio_preprocess_toast") < train.index(
+        "fn=_applio_preprocess_toast,"
+    )
+    assert train.index("def _applio_extract_toast") < train.index(
+        "fn=_applio_extract_toast,"
+    )
+    download = out["tabs/download/download.py"]
+    assert download.index("def _applio_download_toast") < download.index(
+        "fn=_applio_download_toast,"
+    )
+    # Batch inference gets NO toasts here (Task 3 announces it engine-side):
+    # no marker may appear inside enforce_terms_batch's body.
+    inference = out["tabs/inference/inference.py"]
+    b0 = inference.index("def enforce_terms_batch(")
+    b1 = inference.index("terms_checkbox", b0)
+    assert "_APPLIO_TOASTS" not in inference[b0:b1]
+
+
 def run_all():
     test_history_written_before_untrack()
     test_upload_scan_bounded_to_function_body()
     test_progress_routes_patch()
     test_browse_buttons_patch()
     test_web_payload_patch()
-    print("All patch fixture tests passed (5).")
+    test_job_toasts_patch()
+    print("All patch fixture tests passed (6).")
 
 
 if __name__ == "__main__":
