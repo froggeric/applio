@@ -90,15 +90,42 @@ def test_upload_scan_bounded_to_function_body():
 def test_progress_routes_patch():
     routes = _load("patch_progress_routes", "patches/patch_progress_routes.py")
     src = open(os.path.join(REPO, "app.py"), encoding="utf8").read()
+    assert "_APPLIO_A11Y_ROUTES_" not in src, (
+        "app.py is dirty (patched?) - restore first"
+    )
     patched, status = routes.patch_app(src)
     assert status in ("patched", "already")
     assert "prevent_thread_lock=True,  # _APPLIO_A11Y_ROUTES_" in patched
+    # allowed_paths must resolve at LAUNCH time (frozen cwd is the bundle, so
+    # gradio's default cwd+temp set rejects user-dir outputs with
+    # InvalidPathError - file written but never served): home covers the
+    # default data dir (~/Applio) + user-picked paths under ~; the env entry
+    # covers a data location chosen OUTSIDE home (macos_wrapper sets
+    # APPLIO_DATA_PATH in-process before Gradio). The `if p` filter matters:
+    # a None entry would TypeError inside gradio's is_in_or_equal.
+    assert "allowed_paths=[" in patched
+    assert 'os.path.expanduser("~")' in patched
+    assert 'os.environ.get("APPLIO_DATA_PATH")' in patched
+    launch = patched.find("Applio.launch(")
+    kw = patched.find("allowed_paths=[")
+    ptl = patched.find("prevent_thread_lock=True,")
+    assert launch != -1 and launch < kw < ptl, (
+        "allowed_paths kwarg not inside the launch kwargs"
+    )
     block = patched.find("applio_progress_api.register_routes(app)")
     tb = patched.find("from rvc.lib.tools.launch_tensorboard import get_tb_url")
     assert block != -1 and tb != -1 and block < tb
     keepalive = patched.find("while True:", block)
     guard = patched.find("if not client_mode:", block)
     assert guard != -1 and keepalive != -1 and guard < keepalive
+    repatched, status2 = routes.patch_app(patched)
+    assert status2 == "already" and repatched == patched  # idempotent
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf8") as tf:
+        tf.write(patched)
+    try:
+        py_compile.compile(tf.name, doraise=True)
+    finally:
+        os.unlink(tf.name)
 
 
 def test_browse_buttons_patch():
