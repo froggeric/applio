@@ -825,3 +825,7 @@ titles (incl. the 256 KB training tail scan) are composed every 2 s even when th
 fires — by design (the skip needs the titles to compare), bounded, documented. All task-level
 deferred minors triaged ACCEPT (rationale in the final review). Patches/-in-bundle AC was a plan
 defect — the Resources marker checks are the shipping mechanism (7/7).
+
+### Re-test partial results (2026-08-22, user-run, Phase 4 build 21:31)
+- Batch inference toasts + VoiceOver: WORK (start/milestone/finish announced) — the primary fix confirmed.
+- Single inference: NO toast observed. Diagnosis pending (markers verified in bundle — wiring or delivery, not patching).
