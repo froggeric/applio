@@ -932,3 +932,14 @@ toasts captured first-click on the built app; output HTTP 200 (20 MB) + /etc/hos
 "native" (menu toggle) — reset to "auto" via defaults before the pass. User section = the §7
 checklist expanded per-surface (single/batch/training/preprocess+extract/tts/blender/plugins/
 realtime/model-info/tensorboard/dashboard/menu/submenu/output-loading/layering-judgment).
+
+### Re-test A result (2026-08-23, user): single inference
+Toast "Converting audio" VISIBLE but NOT spoken; what spoke was the live region: "Started batch
+inference: <model>" (log: `[A11y] start:` + `post mode=auto vo=True`). Reading: the Auto-mode live
+region WORKS and now covers single conversions via scope:single tracking — but (1) the label says
+"batch inference" for a SINGLE conversion (job-label builders predate single tracking; need
+scope-aware labels on both JS + native sides); (2) gradio's own toast announcement (their aria-live)
+is FLAKY under VoiceOver — spoke in the earlier batch pass, silent here — which is precisely why the
+fork's live region is the primary spoken channel. Owner UX feedback on the Accessibility submenu:
+"having multiple options is confusing and bad ux, especially for disabled users" — simplification
+proposed (drop Native, rename verbosity group, keep Sound Cues).
