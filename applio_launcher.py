@@ -719,6 +719,46 @@ def effective_speech(override, vo_enabled):
     return "verbose" if vo_enabled else "off"
 
 
+_AFPLAY_PATH = "/usr/bin/afplay"
+_SOUND_CUE_BAD = "/System/Library/Sounds/Basso.aiff"
+_SOUND_CUE_GOOD = "/System/Library/Sounds/Glass.aiff"
+
+
+def _play_sound_cue(bad, _runner=None):
+    """Terminal sound cue through the REGULAR audio channel (re-test round 2).
+
+    NSSound system sounds honor the ALERT volume slider, which can be muted
+    while speech on the regular channel still works — the 2026-08-23 re-test
+    heard no chime. afplay plays the same system .aiff through the standard
+    output device; the Popen child is fire-and-forget (DEVNULL pipes), so the
+    main thread never blocks. Falls back to NSSound when afplay or the file
+    is missing. Returns the channel that fired ("afplay" / "nssound", None on
+    total failure); never raises. ``_runner`` is the test seam (defaults to
+    subprocess.Popen).
+    """
+    path = _SOUND_CUE_BAD if bad else _SOUND_CUE_GOOD
+    try:
+        import subprocess
+
+        if os.path.isfile(_AFPLAY_PATH) and os.path.isfile(path):
+            runner = _runner or subprocess.Popen
+            runner(
+                [_AFPLAY_PATH, path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return "afplay"
+    except Exception:
+        pass
+    try:
+        from AppKit import NSSound
+
+        NSSound.soundNamed_("Basso" if bad else "Glass").play()
+        return "nssound"
+    except Exception:
+        return None
+
+
 def _merged_live_procs():
     """Tracked subprocess jobs + the synthesized in-app batch, one list.
 
@@ -5937,6 +5977,9 @@ class ApplioLauncher:
         web live region owns speech). What remains: the dock attention
         request and the sound cue — the a11y.sound_cues defaults key gates
         sounds alone (default on, for everyone; no verbosity/VO coupling).
+        The cue plays via afplay (regular output channel): NSSound system
+        sounds follow the ALERT volume slider, which was muted in the
+        2026-08-23 re-test while speech still worked.
         """
         try:
             from AppKit import NSApp, NSCriticalRequest, NSInformationalRequest
@@ -5945,25 +5988,24 @@ class ApplioLauncher:
             NSApp.requestUserAttention_(
                 NSCriticalRequest if bad else NSInformationalRequest
             )
+            # fired BEFORE the diagnostic so the log line reports the channel
+            # that actually played (_play_sound_cue never raises)
+            channel = _play_sound_cue(bad) if self._a11y_sound_cues else None
             try:  # _APPLIO_AX_DIAGNOSTIC — kept for routing forensics
                 element = (
                     NSApp.keyWindow() or NSApp.mainWindow() or self._main_window.native
                 )
                 logging.info(
-                    "[A11y] terminal post: speech=%s vo=%s element=%r",
+                    "[A11y] terminal post: speech=%s vo=%s element=%r "
+                    "sound=%s channel=%s",
                     self._read_a11y_speech_override(),
                     voice_over_enabled(),
                     element,
+                    self._a11y_sound_cues,
+                    channel,
                 )
             except Exception:
                 pass
-            if self._a11y_sound_cues:
-                try:
-                    from AppKit import NSSound
-
-                    NSSound.soundNamed_("Basso" if bad else "Glass").play()
-                except Exception:
-                    pass
         except Exception:
             pass
 

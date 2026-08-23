@@ -60,11 +60,49 @@ def test_job_label_scope_aware():
     assert 't = job.type || "process"' in body, "non-inference types pass through"
 
 
+def test_jobs_running_gates_output_change_speech():
+    # Re-test round 2, fix B: while a job runs, per-textarea output changes
+    # must not SPEAK — announce() replaces the shared live region text, so
+    # the per-file batch updates drowned the job's own announcements. The
+    # visible Last-result record survives (persistResult still runs), and
+    # idle behavior is unchanged (still verbosity-gated).
+    with open(JS, encoding="utf8") as fh:
+        src = fh.read()
+    assert "var jobsRunning = false" in src, "module-level jobsRunning flag"
+    body = _function_body("announceOutputChanges")
+    assert "jobsRunning" in body, (
+        "announceOutputChanges must gate its announce() on jobsRunning"
+    )
+    assert "persistResult(short)" in body, (
+        "the visible Last-result record must survive the speech gate"
+    )
+    assert "jobsRunning = " in _function_body("handlePayload"), (
+        "handlePayload must refresh jobsRunning from every poll payload"
+    )
+
+
+def test_one_combined_announce_per_poll():
+    # Re-test round 2, fix B (intra-poll stomp): several events arriving in
+    # one poll must be spoken as ONE announce() call — announce() replaces
+    # textContent, so per-event calls overwrite each other and only the last
+    # is heard. The owner/verbosity gate around the spoken path is unchanged.
+    body = _function_body("handlePayload")
+    assert "forEach(function (a) { announce(a[1]); })" not in body, (
+        "per-event announce() calls stomp each other — join into one call"
+    )
+    assert '.join(" — ")' in body, "events must be combined via join"
+    assert len(re.findall(r"\bannounce\(", body)) == 1, (
+        "handlePayload must contain exactly one announce() call (combined)"
+    )
+
+
 def run_all():
     test_heal_record_toggles_scoped_to_browse_anchor()
     test_failed_tail_wiring_present()
     test_job_label_scope_aware()
-    print("All a11y JS invariant tests passed (3).")
+    test_jobs_running_gates_output_change_speech()
+    test_one_combined_announce_per_poll()
+    print("All a11y JS invariant tests passed (5).")
 
 
 if __name__ == "__main__":

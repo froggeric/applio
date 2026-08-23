@@ -13,6 +13,7 @@ and test_a11y_js_invariants.py.
 
 import os
 import sys
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -103,6 +104,57 @@ def test_policy_message_for_single_conversion():
         }
     }
     assert ("start", "Started conversion: voice.pt") in pol.events(snap)
+
+
+def test_play_sound_cue_channels():
+    # Re-test round 2, fix A: NSSound system sounds ride the ALERT volume
+    # slider (muted while speech on the regular channel still worked), so
+    # the terminal chime must go through afplay = the regular output device.
+    # _runner is the injectable seam (defaults to subprocess.Popen).
+    import subprocess as _sp
+
+    calls = []
+
+    def fake_runner(args, stdout=None, stderr=None):
+        calls.append((tuple(args), stdout, stderr))
+
+    assert applio_launcher._play_sound_cue(True, _runner=fake_runner) == "afplay"
+    assert applio_launcher._play_sound_cue(False, _runner=fake_runner) == "afplay"
+    assert calls[0][0] == ("/usr/bin/afplay", "/System/Library/Sounds/Basso.aiff")
+    assert calls[1][0] == ("/usr/bin/afplay", "/System/Library/Sounds/Glass.aiff")
+    assert calls[0][1] == _sp.DEVNULL and calls[0][2] == _sp.DEVNULL, (
+        "the afplay child must be detached and quiet (main thread never blocks)"
+    )
+
+    # afplay (or the .aiff) missing -> NSSound fallback branch, still no raise
+    calls.clear()
+    played = []
+    real_appkit = sys.modules.get("AppKit")
+    fake_appkit = types.ModuleType("AppKit")
+
+    class _Sound:
+        def __init__(self, name):
+            self.name = name
+
+        def play(self):
+            played.append(self.name)
+
+    fake_appkit.NSSound = type(
+        "NSSound", (), {"soundNamed_": staticmethod(lambda n: _Sound(n))}
+    )
+    sys.modules["AppKit"] = fake_appkit
+    orig_bin = applio_launcher._AFPLAY_PATH
+    applio_launcher._AFPLAY_PATH = "/nonexistent/afplay"
+    try:
+        assert applio_launcher._play_sound_cue(True, _runner=fake_runner) == "nssound"
+        assert applio_launcher._play_sound_cue(False, _runner=fake_runner) == "nssound"
+    finally:
+        applio_launcher._AFPLAY_PATH = orig_bin
+        sys.modules.pop("AppKit", None)
+        if real_appkit is not None:
+            sys.modules["AppKit"] = real_appkit
+    assert calls == [], "runner must not fire on the fallback path"
+    assert played == ["Basso", "Glass"]
 
 
 if __name__ == "__main__":

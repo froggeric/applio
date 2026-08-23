@@ -21,6 +21,7 @@
   var seen = {};      // job key -> {status, ms, info}
   var primed = false;
   var lastOutputText = {};  // textbox elem_id/text -> last announced value
+  var jobsRunning = false;  // latest payload has >=1 non-terminal job
 
   /* SELECTORS pinned from a live-DOM session against the installed gradio
      6.20.0 (python app.py + devtools):
@@ -147,7 +148,11 @@
       lastOutputText[id] = value;
       if (!value || prev === undefined || prev === value || !prev) { return; }
       var short = value.length > 120 ? value.slice(0, 120) + "…" : value;
-      if (verbosityNow !== "off") {  // AC: output-change announces respect verbosity
+      // While jobs run: visible record only. announce() REPLACES the shared
+      // live region, so per-textbox speech would drown the job's own start/
+      // milestone/terminal announcements (re-test round 2). Idle: speak,
+      // still verbosity-gated (AC: output-change announces respect verbosity).
+      if (!jobsRunning && verbosityNow !== "off") {
         announce("Output changed: " + short);
       }
       persistResult(short);
@@ -253,6 +258,12 @@
     var errors = (payload && payload.errors) || [];
     var current = {};
     jobs.forEach(function (job) { current[job.key] = job; });
+    // Live-job flag for announceOutputChanges (refreshed BEFORE the priming
+    // return so the first poll sets it too).
+    jobsRunning = false;
+    jobs.forEach(function (job) {
+      if (TERMINAL.indexOf(job.status) === -1) { jobsRunning = true; }
+    });
 
     if (!primed) {
       // First poll after load: adopt silently. Cost: a job that ENDED while
@@ -322,7 +333,14 @@
       }
     });
     if (owner === "web" && verbosity !== "off") {
-      announcements.forEach(function (a) { announce(a[1]); });
+      // ONE announce per poll: the live region is a single text node, so
+      // per-event calls in the same poll overwrite each other — only the
+      // last was heard (re-test round 2). Join everything this poll made.
+      var spoken = [];
+      announcements.forEach(function (a) { spoken.push(a[1]); });
+      if (spoken.length) {
+        announce(spoken.join(" — "));
+      }
     }
   }
 
