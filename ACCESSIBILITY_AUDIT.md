@@ -1034,3 +1034,11 @@ row-view hook retained as belt-and-braces). Chimes PARKED per owner ("forget abo
 104/104 suites (per-file counts exact; an earlier 102 brief figure was arithmetic slip); build
 complete 42/0; bundle: zero jobsRunning/verbosityNow in the JS, persistResult x5, _row_display_text
 in the launcher bytecode; boot smoke green (auto-gating live, verbosity "off" with no VO).
+
+### Round 4 CONFIRMED WORKING (2026-08-23, owner): GATE OPEN
+Owner verdict: "Confirmed working." B-2 batch speech clean (no output-changed voice), J-2
+dashboard rows speak their metrics, I model-info + TensorBoard confirmed. The 2026-08-21 ruling
+("no PR until we have everything 100% test, verified, and confirmed working with 0 regression
+bug") is SATISFIED for the fork surface — the upstream PR program is unblocked. Layering
+judgment item (toast + live-region on start/finish) never received an explicit verdict; current
+behavior (both speak) stands as accepted-by-silence.
