@@ -994,3 +994,13 @@ repeated "output changed ..." (the Phase-2 output-textbox announcements) — sus
 or a job-announcement gap specific to batch. 18:02:29 effective=off = VO turned off (end of
 session). OWNER PROCESS RULING (standing): always INLINE full test details when requesting tests,
 never back-refer into the conversation.
+
+### Phase 4d — re-test round-2 fixes (2026-08-23, a4c9163b, review clean)
+(A) Chime now plays via `/usr/bin/afplay` on the REGULAR output channel (NSSound system sounds
+honor the alert-volume slider — muted on the test machine while speech worked); Basso on
+failure, Glass on success; detached; NSSound fallback; the `[A11y] terminal post:` line now
+carries sound=True channel=afplay for forensics. (B) Output-textbox changes no longer SPEAK
+while any job is running (Last-result region still shows them; speech resumes when idle) and
+all spoken announcements in one poll merge into a single live-region write (join " — ") — job
+start/milestones/terminals own the channel. Known minor: a terminal→idle race can let one
+final "Output changed" line follow the terminal speech (~250ms later) — checklist item.

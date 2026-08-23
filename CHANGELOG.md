@@ -143,6 +143,10 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   "already patched"). Exit `1` remains the standalone usage guard, and `patches/download_pretraineds.py`
   (model downloader, own invocation path) is exempt.
 
+### Fixed
+- Completion chime now plays through the regular output channel (afplay) — previously inaudible when the alert-volume slider was muted.
+- Output-textbox changes no longer speak while a job is running; job start/milestone/terminal announcements are no longer drowned out (single merged live-region write per poll).
+
 ### Removed
 
 - **Accessibility submenu + Native announcement mode (Phase 4c).** The entire submenu is gone —
