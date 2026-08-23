@@ -454,7 +454,7 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   gradio app by `patches/patch_progress_routes.py`): live jobs + metrics (training log tails parsed
   via `rvc.lib.tools.process_log_parser`; inference stats via `applio_inference_stats`), history-derived
   terminal words, and an a11y-settings echo. AppKit-free; the LAUNCHER pushes state in
-  (`set_settings`/`set_announce_owner`/`set_layout_changed_callback`). The launcher runs as `__main__`
+  (`set_settings`/`set_layout_changed_callback`; 4c: `set_announce_owner` unused by the launcher). The launcher runs as `__main__`
   (frozen entry AND dev), so launcher resolution is `sys.modules.get("applio_launcher")` with a
   `__main__` fallback — a plain `get()` always misses.
 - `assets/applio_a11y.js` — injected at build time by `patches/patch_web_a11y_payload.py`, which
@@ -475,11 +475,13 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
 - `applio_i18n.py` — AppKit-free translator for native-side strings (menu/picker/announcements).
   Keys are the English text; an OPTIONAL fork-owned `assets/applio_i18n_overrides.json`
   (`{locale: {key: tr}}`) layers over upstream locale files, which stay pristine.
-- **Per-request announce-owner rule:** the payload's `announce.owner` is `"native"` only when the
-  global owner is native AND the request carries `client=native` (the JS sends it when
-  `window.pywebview` exists — i.e. the in-app WKWebView). Any other client (external browser at the
-  same port) gets `"web"` and the JS announces. This is why the route must be per-request, not a
-  static flag.
+- **Per-request announce-owner rule (kept for API completeness):** the payload's `announce.owner`
+  is `"native"` only when the global owner is native AND the request carries `client=native` (the
+  JS sends it when `window.pywebview` exists — i.e. the in-app WKWebView); any other client
+  (external browser at the same port) gets `"web"` and the JS announces. Since Phase 4c NO
+  launcher path sets the global owner "native" (the window-level AX engine is deleted), so in
+  practice every client gets `"web"` — the rule stays so external/API clients keep a well-defined
+  payload and the route remains per-request, not a static flag.
 - **`prevent_thread_lock` flip:** `patch_progress_routes.py` flips upstream `app.py`'s
   `launch(prevent_thread_lock=client_mode)` to `True` so `launch()` returns the FastAPI app and the
   routes can be registered, then (when not client_mode) parks the calling thread in a
@@ -487,12 +489,17 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   Everything after the launch call — including the TensorBoard proxy — stays DEAD in normal mode
   (status quo). Bind failures still raise on the calling thread (gradio raises before the thread
   lock matters), so the supervisor's OSError fail-fast is preserved.
-- **a11y settings:** Accessibility submenu (native menu, `menu_spec.py` keys `a11y.menu` +
-  `a11y.verbosity.{off,standard,verbose}` + `a11y.sound_cues`), persisted in NSUserDefaults
-  (`com.iahispano.applio`) under `a11y.verbosity` (string) / `a11y.sound_cues` (bool), echoed to the
-  web payload via `applio_progress_api.set_settings`. Verbosity "off" gates native `[A11y]` log lines
-  AND announcements (the heartbeat still computes events to keep `_seen` fresh); "verbose" adds
-  per-epoch/milestone detail; sound cues play a short beep on terminal events.
+- **a11y settings — AUTOMATIC since Phase 4c (2026-08-23, `6efb07e9`):** NO settings UI; the
+  Phase 2/4 Accessibility submenu (menu_spec `a11y.*` keys + launcher dispatch + refresher) is
+  REMOVED (`test_menu_spec` guards against its return). Speech is VOICEOVER-GATED:
+  `effective_speech(override, vo)` is recomputed on each 2-s heartbeat from the HIDDEN
+  NSUserDefaults (`com.iahispano.applio`) key `a11y.speech` (`auto` default / `on` / `off`) and
+  pushed to the web payload via `applio_progress_api.set_settings` on change (module pre-push
+  default is silent; launcher startup replaces it). Sound cues fire for EVERYONE on
+  terminal events (hidden `a11y.sound_cues` bool, default ON). The window-level NSAccessibility
+  post path + `announce_mode` are DELETED — the web live region is the only speech channel;
+  `_a11y_post` is terminal-only (dock attention + sound + the `[A11y] terminal post` diagnostic),
+  and the dashboard selection announcement is VO-gated.
 - **Patcher order note:** the two `app.py` patchers (`patch_progress_routes`, `patch_web_a11y_payload`)
   anchor on DISJOINT text (the `prevent_thread_lock=` kwarg line + TensorBoard import vs the
   `"js": (` entry + `def launch_gradio(`) and are order-independent; `patch_browse_buttons`'s
@@ -502,7 +509,10 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   `test_patch_fixtures.py`, `test_applio_i18n.py`, `test_a11y_js_invariants.py` (Phase 3: payload-JS
   invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract),
   `test_menu_jobs.py` (Phase 4: live menu titles), `test_dashboard_ax.py` (Phase 4: dashboard AX
-  summaries) — (+ `test_menu_spec.py` covers the submenu keys).
+  summaries), `test_a11y_auto_speech.py` (Phase 4c: `effective_speech` + hidden-keys plumbing) —
+  suite counts after Phase 4c: `test_menu_spec.py` 14 (incl. the a11y-submenu-GONE guard),
+  `test_progress_api.py` 13 (echo without announce_mode + scope forwarding),
+  `test_a11y_js_invariants.py` 3 (incl. the scope-aware jobLabel invariant).
 - **Deferred to Phase 3:** error surfacing with full log tails (terminal announcements carry status
   words; full tails need upstream `gr.Error` routing); typed-path on-change validation for the
   remaining fields (Browse's `expanduser` is the partial Phase 2 fix); upstream Applio + gradio PRs
@@ -528,13 +538,14 @@ everything 100% test, verified, and confirmed working with 0 regression bug."
 
 **Accessibility (a11y) Phase 4 — VoiceOver-pass fixes (shipped 2026-08-22, `feat/a11y-phase4`):**
 The five 2026-08-22 manual-pass findings (audit §7, resolutions + re-test checklist there) fixed
-fork-side. **Announce mode Auto (the new default):** in-app speech routes through the WEB live
-region — `_a11y_post` SKIPS the window-level NSAccessibility post (unheard when the VO cursor is
-in web content) but KEEPS dock attention, sound cues, and `[A11y]` log lines; "Native
-(experimental)" opts back into the old engine. Menu keys `a11y.announce.auto`/`a11y.announce.native`,
-persisted as `a11y.announce_mode` in NSUserDefaults; `_apply_announce_mode` maps auto→owner "web" /
-native→owner "native" via `applio_progress_api.set_announce_owner`, the payload settings echo carries
-`announce_mode`, and every AX post logs `[A11y] post mode=… vo=… element=…` for pass bisecting.
+fork-side. **Announce mode Auto (Phase 4; SUPERSEDED by Phase 4c automatic speech):** in-app
+speech routed through the WEB live region — `_a11y_post` skipped the window-level
+NSAccessibility post (unheard when the VO cursor is in web content) but kept dock attention,
+sound cues, and `[A11y]` log lines; "Native (experimental)" opted back into the old engine.
+Phase 4c (2026-08-23, `6efb07e9`) made this AUTOMATIC and deleted the toggle: the
+`a11y.announce.*` menu keys, the `a11y.announce_mode` defaults key, `_apply_announce_mode`, and
+the window-level AX post path are GONE (`set_announce_owner` remains in `applio_progress_api`
+for API completeness); speech is VO-gated per the Phase 2 a11y-settings bullet above.
 **Batch-toast split rule (Phase 4b wave, 2026-08-22/23):** TAB-side toasts
 (`patches/patch_job_toasts.py`, registered as 9 dir-type tuples — inference.py, tts.py, train.py,
 download.py, voice_blender.py, plugins.py, realtime.py, processing.py (model info), tensorboard.py)
@@ -570,7 +581,8 @@ status parent disabled from the static spec). Dashboard AX: module-level
 `_row_ax_summary`/`_chart_ax_summary` + a DUAL row hook (the guaranteed `willDisplayCell` path
 stamps what the delegate hook can miss), template progress values ("Epoch N of M, P percent") +
 indeterminate-bar fix, key-view loop (process_table → stop → pause → reveal → open → back), and a
-selection announcement. The toast + live-region layering at job start/terminal under Auto is
+selection announcement (VO-gated since Phase 4c). The toast + live-region layering at job
+start/terminal under automatic (VO-gated) speech is
 DELIBERATE redundancy; the pre-agreed follow-up if the pass calls it spam: gate the JS
 start/terminal announcements on client!=native (NOT a revert).
 

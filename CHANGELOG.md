@@ -102,6 +102,10 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Fixed
 
+- **Single conversions are announced as "conversion" (Phase 4c).** Both job-label builders —
+  the native snapshot (which said "batch inference" for every inference job) and the web
+  `jobLabel` (scope-blind "inference") — predate single-conversion tracking; both are now
+  scope-aware.
 - **Converted outputs now load in the UI (built app).** Gradio serves output files only from
   its allowed set (working directory + temp), and the packaged app's working directory is the
   bundle — so a conversion wrote the audio file but the output component never loaded it. The
@@ -119,6 +123,13 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Changed
 
+- **Accessibility is now automatic — nothing to configure (Phase 4c, owner ruling 2026-08-23).**
+  Speech is VoiceOver-gated: VoiceOver running → verbose job announcements, VoiceOver off →
+  silent, recomputed on the every-2-second heartbeat (the live region flips within one poll
+  cycle when VoiceOver starts or stops mid-session). Sound cues now play for everyone on job
+  completion and failure. There is no settings UI; two hidden NSUserDefaults keys remain as
+  escape hatches — `a11y.speech` (`auto`/`on`/`off`, default `auto`) and `a11y.sound_cues`
+  (default on).
 - **Announcements default flipped native → Auto (web) — maintainer-facing behavior change.**
   In-app job speech now comes from the web live region (plus toasts) rather than native
   window-level accessibility posts, which the VoiceOver pass never heard; "Announcements:
@@ -131,6 +142,15 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   listing every failure; previously an anchor miss could pass silently (exit `1` was read as
   "already patched"). Exit `1` remains the standalone usage guard, and `patches/download_pretraineds.py`
   (model downloader, own invocation path) is exempt.
+
+### Removed
+
+- **Accessibility submenu + Native announcement mode (Phase 4c).** The entire submenu is gone —
+  verbosity, the Sound Cues toggle, and "Announcements: Native (experimental)". The window-level
+  NSAccessibility post path that mode opted into (never heard by the VoiceOver pass) is deleted
+  outright; the `[A11y] terminal post` diagnostic line remains (simplified), as does the
+  VoiceOver-gated dashboard selection announcement. Per the owner: "having multiple options is
+  confusing and bad ux, especially for disabled users."
 
 ---
 

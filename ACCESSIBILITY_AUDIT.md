@@ -943,3 +943,35 @@ is FLAKY under VoiceOver — spoke in the earlier batch pass, silent here — wh
 fork's live region is the primary spoken channel. Owner UX feedback on the Accessibility submenu:
 "having multiple options is confusing and bad ux, especially for disabled users" — simplification
 proposed (drop Native, rename verbosity group, keep Sound Cues).
+CORRECTION (2026-08-23, resolved in Phase 4c below): the quoted "Started batch inference: <model>"
+was the NATIVE LOG line's wording — what was actually HEARD was the JS live region's "Started
+inference <model>" (space form; the pre-4c JS label was just `job.type + " " + name`, scope-blind).
+Both builders were mislabeling (native snapshot: every inference job "batch inference"; JS: no
+single/batch distinction) and both are now scope-aware ("conversion" vs "batch inference",
+6efb07e9). Re-test A outcome, plainly: speech WORKED via the live region; the toast was
+visible-but-silent (gradio's own aria-live is flaky under VO — the live region is the fork's
+reliable channel).
+
+### Phase 4c — automatic accessibility (owner-confirmed 2026-08-23, `6efb07e9`)
+Owner ruling on the Re-test A UX feedback ("having multiple options is confusing and bad ux,
+especially for disabled users"): accessibility becomes ZERO-CONFIGURATION — nothing to configure
+for the user, the app does the right thing by itself.
+- **Speech is automatic (VoiceOver-gated).** `effective_speech(override, vo)` is recomputed on
+  every 2-second heartbeat from the hidden `a11y.speech` NSUserDefaults key (`auto` default /
+  `on` / `off`; auto = VO running → verbose announcements, VO off → none) and pushed into the web
+  payload (`applio_progress_api.set_settings`) on change — the live region flips within one poll
+  cycle when VO starts/stops mid-session. The web live region is the ONLY speech channel.
+- **Sound cues for EVERYONE.** Terminal events (completion/failure) beep for all users — hidden
+  `a11y.sound_cues` defaults key, default ON, no verbosity/VO coupling.
+- **Deleted:** the whole Accessibility submenu (menu_spec `a11y.*` keys, launcher dispatch,
+  refresher) and the broken window-level NSAccessibility post path together with `announce_mode` /
+  "Native (experimental)". `_a11y_post` is now terminal-only (dock attention + sound cue +
+  simplified `[A11y] terminal post: speech=… vo=… element=…` diagnostic line — kept for routing
+  forensics); the dashboard selection announcement stays, gated on VoiceOver only.
+- **Scope-aware labels (the Re-test A mislabel fix).** `inference_job_type` (single →
+  "conversion", else "batch inference") drives the native snapshot; `scope` rides
+  `_synthesize_inference_proc` into the payload job; the JS `jobLabel` mirrors the mapping.
+- Tests: `tests/test_a11y_auto_speech.py` (5) — `effective_speech` + hidden-keys plumbing;
+  `test_menu_spec.py` now 14 (incl. the a11y-submenu-GONE guard); `test_progress_api.py` now 13
+  (echo without announce_mode + scope forwarding); `test_a11y_js_invariants.py` now 3 (incl. the
+  scope-aware jobLabel invariant).

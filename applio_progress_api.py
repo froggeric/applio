@@ -289,9 +289,11 @@ def handle_progress(nav=None, client=None, now=None):
                 cb()
             except Exception:
                 logging.debug("[ProgressAPI] layout callback failed", exc_info=True)
-        # Per-request owner: only the in-app WKWebView client (client=native,
-        # sent when window.pywebview exists) is silenced by the native engine;
-        # an external browser at the same port still gets web announcements.
+        # Per-request owner rule kept for API completeness/external clients: a
+        # client=native request (the JS sends it when window.pywebview exists)
+        # would get owner "native"; since Phase 4c (2026-08-23) no launcher
+        # path sets the global owner "native" (the window-level AX engine is
+        # deleted), so in practice every client gets "web" and the JS announces.
         owner = "native" if (owner_state == "native" and client == "native") else "web"
         launcher = _resolve_launcher()
         jobs = enrich_jobs(_collect_jobs(), now)
