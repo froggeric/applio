@@ -6,7 +6,7 @@ Wire the batch formant toggle to its own checkbox
 
 ## Body
 
-The batch formant options don't follow their own checkbox. Their visibility is driven by the single tab's checkbox instead, so checking the batch toggle does nothing unless the single tab's checkbox is also checked.
+The batch formant options don't follow their own checkbox. Their visibility is driven by the single tab's checkbox instead, which means checking the batch toggle does nothing unless the single tab's checkbox is also checked.
 
 The handler registration passes `formant_shifting` where it should pass `formant_shifting_batch`:
 
@@ -17,4 +17,4 @@ The handler registration passes `formant_shifting` where it should pass `formant
 +    inputs=[formant_shifting_batch],
 ```
 
-Found while making the inference tabs usable with VoiceOver. The two tabs look identical, so this is easy to miss visually. With a screen reader it stands out immediately, because the toggle you just changed does nothing to the page you are on.
+Found while making the inference tabs usable with VoiceOver. The two tabs look identical, so this is easy to miss visually. With a screen reader it is more easily noticeable, because the changed toggle does nothing to the page you are on.

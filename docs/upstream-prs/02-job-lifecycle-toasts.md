@@ -6,7 +6,7 @@ Announce job start and completion with toasts for screen reader users
 
 ## Body
 
-A blind user running Applio gets no signal when a job starts or finishes. Conversions, TTS, preprocessing, extraction and model link downloads all end in silence, and the result textboxes are not read aloud, so the only way to tell a job is done is to keep checking by hand.
+A blind user running Applio gets no signal when a job starts or finishes. Conversions, TTS, preprocessing, extraction and model link downloads all end in silence, and the result textboxes are not read aloud, leaving the user with no clue of what is happening, if it worked, or if it failed.
 
 Gradio toasts are announced by screen readers (they render with role=status and aria-live). Applio already uses them for the pretrained model download and the prerequisites check. This change extends that to the other long-running jobs:
 
@@ -14,7 +14,7 @@ Gradio toasts are announced by screen readers (they render with role=status and 
 - preprocessing, feature extraction and model link downloads: wrapped so they announce start, the returned result, and errors (a returned message mentioning "error" or "failed" is shown as a warning)
 - training: announces its start. A run can last hours, so completion feedback needs its own approach and is left out here
 
-Start messages are translated like the rest of the UI. Error toasts reuse the exact strings these functions already return, so there are only eight new translation strings.
+Start messages are translated like the rest of the UI. Error toasts reuse the exact strings these functions already return, which means we only need eight new translation strings.
 
 Batch conversion and the real-time engine are left out for now; they need progress reporting rather than single toasts.
 
