@@ -1020,3 +1020,12 @@ speech during jobs — decisive fix: remove output-change SPEECH entirely (visib
 Last-result region; jobs own the channel). J dashboard: rows do NOT speak their metrics —
 row-view values insufficient under VO; decisive fix: append the metrics summary to the visible
 cell text (objectValue) so the spoken row carries it. I untested this round.
+
+### Phase 4e — final fixes (2026-08-23, 0cf8b0a7, review clean)
+Output-change SPEECH removed entirely (persistResult/Last-result region only; jobs own the
+spoken channel — the jobsRunning gate and its lag windows are gone with it; the single joined
+announce is the payload's only speaker). Dashboard ACTIVE rows now carry their metrics in the
+visible cell text ("Running — Training: name — epoch 34 of 200, best loss 0.123", ≤80 chars,
+via module-level _row_display_text reusing _row_ax_summary; history rows byte-unchanged; dual
+row-view hook retained as belt-and-braces). Chimes PARKED per owner ("forget about the chimes")
+— code stays, no further testing.
