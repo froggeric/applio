@@ -1004,3 +1004,9 @@ while any job is running (Last-result region still shows them; speech resumes wh
 all spoken announcements in one poll merge into a single live-region write (join " — ") — job
 start/milestones/terminals own the channel. Known minor: a terminal→idle race can let one
 final "Output changed" line follow the terminal speech (~250ms later) — checklist item.
+
+### Phase 4d gate (2026-08-23, re-validated independently)
+100/100 suites; build complete 42/0; bundle carries jobsRunning + joined announce + afplay
+chime; boot smoke green (settings {"verbosity":"off","sound":true} with no VO — auto-gating
+live). Gate notes: pytest with path-first argv trips the frozen dispatch — lead with -q (or
+per-file runners); post-build restore as usual.
