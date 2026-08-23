@@ -67,18 +67,49 @@ def test_payload_shape_and_settings_echo():
     assert "log_tail" not in payload["jobs"][0]  # never leaked to the wire
 
 
-def test_settings_echo_announce_mode():
+def test_settings_echo_no_announce_mode():
+    # Auto-a11y (2026-08-23): announce_mode is GONE from the settings echo
+    # (the window-level AX post path was removed; the per-request owner rule
+    # keeps its module default "web"). The pre-push default is SILENT speech
+    # with sound cues ON.
     payload = api.build_progress_payload(
-        jobs=[],
-        settings={"verbosity": "standard", "sound": False, "announce_mode": "auto"},
-        announce_owner="web",
-        now=1.0,
+        jobs=[], settings=api.DEFAULT_SETTINGS, announce_owner="web", now=1.0
     )
-    assert payload["settings"]["announce_mode"] == "auto"
-    # The default state carries the key too, so the echo exists before the
-    # launcher's first set_settings push (Task 1).
+    assert "announce_mode" not in payload["settings"], payload["settings"]
+    assert api.DEFAULT_SETTINGS == {"verbosity": "off", "sound": True}
     api.set_settings(api.DEFAULT_SETTINGS)
-    assert api.handle_progress(nav=None, now=1.0)["settings"]["announce_mode"] == "auto"
+    echoed = api.handle_progress(nav=None, now=1.0)["settings"]
+    assert "announce_mode" not in echoed and echoed["sound"] is True
+
+
+def test_collect_jobs_forwards_inference_scope():
+    # The scope written by patch_inference_progress ("single" for a one-file
+    # conversion; absent for a batch) must survive into the payload job so
+    # the web jobLabel can say "conversion" vs "batch inference". The job's
+    # type stays "inference" — enrich_jobs keys on it.
+    class FakeLauncher:
+        def get_active_processes(self):
+            return []
+
+        def _synthesize_inference_proc(self):
+            return {
+                "type": "inference",
+                "status": "running",
+                "model_name": "voice.pt",
+                "scope": "single",
+                "total": 1,
+                "processed": 0,
+            }
+
+    orig = api._resolve_launcher
+    api._resolve_launcher = lambda: FakeLauncher()
+    try:
+        jobs = api._collect_jobs()
+    finally:
+        api._resolve_launcher = orig
+    assert len(jobs) == 1
+    assert jobs[0]["type"] == "inference"
+    assert jobs[0]["scope"] == "single"
 
 
 def test_nav_token_fires_callback_once():
@@ -210,7 +241,8 @@ def run_all():
     test_inference_stats_enrichment()
     test_training_metrics_enrichment()
     test_payload_shape_and_settings_echo()
-    test_settings_echo_announce_mode()
+    test_settings_echo_no_announce_mode()
+    test_collect_jobs_forwards_inference_scope()
     test_nav_token_fires_callback_once()
     test_owner_per_request()
     test_log_tail_read_by_seek()
@@ -219,7 +251,7 @@ def run_all():
     test_recent_error_tails_bounded_and_filtered()
     test_recent_error_tails_limit_two()
     test_payload_carries_errors_key()
-    print("All progress API tests passed (12).")
+    print("All progress API tests passed (13).")
 
 
 if __name__ == "__main__":

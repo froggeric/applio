@@ -669,6 +669,10 @@ def _synthesize_inference_proc():
     return {
         "type": "inference",
         "status": inf["status"],
+        # scope rides along so label builders can tell a one-file conversion
+        # ("single", written by patch_inference_progress since 4b) from a batch
+        # (no scope) — see inference_job_type below.
+        "scope": inf.get("scope"),
         "model_name": inf.get("model_name", ""),
         "total": inf.get("total", 0),
         "processed": inf.get("processed", 0),
@@ -679,6 +683,40 @@ def _synthesize_inference_proc():
         "output_folder": inf.get("output_folder"),
         "_is_inference": True,
     }
+
+
+def inference_job_type(scope):
+    """Scope-aware announcement type for the synthesized inference job.
+
+    The progress record's scope ("single" for a one-file conversion, absent
+    for a batch) picks the spoken type — a single conversion must not be
+    announced as "batch inference" (the 2026-08-23 re-test mislabel). The web
+    jobLabel mirrors this mapping from the payload's scope field.
+    """
+    return "conversion" if scope == "single" else "batch inference"
+
+
+def voice_over_enabled():
+    """Live VoiceOver state; False whenever AppKit/the query is unavailable."""
+    try:
+        return bool(NSWorkspace.sharedWorkspace().isVoiceOverEnabled())
+    except Exception:
+        return False
+
+
+def effective_speech(override, vo_enabled):
+    """Zero-config speech policy (2026-08-23 owner ruling).
+
+    override: the hidden a11y.speech NSUserDefaults value ("auto" default,
+    "on", "off" — no UI); vo_enabled: NSWorkspace's live VoiceOver state.
+    Returns the web payload's verbosity: "verbose" (speak, milestones
+    included) or "off". None/unknown overrides behave as "auto".
+    """
+    if override == "on":
+        return "verbose"
+    if override == "off":
+        return "off"
+    return "verbose" if vo_enabled else "off"
 
 
 def _merged_live_procs():
@@ -4158,18 +4196,11 @@ class ProcessDashboardController(NSObject):
         # while the DASHBOARD window is focused with native VO focus on the
         # table (the configuration where AX posts demonstrably work); selection
         # changes arrive on the main thread, as AX posts require. Gated on VO
-        # running and verbosity != "off" (the launcher's persisted setting —
-        # the dashboard itself has no verbosity attr), and must never break
+        # running ONLY (auto-a11y, 2026-08-23: the user pressed a key, speech
+        # is warranted — no verbosity coupling), and must never break
         # selection: any failure is swallowed.
         try:
-            verbosity = getattr(
-                getattr(self, "_launcher", None), "_a11y_verbosity", "standard"
-            )
-            if (
-                verbosity != "off"
-                and self._selected_process
-                and NSWorkspace.sharedWorkspace().isVoiceOverEnabled()
-            ):
+            if self._selected_process and voice_over_enabled():
                 summary = self._ax_summary_for(self._selected_process)
                 note = _t("Detail pane updated.")
                 message = f"{summary}. {note}" if summary else note
@@ -5171,37 +5202,33 @@ class ApplioLauncher:
             applio_native_picker.mark_native_loop_available()
         except Exception:
             pass
-        # Accessibility settings (Task 9): persisted in NSUserDefaults under
-        # namespaced a11y.* keys, echoed to the web payload. Guarded read —
-        # __init__ must not gain an unguarded PyObjC import (the module keeps
-        # a NATIVE_APIS_AVAILABLE fallback path), so fall back to defaults.
-        self._a11y_verbosity = "standard"
-        self._a11y_sound_cues = False
-        self._a11y_announce_mode = "auto"
+        # Accessibility (auto, 2026-08-23 owner ruling): speech is ZERO-CONFIG —
+        # the web live region speaks exactly when VoiceOver runs. The hidden
+        # a11y.speech NSUserDefaults key ("auto" default / "on" / "off") is the
+        # only override and has NO UI (the Accessibility submenu is gone).
+        # Sound cues default ON for everyone (hidden a11y.sound_cues bool).
+        # Legacy keys (a11y.verbosity, a11y.announce_mode) are no longer read.
+        # Guarded reads — __init__ must not gain an unguarded PyObjC import
+        # (the module keeps a NATIVE_APIS_AVAILABLE fallback path).
+        self._a11y_sound_cues = True
+        self._a11y_effective_verbosity = None  # computed by _update_a11y_speech
         try:
             from Foundation import NSUserDefaults
 
             defaults = NSUserDefaults.standardUserDefaults()
-            verbosity = defaults.stringForKey_("a11y.verbosity") or "standard"
-            if verbosity in ("off", "standard", "verbose"):
-                self._a11y_verbosity = verbosity
-            self._a11y_sound_cues = bool(defaults.boolForKey_("a11y.sound_cues"))
-            mode = defaults.stringForKey_("a11y.announce_mode") or "auto"
-            if mode in ("auto", "native"):
-                self._a11y_announce_mode = mode
+            # boolForKey_ conflates "unset" with False; the default is ON, so
+            # distinguish via objectForKey_ (None = unset).
+            sound = defaults.objectForKey_("a11y.sound_cues")
+            if sound is not None:
+                self._a11y_sound_cues = bool(sound)
         except Exception:
             logging.debug("[A11y] settings read failed", exc_info=True)
-        self._push_a11y_settings()
-        # Announce mode (Task 1, Phase 4): "auto" (default) routes in-app
-        # speech through the web live region — window-level AX posts were
-        # unheard across 3 builds when VO focus sits in the WKWebView, while
-        # toasts on the same channel worked. "native" opts back into the
-        # AX-post engine. Web-side layout changes are marshaled to the main
-        # thread and posted as an AX layout-changed notification either way.
+        self._update_a11y_speech()  # computes the effective verbosity + pushes
+        # Web-side layout changes are marshaled to the main thread and posted
+        # as an AX layout-changed notification (VO re-scans the WKWebView).
         try:
             import applio_progress_api
 
-            self._apply_announce_mode()
             applio_progress_api.set_layout_changed_callback(
                 lambda: AppHelper.callAfter(self._post_webview_layout_changed)
             )
@@ -5506,11 +5533,6 @@ class ApplioLauncher:
             self._key_to_tag,
             is_top_level=True,
         )
-        # Apply the a11y check marks to the FRESH menu (callers setMainMenu_
-        # only after this returns, so resolving via NSApp.mainMenu() here would
-        # hit the old menu) — this is what makes the states survive the
-        # post-webview.start menu re-wipe.
-        self._refresh_a11y_submenu(menu=main_menu)
         return main_menu
 
     def _reassert_menu_and_delegate(self):
@@ -5768,13 +5790,14 @@ class ApplioLauncher:
         """Current tracked-job snapshot for the announcement policy.
 
         Sources are the module-level functions (verified scopes): subprocess
-        jobs from get_active_processes(), the in-app batch from
+        jobs from get_active_processes(), the in-app inference job (batch or
+        single conversion — label via inference_job_type) from
         _synthesize_inference_proc() — disjoint, no dedupe. Keys are
         type:name:pid so same-type jobs sharing a model name (e.g. a
         relaunched preprocess) are tracked independently; word_key drops
         the pid to match history's type:name keys. Paused is derived per-proc via
         psutil because active_processes.json keeps SIGSTOPped jobs "running".
-        The in-app batch's "cancelling" maps onto the policy's terminal
+        The in-app job's "cancelling" maps onto the policy's terminal
         "cancelled" (see the inference block below for why a bare passthrough
         would stay silent).
         """
@@ -5813,7 +5836,7 @@ class ApplioLauncher:
             elif status != "running":
                 status = "running"
             snap[f"inference:{name}:app"] = {
-                "type": "batch inference",
+                "type": inference_job_type(inf.get("scope")),
                 "name": name,
                 "status": status,
                 "word_key": f"inference:{name}",
@@ -5840,22 +5863,22 @@ class ApplioLauncher:
             return {}
 
     def _a11y_heartbeat(self):
-        """Diff job states every 2 s; announce changes; refresh the dock badge."""
+        """Diff job states every 2 s; announce changes; refresh the dock badge.
+
+        Zero-config speech (2026-08-23): the WEB live region owns speech
+        (gated by the payload's verbosity, recomputed each tick below), so the
+        native side only emits the non-speech effects: INFO logs (always —
+        diagnostics, not speech) and, for terminal events, the dock attention
+        request + sound cue (everyone, never VO-gated).
+        """
         try:
+            self._update_a11y_speech()
             snap = self._a11y_snapshot()
             if not self._a11y_primed:
                 # First heartbeat: record already-running jobs silently so a
                 # relaunch doesn't announce "Started X" for hour-old jobs.
                 self._a11y_policy.prime(snap)
                 self._a11y_primed = True
-                events = []
-            elif self._a11y_verbosity == "off":
-                # Announcements off: still consume events every tick — events()
-                # is what keeps the policy's _seen current, so re-enabling
-                # later doesn't replay "Started X" for every already-running
-                # job. terminal_words={} keeps the history read lazy (the
-                # words only shape messages, which are discarded).
-                self._a11y_policy.events(snap, terminal_words={})
                 events = []
             else:
                 # Terminal words are a locked whole-file history read; only
@@ -5868,49 +5891,79 @@ class ApplioLauncher:
             return
         for kind, msg in events:
             logging.info(f"[A11y] {kind}: {msg}")
-            AppHelper.callAfter(self._a11y_post, msg, kind)
+            if kind == "terminal":
+                AppHelper.callAfter(self._a11y_post, msg)
         live = applio_a11y.count_live(snap)
         AppHelper.callAfter(self._a11y_update_badge, live)
 
-    def _a11y_post(self, msg, kind):
-        """Runs on the main thread. Post the AX announcement + attention request."""
-        if self._a11y_verbosity == "off":
-            return  # defense in depth: the heartbeat already gates this
+    def _update_a11y_speech(self):
+        """Recompute the effective announcement verbosity for this tick.
+
+        "auto" (default) speaks exactly when VoiceOver runs, "on" always,
+        "off" never — the hidden a11y.speech NSUserDefaults key is the only
+        escape hatch. The result is pushed to the web payload on change so
+        the live region flips within one poll cycle when VO starts/stops
+        mid-session. Must never raise (the 2 s timer must never die).
+        """
+        try:
+            override = self._read_a11y_speech_override()
+            effective = effective_speech(override, voice_over_enabled())
+            if effective != self._a11y_effective_verbosity:
+                self._a11y_effective_verbosity = effective
+                logging.info(
+                    f"[A11y] speech: override={override} effective={effective}"
+                )
+                self._push_a11y_settings()
+        except Exception:
+            logging.debug("[A11y] speech update failed", exc_info=True)
+
+    def _read_a11y_speech_override(self):
+        """Hidden a11y.speech NSUserDefaults override; "auto" when unset/invalid."""
+        try:
+            from Foundation import NSUserDefaults
+
+            value = NSUserDefaults.standardUserDefaults().stringForKey_("a11y.speech")
+            if value in ("auto", "on", "off"):
+                return value
+        except Exception:
+            logging.debug("[A11y] speech override read failed", exc_info=True)
+        return "auto"
+
+    def _a11y_post(self, msg):
+        """Runs on the main thread. TERMINAL-event side effects only.
+
+        The window-level AX announcement post was REMOVED (2026-08-23 owner
+        ruling: unheard in 3 builds when VO focus sits in the WKWebView; the
+        web live region owns speech). What remains: the dock attention
+        request and the sound cue — the a11y.sound_cues defaults key gates
+        sounds alone (default on, for everyone; no verbosity/VO coupling).
+        """
         try:
             from AppKit import NSApp, NSCriticalRequest, NSInformationalRequest
 
-            element = (
-                NSApp.keyWindow() or NSApp.mainWindow() or self._main_window.native
+            bad = any(w in msg for w in ("fail", "error", "cancel", "interrupt"))
+            NSApp.requestUserAttention_(
+                NSCriticalRequest if bad else NSInformationalRequest
             )
-            try:  # _APPLIO_AX_DIAGNOSTIC — settles routing questions from logs
-                from AppKit import NSWorkspace
-
+            try:  # _APPLIO_AX_DIAGNOSTIC — kept for routing forensics
+                element = (
+                    NSApp.keyWindow() or NSApp.mainWindow() or self._main_window.native
+                )
                 logging.info(
-                    "[A11y] post mode=%s vo=%s element=%r",
-                    self._a11y_announce_mode,
-                    NSWorkspace.sharedWorkspace().isVoiceOverEnabled(),
+                    "[A11y] terminal post: speech=%s vo=%s element=%r",
+                    self._read_a11y_speech_override(),
+                    voice_over_enabled(),
                     element,
                 )
             except Exception:
                 pass
-            if self._a11y_announce_mode != "native":
-                pass  # Auto: window-level AX posts are unheard when VO focus is
-                # in the WKWebView (3 builds of evidence); the web live region
-                # owns speech. Attention/sound/log below still run.
-            else:
-                applio_a11y.post_announcement(element, msg)
-            if kind == "terminal":
-                bad = any(w in msg for w in ("fail", "error", "cancel", "interrupt"))
-                NSApp.requestUserAttention_(
-                    NSCriticalRequest if bad else NSInformationalRequest
-                )
-                if self._a11y_sound_cues:
-                    try:
-                        from AppKit import NSSound
+            if self._a11y_sound_cues:
+                try:
+                    from AppKit import NSSound
 
-                        NSSound.soundNamed_("Basso" if bad else "Glass").play()
-                    except Exception:
-                        pass
+                    NSSound.soundNamed_("Basso" if bad else "Glass").play()
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -5923,7 +5976,7 @@ class ApplioLauncher:
         except Exception:
             pass
 
-    # ---- Accessibility settings (Task 9: verbosity + sound cues) ----
+    # ---- Accessibility settings echo (auto speech; no UI since 2026-08-23) ----
 
     def _push_a11y_settings(self):
         """Echo the current a11y settings to the web payload (exception-safe:
@@ -5933,110 +5986,10 @@ class ApplioLauncher:
 
             applio_progress_api.set_settings(
                 {
-                    "verbosity": self._a11y_verbosity,
+                    "verbosity": self._a11y_effective_verbosity or "off",
                     "sound": self._a11y_sound_cues,
-                    "announce_mode": self._a11y_announce_mode,
                 }
             )
-        except Exception:
-            pass
-
-    def _apply_announce_mode(self):
-        """Map the persisted announce mode onto the web payload's owner flag.
-
-        "auto" -> "web": the in-app client announces via its live region (and
-        _a11y_post skips the window-level AX post). "native" -> "native": the
-        engine posts AX announcements and the per-request owner rule silences
-        the in-app client. Exception-safe: called from __init__ and the menu.
-        """
-        try:
-            import applio_progress_api
-
-            applio_progress_api.set_announce_owner(
-                "native" if self._a11y_announce_mode == "native" else "web"
-            )
-        except Exception:
-            logging.debug("[A11y] announce-mode apply failed", exc_info=True)
-
-    def _set_a11y_announce_mode(self, mode):
-        """Persist + apply an Announce-mode choice (radio behavior)."""
-        from Foundation import NSUserDefaults
-
-        self._a11y_announce_mode = mode
-        defaults = NSUserDefaults.standardUserDefaults()
-        defaults.setObject_forKey_(mode, "a11y.announce_mode")
-        defaults.synchronize()
-        self._apply_announce_mode()
-        self._push_a11y_settings()
-        self._refresh_a11y_submenu()
-
-    def _set_a11y_verbosity(self, value):
-        """Persist + apply an Announcements choice (radio behavior)."""
-        from Foundation import NSUserDefaults
-
-        self._a11y_verbosity = value
-        defaults = NSUserDefaults.standardUserDefaults()
-        defaults.setObject_forKey_(value, "a11y.verbosity")
-        defaults.synchronize()
-        self._push_a11y_settings()
-        self._refresh_a11y_submenu()
-
-    def _toggle_a11y_sound(self):
-        """Persist + apply the Sound Cues toggle."""
-        from Foundation import NSUserDefaults
-
-        self._a11y_sound_cues = not self._a11y_sound_cues
-        defaults = NSUserDefaults.standardUserDefaults()
-        defaults.setBool_forKey_(self._a11y_sound_cues, "a11y.sound_cues")
-        defaults.synchronize()
-        self._push_a11y_settings()
-        self._refresh_a11y_submenu()
-
-    def _refresh_a11y_submenu(self, menu=None):
-        """Sync the Accessibility submenu check marks with persisted settings.
-
-        Resolves live items via _find_item_by_key (backed by _key_to_tag,
-        repopulated on every _build_native_menu pass), so it is rebuild-safe:
-        called at the end of _build_native_menu (states survive the pywebview
-        menu re-wipe) and after every toggle. No 2 s rebuild — states change
-        only via this menu. `menu` lets a caller target a freshly built menu
-        that is not yet NSApp.mainMenu() (setMainMenu_ runs after the build).
-        """
-        import AppKit
-
-        try:
-            current_verbosity = {
-                "off": "a11y.verbosity.off",
-                "standard": "a11y.verbosity.standard",
-                "verbose": "a11y.verbosity.verbose",
-            }[self._a11y_verbosity]
-            for key in (
-                "a11y.verbosity.off",
-                "a11y.verbosity.standard",
-                "a11y.verbosity.verbose",
-                "a11y.sound_cues",
-                "a11y.announce.auto",
-                "a11y.announce.native",
-            ):
-                row = self._find_item_by_key(key, menu=menu)
-                if not row:
-                    continue
-                if key.startswith("a11y.verbosity."):
-                    row.setState_(
-                        AppKit.NSOnState
-                        if key == current_verbosity
-                        else AppKit.NSOffState
-                    )
-                elif key.startswith("a11y.announce."):
-                    row.setState_(
-                        AppKit.NSOnState
-                        if key == f"a11y.announce.{self._a11y_announce_mode}"
-                        else AppKit.NSOffState
-                    )
-                else:
-                    row.setState_(
-                        AppKit.NSOnState if self._a11y_sound_cues else AppKit.NSOffState
-                    )
         except Exception:
             pass
 
@@ -6148,13 +6101,6 @@ class ApplioLauncher:
         # Custom actions - ALL zero-arg callables.
         d["app.about"] = lambda: self.showAbout_(None)
         d["app.check_updates"] = lambda: self.checkUpdates_(None)
-        # Accessibility settings submenu (Task 9)
-        d["a11y.verbosity.off"] = lambda: self._set_a11y_verbosity("off")
-        d["a11y.verbosity.standard"] = lambda: self._set_a11y_verbosity("standard")
-        d["a11y.verbosity.verbose"] = lambda: self._set_a11y_verbosity("verbose")
-        d["a11y.sound_cues"] = self._toggle_a11y_sound
-        d["a11y.announce.auto"] = lambda: self._set_a11y_announce_mode("auto")
-        d["a11y.announce.native"] = lambda: self._set_a11y_announce_mode("native")
         d["file.set_data_location"] = lambda: self.setDataLocation_(None)
         d["process.open_dashboard"] = lambda: self.showProgressMonitor_(None)
         d["process.open_logs"] = self._open_training_logs  # already zero-arg

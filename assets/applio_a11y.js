@@ -1,8 +1,10 @@
 /* Applio a11y web payload (fork-owned; injected via gradio js= on load).
    Regions are created up-front (live regions must exist before updates),
-   writes are change-only, and job announcements run only for clients the
-   native engine does NOT already cover (announce.owner === "web": external
-   browsers; the in-app WKWebView sends client=native and is silenced). */
+   writes are change-only, and spoken announcements are gated by the payload's
+   verbosity (auto-a11y: "verbose" when VoiceOver runs / a11y.speech=on, else
+   "off"). The native window-level AX post path was removed (2026-08-23), so
+   this live region is THE speech channel for every client; announce.owner
+   stays "web" (the per-request native rule is reserved machinery). */
 (function () {
   "use strict";
   if (window.__APPLIO_A11Y__) { return; }
@@ -221,7 +223,14 @@
   /* --- progress polling -------------------------------------------------- */
 
   function jobLabel(job) {
-    return (job.type || "process") + " " + (job.name || "");
+    var t = job.type || "process";
+    if (t === "inference") {
+      // Scope-aware (mirrors applio_launcher.inference_job_type): a tracked
+      // single conversion must not be announced as "batch inference"; batch
+      // records carry no scope.
+      t = job.scope === "single" ? "conversion" : "batch inference";
+    }
+    return t + " " + (job.name || "");
   }
 
   function failedTail(errors, job) {

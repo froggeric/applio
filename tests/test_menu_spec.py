@@ -118,14 +118,9 @@ def test_action_key_contracts():
         "window.zoom",
         "window.bring_all_to_front",
     }
-    from menu_spec import A11Y_CHILD_KEYS
-
-    # Amended by Task 9: the a11y children are launcher-only too (the
-    # standalone wrapper has no announcement engine to drive them).
     assert (
-        WRAPPER_ACTION_KEYS
-        == LAUNCHER_ACTION_KEYS - injected - EDIT_KEYS - A11Y_CHILD_KEYS
-    ), "wrapper contract mismatch (Edit + a11y items are launcher-only)"
+        WRAPPER_ACTION_KEYS == LAUNCHER_ACTION_KEYS - injected - EDIT_KEYS
+    ), "wrapper contract mismatch (Edit items are launcher-only)"
     assert injected <= LAUNCHER_ACTION_KEYS, "injected keys must be in launcher set"
 
 
@@ -135,56 +130,21 @@ def test_display_keys_are_dynamic():
             assert leaf.dynamic, f"display key {leaf.key!r} must be dynamic"
 
 
-def test_a11y_menu_present():
+def test_a11y_menu_gone():
+    # 2026-08-23 auto-a11y owner ruling: the Accessibility submenu is REMOVED
+    # (speech is zero-config — VoiceOver-gated; hidden NSUserDefaults keys
+    # are the only escape hatch, with no UI). Guard against regressions in
+    # both the MENU tree and the key-set machinery.
     import menu_spec
 
-    app_menu_items = menu_spec.MENU[0].submenu  # the App menu's item list
-    a11y = [mi for mi in app_menu_items if mi.key == "a11y.menu"]
-    assert a11y and a11y[0].title == "Accessibility"
-    child_keys = {mi.key for mi in a11y[0].submenu}
-    assert child_keys == menu_spec.A11Y_CHILD_KEYS
-
-
-def test_a11y_keys_sets():
-    import menu_spec
-
-    assert menu_spec.A11Y_KEYS <= menu_spec.TAXONOMY
-    assert menu_spec.A11Y_CHILD_KEYS <= menu_spec.LAUNCHER_ACTION_KEYS
-    assert not (menu_spec.A11Y_KEYS & menu_spec.WRAPPER_ACTION_KEYS)
-    assert "a11y.menu" in menu_spec.DISPLAY_KEYS
-
-
-def test_a11y_announce_mode_items():
-    import menu_spec
-
-    # Task 1 (Phase 4): the two announce-mode leaves ride with the a11y
-    # children — launcher-dispatched radio items, never in the static
-    # wrapper menu (the standalone wrapper has no announcement engine).
-    for key in ("a11y.announce.auto", "a11y.announce.native"):
-        assert key in menu_spec.A11Y_CHILD_KEYS
-        assert key in menu_spec.LAUNCHER_ACTION_KEYS
-        assert key not in menu_spec.WRAPPER_ACTION_KEYS
-    a11y = next(mi for mi in menu_spec.MENU[0].submenu if mi.key == "a11y.menu")
-    by_key = {mi.key: mi for mi in a11y.submenu}
-    assert by_key["a11y.announce.auto"].title == "Announcements: Auto (recommended)"
-    assert (
-        by_key["a11y.announce.native"].title == "Announcements: Native (experimental)"
-    )
-
-
-def test_a11y_submenu_order():
-    import menu_spec
-
-    # verbosity radio, then announce-mode radio, then the sound-cues toggle
-    a11y = next(mi for mi in menu_spec.MENU[0].submenu if mi.key == "a11y.menu")
-    assert [mi.key for mi in a11y.submenu] == [
-        "a11y.verbosity.off",
-        "a11y.verbosity.standard",
-        "a11y.verbosity.verbose",
-        "a11y.announce.auto",
-        "a11y.announce.native",
-        "a11y.sound_cues",
-    ]
+    for leaf in iter_leaves(menu_spec.MENU):
+        assert not (leaf.key or "").startswith("a11y."), (
+            f"stale a11y menu item {leaf.key!r}"
+        )
+    assert not hasattr(menu_spec, "A11Y_CHILD_KEYS"), "stale a11y key-set machinery"
+    assert not hasattr(menu_spec, "A11Y_KEYS"), "stale a11y key-set machinery"
+    assert not any(k.startswith("a11y.") for k in menu_spec.TAXONOMY)
+    assert not any(k.startswith("a11y.") for k in menu_spec.DISPLAY_KEYS)
 
 
 def test_app_menu_const():

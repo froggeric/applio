@@ -18,9 +18,12 @@ NAV_FIRE_MIN_INTERVAL_S = 5.0
 LOG_TAIL_MAX_BYTES = 262144
 
 _lock = threading.Lock()
-# Default a11y settings echoed to the web payload. announce_mode ("auto" |
-# "native") rides here so the echo exists before the launcher's first push.
-DEFAULT_SETTINGS = {"verbosity": "standard", "sound": False, "announce_mode": "auto"}
+# Default a11y settings echoed to the web payload (auto-a11y, 2026-08-23):
+# speech is VO-gated, so the pre-push default is SILENT ("off" — the launcher's
+# first heartbeat push replaces it with the computed value), and sound cues
+# default ON for everyone. announce_mode is gone with the window-level AX post
+# path; the per-request owner rule below keeps its module default ("web").
+DEFAULT_SETTINGS = {"verbosity": "off", "sound": True}
 _state = {
     "settings": dict(DEFAULT_SETTINGS),
     "announce_owner": "web",
@@ -242,6 +245,11 @@ def _collect_jobs():
                 {
                     "key": f"inference:{name}:app",
                     "type": "inference",
+                    # scope ("single" for a one-file conversion, absent for a
+                    # batch) lets the web jobLabel say "conversion" vs "batch
+                    # inference" (mirrors applio_launcher.inference_job_type);
+                    # enrich_jobs keys on type, which stays "inference".
+                    "scope": infer.get("scope"),
                     "name": name,
                     "status": infer.get("status", "running"),
                     "word_key": f"inference:{name}",
