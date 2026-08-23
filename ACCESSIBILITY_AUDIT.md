@@ -1010,3 +1010,13 @@ final "Output changed" line follow the terminal speech (~250ms later) — checkl
 chime; boot smoke green (settings {"verbosity":"off","sound":true} with no VO — auto-gating
 live). Gate notes: pytest with path-first argv trips the frozen dispatch — lead with -q (or
 per-file runners); post-build restore as usual.
+
+### Re-test round 3 (2026-08-23, user, dist 18:20): A-H OK, K OK
+All job announcements speak correctly (start/terminal for batch+single+preprocess+extract+training
+incl. a FAILED run+tts). CHIMES: afplay fired on every terminal (log: sound=True channel=afplay)
+but inaudible on the user's setup — OWNER RULING: "forget about the chimes" (parked; code stays,
+no further testing). Residual: some/many messages still prefixed/preceded by "Output changed"
+speech during jobs — decisive fix: remove output-change SPEECH entirely (visible-only in the
+Last-result region; jobs own the channel). J dashboard: rows do NOT speak their metrics —
+row-view values insufficient under VO; decisive fix: append the metrics summary to the visible
+cell text (objectValue) so the spoken row carries it. I untested this round.
