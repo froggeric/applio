@@ -16,12 +16,10 @@
      a batch showing "cancelling" while Stop takes effect) must never be
      announced as a terminal word. */
   var TERMINAL = ["completed", "failed", "error", "cancelled", "canceled", "interrupted"];
-  var verbosityNow = "standard";  // latest payload setting; gates output-change announces
   var lastLive = "", lastNav = null, pollFailures = 0;
   var seen = {};      // job key -> {status, ms, info}
   var primed = false;
-  var lastOutputText = {};  // textbox elem_id/text -> last announced value
-  var jobsRunning = false;  // latest payload has >=1 non-terminal job
+  var lastOutputText = {};  // textbox elem_id/text -> last recorded value
 
   /* SELECTORS pinned from a live-DOM session against the installed gradio
      6.20.0 (python app.py + devtools):
@@ -148,13 +146,11 @@
       lastOutputText[id] = value;
       if (!value || prev === undefined || prev === value || !prev) { return; }
       var short = value.length > 120 ? value.slice(0, 120) + "…" : value;
-      // While jobs run: visible record only. announce() REPLACES the shared
-      // live region, so per-textbox speech would drown the job's own start/
-      // milestone/terminal announcements (re-test round 2). Idle: speak,
-      // still verbosity-gated (AC: output-change announces respect verbosity).
-      if (!jobsRunning && verbosityNow !== "off") {
-        announce("Output changed: " + short);
-      }
+      // Visible record ONLY (re-test round 3, owner decision): output-change
+      // speech is gone entirely — the round-2 jobs gate still leaked in the
+      // lag windows around job start/terminal, and the live region is a
+      // single replacement channel, so jobs own the spoken word. Every
+      // change still lands in the Last-result region below.
       persistResult(short);
     });
   }
@@ -252,18 +248,11 @@
   function handlePayload(payload) {
     var owner = payload && payload.announce && payload.announce.owner;
     var verbosity = (payload && payload.settings && payload.settings.verbosity) || "standard";
-    verbosityNow = verbosity;
     var words = (payload && payload.words) || {};
     var jobs = (payload && payload.jobs) || [];
     var errors = (payload && payload.errors) || [];
     var current = {};
     jobs.forEach(function (job) { current[job.key] = job; });
-    // Live-job flag for announceOutputChanges (refreshed BEFORE the priming
-    // return so the first poll sets it too).
-    jobsRunning = false;
-    jobs.forEach(function (job) {
-      if (TERMINAL.indexOf(job.status) === -1) { jobsRunning = true; }
-    });
 
     if (!primed) {
       // First poll after load: adopt silently. Cost: a job that ENDED while

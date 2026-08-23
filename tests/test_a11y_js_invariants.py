@@ -60,24 +60,26 @@ def test_job_label_scope_aware():
     assert 't = job.type || "process"' in body, "non-inference types pass through"
 
 
-def test_jobs_running_gates_output_change_speech():
-    # Re-test round 2, fix B: while a job runs, per-textarea output changes
-    # must not SPEAK — announce() replaces the shared live region text, so
-    # the per-file batch updates drowned the job's own announcements. The
-    # visible Last-result record survives (persistResult still runs), and
-    # idle behavior is unchanged (still verbosity-gated).
+def test_output_change_speech_removed():
+    # Re-test round 3, owner decision: output-change speech is removed
+    # ENTIRELY — visible-only in the Last-result region; jobs own the spoken
+    # channel. The round-2 jobsRunning gate still leaked "Output changed"
+    # lines in the lag windows around job start/terminal (poll cadence vs
+    # textarea mutations), so announceOutputChanges must never speak at all.
     with open(JS, encoding="utf8") as fh:
         src = fh.read()
-    assert "var jobsRunning = false" in src, "module-level jobsRunning flag"
     body = _function_body("announceOutputChanges")
-    assert "jobsRunning" in body, (
-        "announceOutputChanges must gate its announce() on jobsRunning"
-    )
     assert "persistResult(short)" in body, (
-        "the visible Last-result record must survive the speech gate"
+        "the visible Last-result record must survive"
     )
-    assert "jobsRunning = " in _function_body("handlePayload"), (
-        "handlePayload must refresh jobsRunning from every poll payload"
+    assert "announce(" not in body, (
+        "output changes must never SPEAK (jobs own the spoken channel)"
+    )
+    assert "jobsRunning" not in src, (
+        "the jobsRunning flag is dead once no speech path reads it"
+    )
+    assert "verbosityNow" not in src, (
+        "verbosityNow was only read by the removed output-change gate"
     )
 
 
@@ -100,7 +102,7 @@ def run_all():
     test_heal_record_toggles_scoped_to_browse_anchor()
     test_failed_tail_wiring_present()
     test_job_label_scope_aware()
-    test_jobs_running_gates_output_change_speech()
+    test_output_change_speech_removed()
     test_one_combined_announce_per_poll()
     print("All a11y JS invariant tests passed (5).")
 

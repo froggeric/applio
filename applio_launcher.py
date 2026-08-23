@@ -864,9 +864,12 @@ def _menu_job_title(proc, training_epoch=None):
 def _row_ax_summary(proc, metrics=None, total_epoch=None, eta=None):
     """One-line VoiceOver summary of a dashboard row's live state (AppKit-free).
 
-    The visible cell text stays short; this is the FULL value a screen reader
-    speaks from the row view (stamped by _apply_row_ax) or the selection
-    announcement. Shapes:
+    Single wording source for a row's live metrics, consumed by BOTH spoken
+    channels and the visible cell text: the row-view AX value (stamped by
+    _apply_row_ax), the selection announcement, and — since re-test round 3 —
+    the runs-list cell itself via _row_display_text (VoiceOver does not
+    reliably speak the row view's accessibilityValue, so the metrics must be
+    IN the text). Shapes:
 
       training   "epoch {cur} of {total}, best loss {best}, ETA {eta}"
                  best is "{:.4g}" or "--" before the first evaluation
@@ -922,6 +925,33 @@ def _row_ax_summary(proc, metrics=None, total_epoch=None, eta=None):
             f"{pct:.0f} {_t('percent')}"
         )
     return ""
+
+
+def _row_display_text(proc, word, summary=""):
+    """Visible runs-list row text: "{word} — {Type}: {name}" (+ live metrics).
+
+    Re-test round 3 (2026-08-23): the row view's accessibilityValue proved
+    unreliable under VoiceOver, so ACTIVE rows now carry their metrics IN the
+    cell text — the dataSource appends ``summary`` (built from
+    _row_ax_summary via the controller's _ax_summary_for: epoch/best loss/ETA
+    for training, files/percent for inference). History rows (and active rows
+    whose type carries no metrics) pass no summary and keep the plain shape.
+    Capped at 80 chars — truncation eats the summary tail; the status/type/
+    name head always survives. AppKit-free, no I/O. ``word`` is the caller's
+    FINAL status string (already translated, or a raw status capitalize).
+    """
+    import applio_i18n
+
+    if not proc:
+        return ""
+    _t = applio_i18n.native_tr
+    proc_type = proc.get("type", _t("Unknown")).capitalize()
+    model_name = proc.get("model_name", "") or ""
+    base = f"{word} — {proc_type}: {model_name}"
+    text = f"{base} — {summary}" if summary else base
+    if len(text) > 80:
+        text = text[:79].rstrip() + "…"
+    return text
 
 
 def _sweep_stale_inference_progress():
@@ -4163,6 +4193,10 @@ class ProcessDashboardController(NSObject):
         "running"); history rows use the status stored when the run ended.
         A cancelling batch shows "Stopping" — checked BEFORE the probe,
         which synthesized inference procs force to False (never paused).
+        Active rows also embed their live metrics in the cell text (re-test
+        round 3: VoiceOver does not reliably speak the row view's
+        accessibilityValue) via _row_display_text + _ax_summary_for; history
+        rows keep the plain shape (no live metrics).
         """
         import applio_i18n
 
@@ -4176,9 +4210,7 @@ class ProcessDashboardController(NSObject):
                 word = _t("Paused")
             else:
                 word = _t("Running")
-            proc_type = proc.get("type", _t("Unknown")).capitalize()
-            model_name = proc.get("model_name", "")
-            return f"{word} — {proc_type}: {model_name}"
+            return _row_display_text(proc, word, summary=self._ax_summary_for(proc))
         else:
             recent_idx = row - len(self._active_processes)
             if recent_idx < len(self._recent_processes):
@@ -4195,9 +4227,7 @@ class ProcessDashboardController(NSObject):
                     "canceled": _t("Cancelled"),
                     "interrupted": _t("Interrupted"),
                 }.get(status, status.capitalize() or _t("Completed"))
-                proc_type = proc.get("type", _t("Unknown")).capitalize()
-                model_name = proc.get("model_name", "")
-                return f"{word} — {proc_type}: {model_name}"
+                return _row_display_text(proc, word)
         return ""
 
     # =================================================================
@@ -4279,9 +4309,11 @@ class ProcessDashboardController(NSObject):
     def _apply_row_ax(self, table, row, view=None):
         """Stamp AX label + value on one runs-list row (Phase 4 a11y).
 
-        The visible cell text stays short ("Running — Training: voice");
-        VoiceOver reads the row view's label + value instead, which carries
-        the live metrics summary. ``view`` is the freshly added row view from
+        Belt-and-braces alongside the cell text: since re-test round 3 the
+        visible cell text itself carries the live metrics (_row_display_text)
+        because VoiceOver does not reliably speak the row view's
+        accessibilityValue; this stamp remains the second channel (label +
+        value). ``view`` is the freshly added row view from
         the didAddRowView hook; when None (the willDisplayCell path) it is
         resolved via rowViewAtRow_. Skips silently when the row/proc/view
         cannot be resolved or the row view is already stamped (the two hooks
