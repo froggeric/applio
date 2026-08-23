@@ -1029,3 +1029,8 @@ visible cell text ("Running — Training: name — epoch 34 of 200, best loss 0.
 via module-level _row_display_text reusing _row_ax_summary; history rows byte-unchanged; dual
 row-view hook retained as belt-and-braces). Chimes PARKED per owner ("forget about the chimes")
 — code stays, no further testing.
+
+### Phase 4e gate (2026-08-23, re-validated independently)
+104/104 suites (per-file counts exact; an earlier 102 brief figure was arithmetic slip); build
+complete 42/0; bundle: zero jobsRunning/verbosityNow in the JS, persistResult x5, _row_display_text
+in the launcher bytecode; boot smoke green (auto-gating live, verbosity "off" with no VO).
