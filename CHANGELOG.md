@@ -145,7 +145,14 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Fixed
 - Completion chime now plays through the regular output channel (afplay) — previously inaudible when the alert-volume slider was muted.
-- Output-textbox changes no longer speak while a job is running; job start/milestone/terminal announcements are no longer drowned out (single merged live-region write per poll).
+- **Output changes are visible-only (Phase 4e).** Output-textbox changes are no longer spoken at
+  all — job start/milestone/terminal announcements own the spoken channel (a single merged
+  live-region write per poll, so simultaneous events announce as one line); the latest output
+  text stays readable in the persistent "Last result" region.
+- **Dashboard rows speak their metrics (Phase 4e).** Active-run rows now carry their live metrics
+  (epoch, best loss, ETA; inference files converted and percent) in the row's visible text, which
+  VoiceOver reads reliably — a row view's accessibility value alone proved unreliable under
+  VoiceOver.
 
 ### Removed
 

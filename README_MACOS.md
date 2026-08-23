@@ -569,6 +569,51 @@ The macOS build patches the training UI at build time to support additional samp
 
 *44.1kHz requires custom pretrained models (KLM50 exp1, VCTK v1)
 
+## Accessibility
+
+Applio is screen-reader-ready out of the box — nothing to configure.
+
+### VoiceOver
+
+Turn VoiceOver on (⌘F5) and Applio speaks automatically. Every job announces its start, progress
+milestones (25/50/75% during batch conversions), and completion or failure — conversions (single
+and batch), training (including preprocessing and feature-extraction), TTS, model downloads,
+voice blending, plugin installs, and realtime conversion. Speech follows VoiceOver: verbose while
+it runs, silent otherwise, adapting within a couple of seconds if you toggle it mid-session.
+
+### Visual cues
+
+- Completion and failure toasts appear for every job.
+- Output changes (converted audio, reports, statuses) are echoed in a persistent "Last result"
+  region, so the latest outcome stays readable after the moment passes.
+
+### Progress monitoring
+
+- **Process → Active Processes** (menu bar) lists live jobs with inline progress —
+  "Inference: model — 43% (2/3 files)", "Training: model — epoch 34/200" — refreshed every
+  2 seconds; choosing an entry opens the Progress Dashboard.
+- **Progress Dashboard** (⌘⇧P): each run's row reads its live metrics (epoch, best loss, ETA;
+  inference files converted and percent), the progress bar announces "Epoch 34 of 200, 45 percent"
+  instead of a bare percentage, Tab moves between the runs list and the action buttons, and
+  selecting a row speaks its summary.
+
+### Paths
+
+Every path field has a **Browse…** button that opens a native macOS folder/file picker. Typed
+paths are validated when you leave the field — a missing or wrong-type path produces a spoken
+warning toast.
+
+### Hidden preferences (advanced)
+
+Two escape hatches exist as hidden preference keys (defaults: `auto` and on):
+
+```bash
+# Speech: "auto" (VoiceOver-gated, default), "on" (always), or "off" (never)
+defaults write com.iahispano.applio a11y.speech -string auto
+# Disable the completion/failure sound cue
+defaults write com.iahispano.applio a11y.sound_cues -bool false
+```
+
 ## Architecture
 
 ### Bundle layout
@@ -605,12 +650,12 @@ standalone dev wrapper, so they stay in sync. Five menus:
 |------|-------|
 | **Applio** | About, Check for Updates…, Hide ⌘H, Quit ⌘Q |
 | **File** | Set Data Location…, Reveal in Finder (logs / datasets / audios / models / …) |
-| **Process** | Live `● <JobType>: <name>` status (e.g. `● Training:` / `● Inference:`) + Open Progress Dashboard ⌘⇧P (the pause/resume/stop controls live in the dashboard - see below) |
+| **Process** | Active Processes — live jobs with progress (e.g. `Inference: model — 43% (2/3 files)`); selecting one opens the dashboard — + Open Progress Dashboard ⌘⇧P + Open Debug Logs… ⌘L (the pause/resume/stop controls live in the dashboard - see below) |
 | **Window** | Minimize ⌘M, Zoom, Show Main |
 | **Help** | Studio Production Guide, Online Docs, Report an Issue, Discord |
 
 **Dynamic behavior (bundled app only):** the launcher binds the keyboard shortcuts and runs a
-2 s `NSTimer` that refreshes the Process status line and enables each Reveal-in-Finder item only
+2 s `NSTimer` that refreshes the Active Processes entries and enables each Reveal-in-Finder item only
 when its folder actually exists. The **File → data items are disabled until first run** (i.e. until
 you've chosen a data location).
 

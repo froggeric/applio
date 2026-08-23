@@ -461,7 +461,9 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   swaps upstream `app.py`'s inline `js=` entry for a `_applio_a11y_js(client_mode)` helper reading
   the file from `now_dir`/`sys._MEIPASS` (ships via the `("assets","assets")` datas). Creates a
   live region + "Last result" region client-side, polls the route every 2 s, announces job
-  milestones/terminals, heals accordion/tab semantics (selectors pinned against gradio 6.20.0), restores focus after gradio re-renders, and announces output-textbox changes.
+  milestones/terminals, heals accordion/tab semantics (selectors pinned against gradio 6.20.0), restores focus after gradio re-renders, and records output-textbox changes in the
+  "Last result" region (visible-ONLY since Phase 4e — output-change speech removed; one joined
+  `announce()` per poll is the payload's only speaker).
 - `applio_native_picker.py` — `native_browse(mode)` opens NSOpenPanel via `AppHelper.callAfter`
   (gradio handlers run on worker threads; the panel MUST run on the main AppKit thread; the worker
   blocks on an Event). Availability is an EXPLICIT `mark_native_loop_available()` flag set by the
@@ -510,9 +512,12 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract),
   `test_menu_jobs.py` (Phase 4: live menu titles), `test_dashboard_ax.py` (Phase 4: dashboard AX
   summaries), `test_a11y_auto_speech.py` (Phase 4c: `effective_speech` + hidden-keys plumbing) —
-  suite counts after Phase 4c: `test_menu_spec.py` 14 (incl. the a11y-submenu-GONE guard),
+  suite counts after Phase 4e: `test_menu_spec.py` 14 (incl. the a11y-submenu-GONE guard),
   `test_progress_api.py` 13 (echo without announce_mode + scope forwarding),
-  `test_a11y_js_invariants.py` 3 (incl. the scope-aware jobLabel invariant).
+  `test_a11y_js_invariants.py` 5 (scope-aware jobLabel, output-change-speech-removed, one
+  combined `announce()` per poll), `test_dashboard_ax.py` 7 (row AX summaries + 4e
+  `_row_display_text` cell-text metrics incl. the ≤80-char truncation), `test_a11y_auto_speech.py`
+  6 (`effective_speech` + hidden-keys plumbing + the afplay chime runner).
 - **Deferred to Phase 3:** error surfacing with full log tails (terminal announcements carry status
   words; full tails need upstream `gr.Error` routing); typed-path on-change validation for the
   remaining fields (Browse's `expanduser` is the partial Phase 2 fix); upstream Applio + gradio PRs
@@ -581,7 +586,16 @@ status parent disabled from the static spec). Dashboard AX: module-level
 `_row_ax_summary`/`_chart_ax_summary` + a DUAL row hook (the guaranteed `willDisplayCell` path
 stamps what the delegate hook can miss), template progress values ("Epoch N of M, P percent") +
 indeterminate-bar fix, key-view loop (process_table → stop → pause → reveal → open → back), and a
-selection announcement (VO-gated since Phase 4c). The toast + live-region layering at job
+selection announcement (VO-gated since Phase 4c). **Phase 4d/4e (round-2/3 fixes, `a4c9163b` +
+`0cf8b0a7`):** the terminal sound cue plays via `/usr/bin/afplay` on the REGULAR output channel
+(Basso on failure / Glass on success — NSSound honors the muted alert-volume slider), then was
+PARKED per owner ("forget about the chimes": code stays, no further testing); output-change
+SPEECH is removed entirely (the JS Last-result region is visible-only; one joined `announce()`
+per poll is the payload's only speaker — the jobsRunning gate and its lag windows are gone);
+and dashboard ACTIVE rows carry their metrics in the visible cell text (`_row_display_text`,
+≤80 chars, reusing `_row_ax_summary`; history rows byte-unchanged) because VoiceOver does not
+reliably speak a row view's accessibilityValue. Round 4 (2026-08-23) CONFIRMED WORKING by the
+owner — gate open; the start/terminal layering stands accepted-by-silence. The toast + live-region layering at job
 start/terminal under automatic (VO-gated) speech is
 DELIBERATE redundancy; the pre-agreed follow-up if the pass calls it spam: gate the JS
 start/terminal announcements on client!=native (NOT a revert).
