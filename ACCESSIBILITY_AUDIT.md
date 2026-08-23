@@ -923,3 +923,12 @@ fallback live); allowed_paths PROVEN with controls (user-dir output → HTTP 200
 /etc/hosts → 403 "File not allowed"). Build-log trap for future validators: stdout block-buffering
 reorders the last job_toasts blocks AFTER the PyInstaller lines — a mid-build grep sees 5/9; tally
 the COMPLETE log.
+
+### Phase 4+4b re-test plan (2026-08-23; dist 00:16:41 confirmed ready; announce_mode reset auto)
+Agent-verified before handoff: 93/93 suites; clean build (9/9 job_toasts, 0 miss); bundle markers
+all targets + single-tracking + allowed_paths; fresh boot route/settings/words OK; single-conversion
+toasts captured first-click on the built app; output HTTP 200 (20 MB) + /etc/hosts 403 control;
+`[A11y] post mode=` diagnostic lines in the launcher log. NOTE: announce_mode had been persisted
+"native" (menu toggle) — reset to "auto" via defaults before the pass. User section = the §7
+checklist expanded per-surface (single/batch/training/preprocess+extract/tts/blender/plugins/
+realtime/model-info/tensorboard/dashboard/menu/submenu/output-loading/layering-judgment).
