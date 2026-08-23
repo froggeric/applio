@@ -985,3 +985,12 @@ a11y.sound_cues→true (stale false from an old toggle would have silenced the c
 everyone-gets-sounds design), legacy a11y.announce_mode/a11y.verbosity deleted. Gate note: run
 test files per-file — a single pytest command over all 13 trips the launcher's frozen
 script-dispatch (INTERNALERROR).
+
+### Re-test round 2 (2026-08-23, user): A pass (no chime), B fail
+A single conversion: WORKS — "Started conversion: X" spoken, terminal "completed" spoken (log
+confirms both + terminal post ran). NO CHIME despite the terminal post path firing. B batch:
+start logged natively but NOT heard; no milestone speech; the only speech during batch was
+repeated "output changed ..." (the Phase-2 output-textbox announcements) — suspected drown-out
+or a job-announcement gap specific to batch. 18:02:29 effective=off = VO turned off (end of
+session). OWNER PROCESS RULING (standing): always INLINE full test details when requesting tests,
+never back-refer into the conversation.
