@@ -975,3 +975,13 @@ for the user, the app does the right thing by itself.
   `test_menu_spec.py` now 14 (incl. the a11y-submenu-GONE guard); `test_progress_api.py` now 13
   (echo without announce_mode + scope forwarding); `test_a11y_js_invariants.py` now 3 (incl. the
   scope-aware jobLabel invariant).
+
+### Phase 4c gate (2026-08-23, user-ordered, re-validated independently)
+97/97 suites (12 standalone incl. NEW test_a11y_auto_speech=5 + pytest 9); build complete 44/0;
+bundle carries effective_speech/voice_over_enabled/scope labels, zero announce_mode anywhere;
+boot JSON settings={"verbosity":"off"} (VO-off auto-gating LIVE, no VO in the gate session) with
+no announce_mode key; unit mapping auto+vo→verbose/off verified. Pref resets before the re-test:
+a11y.sound_cues→true (stale false from an old toggle would have silenced the confirmed
+everyone-gets-sounds design), legacy a11y.announce_mode/a11y.verbosity deleted. Gate note: run
+test files per-file — a single pytest command over all 13 trips the launcher's frozen
+script-dispatch (INTERNALERROR).
