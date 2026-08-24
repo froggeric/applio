@@ -1042,3 +1042,11 @@ dashboard rows speak their metrics, I model-info + TensorBoard confirmed. The 20
 bug") is SATISFIED for the fork surface — the upstream PR program is unblocked. Layering
 judgment item (toast + live-region on start/finish) never received an explicit verdict; current
 behavior (both speak) stands as accepted-by-silence.
+
+### Upstream program wave 1: BOTH PRs MERGED (2026-08-23 21:45Z)
+IAHispano/Applio#1270 (formant batch wiring) and #1271 (job lifecycle toasts) merged within ~2h
+of submission, no changes requested — the owner-edited texts passed. Consequences: the NEXT
+upstream sync inherits both changes; the fork's patches/patch_job_toasts.py becomes REDUNDANT
+(drop it + its 9 registrations + fixtures at sync time, after verifying upstream's merged shape
+matches our anchors); the fork's formant bug fixes itself via sync. Owner going-forward ruling
+(2026-08-24): future program PRs are created as DRAFTS until the owner marks them ready.
