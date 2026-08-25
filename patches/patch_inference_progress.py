@@ -12,10 +12,14 @@ This patch:
    - cooperatively cancel via inference_cancel.flag (no PID kill),
    - append a completed/cancelled/error entry to process_history.json,
    - normalise terminal status (running->completed, cancelling->cancelled),
-   - clear a stale cancel flag at start (robust against a stray Stop click),
-   - fire gradio toasts (start, 25/50/75% milestones, terminal, errors) via
-     _infer_toast (lazy gradio import - the engine module top stays gradio-free;
-     the concurrent-run raise is BEFORE the try, so it gets its own toast).
+   - clear a stale cancel flag at start (robust against a stray Stop click).
+   TOASTS: since upstream #1271/#1275 landed (merged 2026-08-25), the pristine
+   convert_audio_batch fires its own toasts via a module-level _toast helper
+   (start, 25/50/75% milestones, terminal, error). The rewrite KEEPS those
+   upstream calls verbatim (the fork no longer injects _infer_toast - that
+   would duplicate every announcement). Only the concurrent-run raise toast
+   is fork-added: it sits BEFORE the body's try, so upstream's except-handler
+   can never cover it.
 3. Removes the broken infer_pid.txt logic (frozen-CWD write was wrong; and in
    single-process os.getpid() == the whole app, so PID-kill quit the app).
 4. (a11y phase 4b) Wraps VoiceConverter.convert_audio's body in a try/except so
@@ -119,16 +123,6 @@ def _infer_add_to_history(entry):
     except OSError:
         pass
 
-def _infer_toast(msg):
-    """Fire a gradio toast from inside the batch loop (handler thread has
-    live LocalContext; falls back to print when headless)."""
-    try:
-        import gradio as gr
-
-        gr.Info(msg)
-    except Exception:
-        print(msg)
-
 def _infer_single_begin(model_path, audio_input_path, audio_output_path):
     """Single-conversion tracking (a11y phase 4b): claim inference_progress.json
     for a one-file convert_audio run so the menu/dashboard/a11y payload see it
@@ -214,23 +208,34 @@ def _infer_single_end(ctx, error=None):
 '''
 
 
-# Anchor regex: spans the method BODY only (the def + docstring L345-360 are preserved).
+# Anchor regex: spans the method BODY only (the def + docstring are preserved).
+# Bookends = the pristine pid-file open/remove pair; the MIDDLE pin
+# (_toast start call) verifies the post-#1275 shape, so a future upstream
+# rewrite of the toast text misses here (exit 2) instead of silently
+# replacing newer upstream code with this stale replacement.
 INFER_BATCH_ANCHOR = re.compile(
     r"        pid = os\.getpid\(\)\n        try:.*?"
+    r'_toast\(f"Batch conversion started: \{total\} files"\)\n.*?'
     r'os\.remove\(os\.path\.join\(now_dir, "assets", "infer_pid\.txt"\)\)\n',
     re.DOTALL,
 )
 
 
-INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): cooperative cancel + progress file.
-        # Replaces the PID-file mechanism (frozen-CWD write was broken; and in
-        # single-process os.getpid() == the whole app, so PID-kill quit the app).
+INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (fork): cooperative cancel + progress file
+        # + process history, layered onto upstream's #1271/#1275 toast-announced
+        # loop. Upstream's _toast calls are kept verbatim - the fork injects NO
+        # toast helper of its own (that would double every announcement). The
+        # PID-file mechanism is gone on purpose: the frozen-CWD write was broken,
+        # and in single-process os.getpid() == the whole app, so PID-kill quit
+        # the app.
         existing = _read_infer_progress()
         if existing and existing.get("status") == "running":
             # This raise sits BEFORE the body's try:, so the except-handler
             # toast below can never cover it - announce here, then raise.
-            _infer_toast(
-                "Batch conversion failed: another batch inference is already running. Stop it first from the Process Dashboard."
+            _toast(
+                "Batch conversion failed: another batch inference is already running."
+                " Stop it first from the Process Dashboard.",
+                warning=True,
             )
             raise RuntimeError(
                 "Another batch inference is already running. Stop it first from the Process Dashboard."
@@ -253,7 +258,7 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
         processed = converted = skipped = 0
         _next_milestone = 25
         status = "running"
-        _infer_toast(f"Batch conversion started: {total} files")
+        _toast(f"Batch conversion started: {total} files")
         _write_infer_progress({
             "version": 1, "type": "inference", "status": status,
             "model_name": _model_name, "input_folder": audio_input_paths,
@@ -292,7 +297,6 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
                 new_output = _infer_os.path.join(audio_output_path, new_output)
                 if _infer_os.path.exists(new_output):
                     skipped += 1
-                    processed += 1
                 else:
                     self.convert_audio(
                         audio_input_path=new_input,
@@ -300,7 +304,7 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
                         **kwargs,
                     )
                     converted += 1
-                    processed += 1
+                processed = converted + skipped
                 nxt = audio_files[idx + 1] if idx + 1 < total else ""
                 _write_infer_progress({
                     "version": 1, "type": "inference", "status": status,
@@ -310,19 +314,17 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
                     "current_file": nxt, "started_at": start_time,
                     "ended_at": None, "elapsed": None, "error": None,
                 })
-                # Milestone toast: threshold-FIRST-crossing (fires at the first
-                # file past each threshold; the label carries the threshold).
-                # processed < total suppresses the 100% milestone (it would
-                # double-announce with the terminal toast); total >= 8 keeps
-                # small batches toast-free between start and terminal.
+                # Milestone toast (upstream #1275): fires at the first file past
+                # each threshold (the label carries the threshold). processed
+                # < total suppresses the 100% milestone (it would double-announce
+                # with the terminal toast); total >= 8 keeps small batches
+                # toast-free between start and terminal.
                 if (
                     total >= 8
                     and processed < total
                     and processed * 100 // total >= _next_milestone
                 ):
-                    _infer_toast(
-                        f"{processed}/{total} files converted ({_next_milestone}%)"
-                    )
+                    _toast(f"{processed}/{total} files converted ({_next_milestone}%)")
                     _next_milestone += 25
             # Normalise terminal status (loop exited without raise).
             if status == "running":
@@ -331,6 +333,9 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
                 status = "cancelled"
             ended_at = _infer_time.time()
             elapsed = ended_at - start_time
+            if status == "completed":
+                print(f"Conversion completed at '{audio_input_paths}'.")
+                print(f"Batch conversion completed in {elapsed:.2f} seconds.")
             _write_infer_progress({
                 "version": 1, "type": "inference", "status": status,
                 "model_name": _model_name, "input_folder": audio_input_paths,
@@ -339,12 +344,10 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
                 "current_file": "", "started_at": start_time,
                 "ended_at": ended_at, "elapsed": elapsed, "error": None,
             })
-            _infer_toast(
-                f"Batch conversion {status}: {converted} converted, {skipped} skipped in {elapsed:.0f}s"
+            _toast(
+                f"Batch conversion {status}: {converted} converted, "
+                f"{skipped} skipped in {elapsed:.0f}s"
             )
-            if status == "completed":
-                print(f"Conversion completed at '{audio_input_paths}'.")
-                print(f"Batch conversion completed in {elapsed:.2f} seconds.")
             _infer_add_to_history({
                 "type": "inference", "model_name": _model_name,
                 "started_at": _infer_dt.datetime.fromtimestamp(start_time).isoformat(),
@@ -370,7 +373,7 @@ INFER_BATCH_REPLACEMENT = r"""        # Inference progress tracking (3.6.3.7): c
                 "status": "error", "total": total,
                 "converted": converted, "skipped": skipped,
             })
-            _infer_toast("Batch conversion failed: " + str(_infer_exc))
+            _toast(f"Batch conversion failed: {_infer_exc}", warning=True)
             raise
         finally:
             # Always remove the cancel flag (a post-completion Stop click is a no-op;

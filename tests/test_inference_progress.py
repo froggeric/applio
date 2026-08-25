@@ -111,17 +111,20 @@ def test_skip_semantics_eta_uses_converted_only():
 
 def test_batch_toast_calls_in_patched_engine():
     patched = _patched_infer_source()
-    # Start toast: after the counters (+ milestone init), before the initial write.
+    # Start toast (upstream #1271): after the counters (+ milestone init),
+    # before the initial write. Upstream's _toast helper carries the call -
+    # the fork injects no toast helper of its own.
     counters = patched.index("processed = converted = skipped = 0")
     milestone_init = patched.index("_next_milestone = 25")
     start_toast = patched.index(
-        '_infer_toast(f"Batch conversion started: {total} files")'
+        '_toast(f"Batch conversion started: {total} files")'
     )
     initial_write = patched.index('"processed": 0, "converted": 0, "skipped": 0,')
     assert counters < milestone_init < start_toast < initial_write
-    # Milestone toast: threshold-first-crossing guard at the loop tail (after
-    # the per-file write). total>=8 keeps small batches spam-free; the
-    # processed<total term suppresses the 100% milestone double-announcement.
+    # Milestone toast (upstream #1275): threshold-first-crossing guard at the
+    # loop tail (after the per-file write). total>=8 keeps small batches
+    # spam-free; the processed<total term suppresses the 100% milestone
+    # double-announcement.
     per_file_write = patched.index('"current_file": nxt,')
     guard = patched.index("and processed * 100 // total >= _next_milestone")
     assert per_file_write < guard
@@ -130,47 +133,51 @@ def test_batch_toast_calls_in_patched_engine():
     assert milestone_msg in patched
     assert patched.index(milestone_msg) < patched.index("_next_milestone += 25")
     # Terminal toast: after the terminal write, before the history append.
+    # {status} renders as upstream's "completed" wording on normal runs and
+    # carries "cancelled" for fork-canceled ones.
     terminal_write = patched.index(
         '"ended_at": ended_at, "elapsed": elapsed, "error": None,'
     )
     terminal_toast = patched.index(
-        'f"Batch conversion {status}: {converted} converted, {skipped} skipped in {elapsed:.0f}s"'
+        'f"Batch conversion {status}: {converted} converted, "'
     )
     first_hist_call = patched.index("_infer_add_to_history({")
     assert terminal_write < terminal_toast < first_hist_call
     # Error site 1: the except handler, BEFORE the re-raise (variable is
-    # _infer_exc — never e).
+    # _infer_exc — never e; warning=True matches upstream's helper).
     exc_toast = patched.index(
-        '_infer_toast("Batch conversion failed: " + str(_infer_exc))'
+        '_toast(f"Batch conversion failed: {_infer_exc}", warning=True)'
     )
     assert patched.index("except Exception as _infer_exc:") < exc_toast
     # Error site 2: the concurrent-run raise sits BEFORE the body's try, so the
     # except handler can never cover it — the toast must precede that raise.
-    conc_toast = patched.index(
-        "Batch conversion failed: another batch inference is already running."
-        " Stop it first from the Process Dashboard."
-    )
+    conc_toast = patched.index("another batch inference is already running.")
     conc_raise = patched.index("raise RuntimeError(")
     assert conc_toast < conc_raise
-    assert "_infer_toast(" in patched  # helper is defined and used
+    # The fork no longer injects a toast helper: upstream's _toast (present
+    # exactly once, pristine) carries every announcement above.
+    assert "def _infer_toast(" not in patched
+    assert patched.count("def _toast(") == 1
 
 
 def test_gradio_import_only_inside_toast_helper():
     patched = _patched_infer_source()
     gradio_lines = [ln for ln in patched.splitlines() if "import gradio" in ln]
     assert len(gradio_lines) == 1, (
-        f"expected exactly 1 gradio import (lazy, inside _infer_toast), "
+        f"expected exactly 1 gradio import (lazy, inside upstream's _toast), "
         f"got {gradio_lines}"
     )
     assert gradio_lines[0] == "        import gradio as gr"  # indented = function-local
-    # ...and it lives inside the _infer_toast body (never at module top of the
-    # generated engine code): after its def, before the class injection point.
-    toast_def = patched.index("def _infer_toast(")
+    # ...and it lives inside upstream's _toast body (never at module top of
+    # the generated engine code): after its def, before the class injection
+    # point (the fork's helpers block sits between _toast and the class).
+    toast_def = patched.index("def _toast(")
     gradio_imp = patched.index("import gradio as gr")
     class_idx = patched.index("class VoiceConverter:")
     assert toast_def < gradio_imp < class_idx
     assert patched[:toast_def].count("import gradio") == 0
-    assert "gr.Info(msg)" in patched
+    assert "(gr.Warning if warning else gr.Info)(message)" in patched
+    assert "def _infer_toast(" not in patched
 
 
 def _load_helpers():
