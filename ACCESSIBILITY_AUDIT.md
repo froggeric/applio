@@ -1050,3 +1050,8 @@ upstream sync inherits both changes; the fork's patches/patch_job_toasts.py beco
 (drop it + its 9 registrations + fixtures at sync time, after verifying upstream's merged shape
 matches our anchors); the fork's formant bug fixes itself via sync. Owner going-forward ruling
 (2026-08-24): future program PRs are created as DRAFTS until the owner marks them ready.
+
+### Upstream program: PR #1275 MERGED (2026-08-25)
+Three for three: #1270 (formant wiring), #1271 (lifecycle toasts), #1275 (batch milestones)
+all merged with no changes requested. Fork is now 3+ upstream merges behind; next sync drops
+patch_job_toasts.py (upstream carries the toasts natively).
