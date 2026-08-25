@@ -918,60 +918,6 @@ def pre_build_patch():
             "app.py - inject a11y web payload",
             "file",
         ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/inference/inference.py",
-            "inference.py - lifecycle toasts (single conversion)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/tts/tts.py",
-            "tts.py - lifecycle toasts (TTS conversion)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/train/train.py",
-            "train.py - lifecycle toasts (train start/finish, preprocess, extract)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/download/download.py",
-            "download.py - lifecycle toasts (model download)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/voice_blender/voice_blender.py",
-            "voice_blender.py - lifecycle toasts (blend, drop confirm)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/plugins/plugins.py",
-            "plugins.py - lifecycle toasts (plugin install)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/realtime/realtime.py",
-            "realtime.py - lifecycle toasts (engine start/failure)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/extra/sections/processing.py",
-            "processing.py - lifecycle toasts (model information)",
-            "dir",
-        ),
-        (
-            "patches/patch_job_toasts.py",
-            "tabs/tensorboard/tensorboard.py",
-            "tensorboard.py - lifecycle toasts (TensorBoard ready)",
-            "dir",
-        ),
     ]
 
     # Validate patch order matches dependencies

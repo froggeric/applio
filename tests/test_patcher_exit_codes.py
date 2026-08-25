@@ -24,15 +24,6 @@ CASES = [
     ("patches/patch_progress_routes.py", "app.py", "prevent_thread_lock=", "file"),
     ("patches/patch_web_a11y_payload.py", "app.py", "def launch_gradio(", "file"),
     ("patches/patch_train_paths.py", "rvc/train/train.py", "current_dir = os.getcwd()", "dir"),
-    # patch_job_toasts resolves tts.py by basename inside the dir and skips
-    # its three other targets (absent = non-fatal); mutating the
-    # enforce_terms def line makes the def-first scan miss -> exit 2.
-    (
-        "patches/patch_job_toasts.py",
-        "tabs/tts/tts.py",
-        "def enforce_terms(terms_accepted, *args):",
-        "dir",
-    ),
 ]
 # All CASES anchors occur EXACTLY ONCE in their pristine source (verified
 # 2026-08-21) — replace-all is still used defensively below.
