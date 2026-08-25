@@ -1065,3 +1065,8 @@ re-pointed onto upstream's post-#1275 batch block (middle-pin anchor so drift mi
 fork machinery retained; upstream toasts preserved verbatim; coexistence proven in the bundle:
 _toast×6 + _write_infer_progress×8, _infer_toast×0). Gate: 104/104 suites, build complete 38/38,
 boot smoke green. Counting notes: patches_to_apply = 38 tuples; full-chain total 104.
+
+### Upstream program: PR #1276 MERGED (2026-08-25 12:01Z) — toast family COMPLETE
+#1270/#1271/#1275/#1276 all merged, no changes requested across the series. Consequence for the
+NEXT fork sync: the slim 5-target patch_job_toasts is now fully redundant (upstream carries all
+nine toast surfaces) — drop it + registrations + fixtures at sync, after anchor verification.
