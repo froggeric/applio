@@ -114,10 +114,17 @@ git merge upstream/main
 ```
 
 The fork keeps macOS work in separate files, so the git merge is nearly conflict-free
-(last sync 3.6.3 → 3.6.4 on 2026-08-13: **conflict-free** — all 12 upstream-changed files were
+(last sync within 3.6.4 on 2026-08-25: **conflict-free** — merged our own upstreamed PRs
+#1270 formant-batch wiring, #1271 job-lifecycle toasts, #1275 batch-milestone toasts, a formatter
+run, and an upstream preprocess int→float fix; consequence: `patches/patch_job_toasts.py` DELETED
+— upstream now toasts natively in inference/tts/train/download (the patcher's anchors there
+missed, exit 2) — and `patches/patch_inference_progress.py` re-pointed onto upstream's post-#1275
+`convert_audio_batch`: it now KEEPS upstream's `_toast` calls verbatim and injects only the
+fork machinery (progress file, cancel, history, makedirs); `_infer_toast` is gone. Prior sync
+3.6.3 → 3.6.4 on 2026-08-13: **conflict-free** — all 12 upstream-changed files were
 pristine on the fork side, and the CLI-revamp rewrite of `core.py` left the `run_*_script` functions
 our patches anchor on untouched, so all 24 patches applied with zero re-pointing; new dep `click`
-pinned in `requirements_macos.txt`). Prior sync 3.6.2 → 3.6.3 on 2026-07-24 touched `.gitignore`,
+pinned in `requirements_macos.txt`. Prior sync 3.6.2 → 3.6.3 on 2026-07-24 touched `.gitignore`,
 `rvc/train/preprocess/preprocess.py`, and `tabs/train/train.py` on both sides; only `.gitignore`
 actually conflicted.
 **The real work after a merge is re-pointing build-time patches** (see "Re-pointing patches
@@ -282,7 +289,7 @@ history browsing.
 - No microphone entitlement needed - pywebview wrapper doesn't capture audio; Gradio handles it via browser
 - **Patcher escape sequences:** In triple-quoted strings, `\\n` produces literal newline. Use `chr(10)` for newlines in patched code.
 - Patches in `patches/` are applied to source files before PyInstaller, then source files are restored to pristine state
-- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (4 patchers touch it: dataset_paths, train_44100, browse_buttons, job_toasts). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
+- **`post_build_restore` reliably leaves `tabs/train/train.py` dirty** (3 patchers touch it: dataset_paths, train_44100, browse_buttons). After EVERY build run `git checkout -- assets core.py rvc tabs`; never commit it patched
 - PyInstaller cleans `dist/` at start - never delete while builds running
 - Before `rm -rf dist build`: no `Applio` process may run from `dist/` (it holds file handles, so `rm` fails with "Directory not empty"). Quit it (`osascript -e 'tell application "Applio" to quit'`) + `sleep 3` first
 - Build size: ~1.6GB lite (post-3.6.3 dependency stack; ~2GB models download on first launch)
@@ -505,8 +512,7 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
 - **Patcher order note:** the two `app.py` patchers (`patch_progress_routes`, `patch_web_a11y_payload`)
   anchor on DISJOINT text (the `prevent_thread_lock=` kwarg line + TensorBoard import vs the
   `"js": (` entry + `def launch_gradio(`) and are order-independent; `patch_browse_buttons`'s
-  insertions collide with none of the other `tabs/train/train.py` patchers (Phase 4's
-  `patch_job_toasts` also touches it — see the Phase 4 paragraph). Tests:
+  insertions collide with none of the other `tabs/train/train.py` patchers. Tests:
   `tests/test_applio_a11y.py`, `test_native_picker.py`, `test_browse_ui.py`, `test_progress_api.py`,
   `test_patch_fixtures.py`, `test_applio_i18n.py`, `test_a11y_js_invariants.py` (Phase 3: payload-JS
   invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract),
@@ -551,18 +557,24 @@ Phase 4c (2026-08-23, `6efb07e9`) made this AUTOMATIC and deleted the toggle: th
 `a11y.announce.*` menu keys, the `a11y.announce_mode` defaults key, `_apply_announce_mode`, and
 the window-level AX post path are GONE (`set_announce_owner` remains in `applio_progress_api`
 for API completeness); speech is VO-gated per the Phase 2 a11y-settings bullet above.
-**Batch-toast split rule (Phase 4b wave, 2026-08-22/23):** TAB-side toasts
+**Batch-toast split rule (Phase 4b wave, 2026-08-22/23; TAB side retired by the 2026-08-25
+upstream merge of #1271/#1275 — the paragraph below is kept as history):** TAB-side toasts
 (`patches/patch_job_toasts.py`, registered as 9 dir-type tuples — inference.py, tts.py, train.py,
 download.py, voice_blender.py, plugins.py, realtime.py, processing.py (model info), tensorboard.py)
-cover single-file inference, tts (start/finish/error), train start + TERMINAL (owner ruling
+coverED single-file inference, tts (start/finish/error), train start + TERMINAL (owner ruling
 2026-08-22: `run_train_script` blocks the handler thread for hours, so toasting its return
 announces completion), preprocess/extract/download wrappers (error|failed predicate), blender mix
 + both drop confirmations, plugins start/error (finish is upstream's own gr.Info),
 realtime start/failure (GENERATOR wrapper scanning yielded statuses — broadened predicate:
 error/failed/stopping/aborting/"please select"/"not provided"; benign yields silent), model-info
-finish, and TensorBoard ready — jobs whose mid-run progress the tab thread cannot see;
-ENGINE-side toasts (in `patches/patch_inference_progress.py`, `_infer_toast` lazy-imports gradio
-so the engine module top stays gradio-free) cover batch start / 25-50-75 % milestones (total≥8,
+finish, and TensorBoard ready — jobs whose mid-run progress the tab thread cannot see.
+The 2026-08-25 sync DELETED the patcher: upstream #1271 now carries the
+inference/tts/train/download toasts natively (the patcher's anchors there missed → build-fatal
+exit 2), and the remaining five targets (voice_blender, plugins, realtime, model-info,
+tensorboard) lost their toasts with it — noted as future upstream-PR candidates.
+ENGINE-side toasts: since the same merge, upstream #1275 provides them natively
+(module-level `_toast`, lazy gradio import) and the re-pointed
+`patches/patch_inference_progress.py` KEEPS those calls verbatim — batch start / 25-50-75 % milestones (total≥8,
 threshold-FIRST-crossing; terminal suppresses the 100 % milestone) / terminal (counts+elapsed) +
 errors at BOTH raise sites (incl. the concurrent-run RuntimeError, which fires BEFORE the try).
 SINGLE conversions are ALSO tracked engine-side (Phase 4b): `_infer_single_begin/_infer_single_end`

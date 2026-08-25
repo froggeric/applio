@@ -5,6 +5,23 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ## [Unreleased]
 
+### Changed
+
+- **Upstream sync 2026-08-25 (within 3.6.4).** Merged our upstreamed PRs — #1270 (batch formant
+  toggle wired to the batch checkbox), #1271 (job lifecycle toasts), #1275 (batch conversion
+  milestone toasts) — plus a formatter run and an upstream preprocess int→float fix.
+  Patch-surface consequences:
+  - `patches/patch_job_toasts.py` is deleted with its 9 build registrations and test coverage:
+    upstream #1271 now carries the inference/tts/train/download toasts natively, so the fork
+    patcher would have double-toasted and its anchors there miss (build-fatal by design).
+    The five targets upstream did not take (voice blender, plugin install, realtime start,
+    model information, TensorBoard ready) lose their toasts with it; they remain candidates
+    for a follow-up upstream PR.
+  - `patches/patch_inference_progress.py` is re-pointed onto upstream's rewritten
+    `convert_audio_batch`: it now keeps upstream's `_toast` announcements verbatim and injects
+    only the fork machinery (progress file, cooperative cancel, process history, output-dir
+    makedirs). The fork's `_infer_toast` helper is gone — one toast path, upstream's.
+
 ### Added
 
 - **Accessibility, Phase 4 (VoiceOver-pass fixes).** The five findings from the 2026-08-22
