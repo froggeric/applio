@@ -1055,3 +1055,13 @@ matches our anchors); the fork's formant bug fixes itself via sync. Owner going-
 Three for three: #1270 (formant wiring), #1271 (lifecycle toasts), #1275 (batch milestones)
 all merged with no changes requested. Fork is now 3+ upstream merges behind; next sync drops
 patch_job_toasts.py (upstream carries the toasts natively).
+
+### Upstream sync completed (2026-08-25, Track A, gated)
+Merged upstream (our #1270/#1271/#1275 + formatter runs; conflict-free; zero new upstream-file
+deltas). patch_job_toasts DELETED then RESTORED as the slim 5-target fork-only patcher
+(blender/plugins/realtime/model-info/tensorboard — dead upstream, owner-validated here; the 4
+now-upstream targets dropped with a never-re-enter fixture guard). patch_inference_progress
+re-pointed onto upstream's post-#1275 batch block (middle-pin anchor so drift misses loudly;
+fork machinery retained; upstream toasts preserved verbatim; coexistence proven in the bundle:
+_toast×6 + _write_infer_progress×8, _infer_toast×0). Gate: 104/104 suites, build complete 38/38,
+boot smoke green. Counting notes: patches_to_apply = 38 tuples; full-chain total 104.
