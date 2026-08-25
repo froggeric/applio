@@ -1169,9 +1169,17 @@ def inference_tab():
                 gr.Info(message)
                 return message, None
             try:
-                return run_infer_script(*args)
+                gr.Info(i18n("Converting audio..."))
+                result = run_infer_script(*args)
+                gr.Info(result[0])
+                return result
             except Exception:
                 traceback.print_exc()
+                gr.Warning(
+                    i18n(
+                        "An error occurred during audio conversion. Please check the console logs for more details."
+                    )
+                )
                 return (
                     "An error occurred during audio conversion. Please check the console logs for more details.",
                     None,
@@ -1923,7 +1931,7 @@ def inference_tab():
     )
     formant_shifting_batch.change(
         fn=toggle_visible_formant_shifting,
-        inputs=[formant_shifting],
+        inputs=[formant_shifting_batch],
         outputs=[
             formant_row_batch,
             formant_preset_batch,
