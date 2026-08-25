@@ -2,16 +2,16 @@
 
 ## Title
 
-Label controls so screen readers can tell them apart
+Accessibility improvements: differentiate controls through unique labels, for screen readers
 
 ## Body
 
-Thirteen text boxes across the app are all labelled "Output Information", and seven buttons are just "Refresh". The training page alone shows three of those boxes and two of those buttons at once, so listing a page's controls with a screen reader gives you no way to tell which job an output belongs to, or what a button reloads, without finding it visually first.
+There are 13 text boxes across the app, with the same label, "Output Information"; and 7 buttons all titled "Refresh". This makes it impossible for a screen reader to differentiate them. For example, the training page shows three "Output information" boxes and 2 "Refresh" buttons at once, making it impossible for a user requiring accessibility to know which one to use or view.
 
-Every one of those now says what it is: "Preprocess output", "Feature extraction output", "Training output", "Conversion output" versus "Batch conversion output", and so on. The Refresh buttons get the same treatment as the specific ones Applio already has ("Refresh Presets", "Refresh Audio Devices", "Refresh embedders"), each naming what it actually reloads: "Refresh formant presets", "Refresh models and indexes", "Refresh models and datasets".
+After this PR, each of those text boxes will clearly state what it is: "Preprocess output", "Feature extraction output", "Training output", "Conversion output", "Batch conversion output", etc. Same for the refresh buttons: "Refresh formant presets", "Refresh models and indexes", "Refresh models and datasets" (applio already has "Refresh Presets", "Refresh Audio Devices", "Refresh embedders").
 
-The voice blender had two drop zones and two path fields with identical names; they are now first/second. The drop zone labels only mentioned dragging, but each one is also a keyboard-operable browse button, so the new wording mentions both ("Drop a plugin.zip here or use the browse button to install it"). The TensorBoard iframe gets a title so it is announced as something other than an empty frame.
+As for the voice blender, it has 2 drop zones and 2 path fields with identical names; they are now first and second. The drop zone labels only mentioned dragging, but since they also a keyboard operable browse button, the new wording is updated to mention both methods ("Drop a plugin.zip here or use the browse button to install it"). The tensorboard iframe was missing a title; adding it so that it gets a announced properly by a screen reader instead an empty frame.
 
-The new labels go through the translation setup like the rest of the UI; until a locale catches up it shows the English text, which is how new strings always behave in Applio. Two small notes: one of the thirteen renamed text boxes lives in a file that isn't mounted anywhere (renamed anyway so a search finds no strays), and the realtime Refresh button also reloads audio devices in full mode, but the label says "Refresh models and indexes" because that is what it does in client mode and a dedicated device button already exists.
+All the new labels use the same translation as the rest of the UI.
 
-Checked with VoiceOver: you can tell every control apart.
+Verified with voiceover on macos.
