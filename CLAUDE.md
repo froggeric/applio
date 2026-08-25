@@ -118,7 +118,9 @@ The fork keeps macOS work in separate files, so the git merge is nearly conflict
 #1270 formant-batch wiring, #1271 job-lifecycle toasts, #1275 batch-milestone toasts, a formatter
 run, and an upstream preprocess int→float fix; consequence: `patches/patch_job_toasts.py` DELETED
 — upstream now toasts natively in inference/tts/train/download (the patcher's anchors there
-missed, exit 2) — and `patches/patch_inference_progress.py` re-pointed onto upstream's post-#1275
+missed, exit 2) and same-day RESTORED as a slim 5-target patcher for the surfaces upstream
+did NOT take (voice_blender, plugins, realtime, model-info, tensorboard — `patch_job_toasts.py`,
+pending the Track B upstream PR) — and `patches/patch_inference_progress.py` re-pointed onto upstream's post-#1275
 `convert_audio_batch`: it now KEEPS upstream's `_toast` calls verbatim and injects only the
 fork machinery (progress file, cancel, history, makedirs); `_infer_toast` is gone. Prior sync
 3.6.3 → 3.6.4 on 2026-08-13: **conflict-free** — all 12 upstream-changed files were
@@ -568,10 +570,13 @@ announces completion), preprocess/extract/download wrappers (error|failed predic
 realtime start/failure (GENERATOR wrapper scanning yielded statuses — broadened predicate:
 error/failed/stopping/aborting/"please select"/"not provided"; benign yields silent), model-info
 finish, and TensorBoard ready — jobs whose mid-run progress the tab thread cannot see.
-The 2026-08-25 sync DELETED the patcher: upstream #1271 now carries the
+The 2026-08-25 sync slimmed the patcher to those five targets: upstream #1271 now carries the
 inference/tts/train/download toasts natively (the patcher's anchors there missed → build-fatal
-exit 2), and the remaining five targets (voice_blender, plugins, realtime, model-info,
-tensorboard) lost their toasts with it — noted as future upstream-PR candidates.
+exit 2; re-adding them would double-toast), so voice_blender (blend mix + both drop
+confirmations), plugins (start/error), realtime (start/failure, broadened yield predicate),
+model-info (finish) and tensorboard (ready) remain fork-patched — RESTORED pending the Track B
+upstream PR (their sub-patchers/markers kept verbatim; `tabs/train/train.py` is no longer a
+target, so `post_build_restore`'s train.py patcher count stays 3).
 ENGINE-side toasts: since the same merge, upstream #1275 provides them natively
 (module-level `_toast`, lazy gradio import) and the re-pointed
 `patches/patch_inference_progress.py` KEEPS those calls verbatim — batch start / 25-50-75 % milestones (total≥8,

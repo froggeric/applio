@@ -24,6 +24,16 @@ CASES = [
     ("patches/patch_progress_routes.py", "app.py", "prevent_thread_lock=", "file"),
     ("patches/patch_web_a11y_payload.py", "app.py", "def launch_gradio(", "file"),
     ("patches/patch_train_paths.py", "rvc/train/train.py", "current_dir = os.getcwd()", "dir"),
+    # patch_job_toasts resolves voice_blender.py by basename inside the dir and
+    # skips its four other targets (absent = non-fatal); mutating the
+    # update_model_fusion def line makes the blend-drop sub-patch miss
+    # (patch_voice_blender propagates any sub-miss) -> exit 2.
+    (
+        "patches/patch_job_toasts.py",
+        "tabs/voice_blender/voice_blender.py",
+        "def update_model_fusion(dropbox):",
+        "dir",
+    ),
 ]
 # All CASES anchors occur EXACTLY ONCE in their pristine source (verified
 # 2026-08-21) — replace-all is still used defensively below.

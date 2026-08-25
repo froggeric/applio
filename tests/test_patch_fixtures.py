@@ -236,13 +236,114 @@ def test_web_payload_patch():
         os.unlink(tf.name)
 
 
+def test_job_toasts_patch():
+    # Slimmed 2026-08-25 to the five fork-only targets (single inference, tts,
+    # train, download are upstream's since #1271 - patching them would
+    # double-toast; their sub-patchers are deleted from the patcher).
+    toasts = _load("patch_job_toasts", "patches/patch_job_toasts.py")
+    expected = {
+        "tabs/voice_blender/voice_blender.py": [
+            "gr.Info(  # _APPLIO_TOASTS_BLEND_DROP",
+            "def _applio_blend_toast(*args):  # _APPLIO_TOASTS_BLENDER",
+            'gr.Info(i18n("Blending models..."))',
+            "result = run_model_blender_script(*args)",
+            "message = result[0] if isinstance(result, tuple) else result",
+            'if "error" in message.lower() or "failed" in message.lower():',
+            "fn=_applio_blend_toast,",
+        ],
+        "tabs/plugins/plugins.py": [
+            "def _applio_plugin_toast(dropbox):  # _APPLIO_TOASTS_PLUGINS",
+            'gr.Info(i18n("Installing plugin..."))',
+            "return plugins_core.save_plugin_dropbox(dropbox)",
+            "except gr.Error:",
+            "fn=_applio_plugin_toast,",
+        ],
+        "tabs/realtime/realtime.py": [
+            "def _applio_realtime_toast(terms_accepted, *args):  #"
+            " _APPLIO_TOASTS_REALTIME",
+            'gr.Info(i18n("Starting real-time conversion..."))',
+            "for update in enforce_terms(terms_accepted, *args):",
+            # Broadened yield markers: start_realtime yields validation
+            # statuses that never raise (devices/monitor/model-path/
+            # bad-device-format) - pin each one so none silently drops.
+            "failures = (",
+            '                "stopping",',
+            '                "aborting",',
+            '                "please select",',
+            '                "not provided",',
+            "marker in status.lower() for marker in failures",
+            "fn=_applio_realtime_toast,",
+        ],
+        "tabs/extra/sections/processing.py": [
+            "def _applio_model_info_toast(pth_path):  # _APPLIO_TOASTS_MODEL_INFO",
+            "result = run_model_information_script(pth_path)",
+            'gr.Info(i18n("Model information loaded."))',
+            "fn=_applio_model_info_toast,",
+        ],
+        "tabs/tensorboard/tensorboard.py": [
+            'gr.Info(i18n("TensorBoard ready."))  # _APPLIO_TOASTS_TENSORBOARD',
+        ],
+    }
+    out = {}
+    for repo_rel, basename, fn in toasts.TARGETS:
+        src = open(os.path.join(REPO, repo_rel), encoding="utf8").read()
+        assert "_APPLIO_TOASTS_" not in src, (
+            f"{repo_rel} is dirty (patched?) - restore first"
+        )
+        patched, status = fn(src)
+        assert status == "patched", f"{repo_rel}: status={status}"
+        for line in expected[repo_rel]:
+            assert line in patched, f"{repo_rel}: missing injected line {line!r}"
+        again, status2 = fn(patched)
+        assert status2 == "already" and again == patched, f"{repo_rel}: not idempotent"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".py", delete=False, encoding="utf8"
+        ) as tf:
+            tf.write(patched)
+        try:
+            py_compile.compile(tf.name, doraise=True)
+        finally:
+            os.unlink(tf.name)
+        out[repo_rel] = patched
+    # Ordering regression (senior review): the wrapper DEFS must land at the
+    # head of the tab functions, syntactically BEFORE the fn= registrations
+    # that execute during tab build - anything later is an UnboundLocalError
+    # at app startup.
+    for rel, wrapper in (
+        ("tabs/voice_blender/voice_blender.py", "_applio_blend_toast"),
+        ("tabs/plugins/plugins.py", "_applio_plugin_toast"),
+        ("tabs/realtime/realtime.py", "_applio_realtime_toast"),
+        ("tabs/extra/sections/processing.py", "_applio_model_info_toast"),
+    ):
+        patched = out[rel]
+        assert patched.index(f"def {wrapper}") < patched.index(
+            f"fn={wrapper},"
+        ), f"{rel}: wrapper def must precede its fn= registration"
+    # TensorBoard toast sits INSIDE launch_and_get_url's success branch:
+    # after the URL resolves, before the return it guards.
+    tb = out["tabs/tensorboard/tensorboard.py"]
+    assert tb.index("url = launch_tensorboard()") < tb.index(
+        'gr.Info(i18n("TensorBoard ready."))'
+    ) < tb.index("return (")
+    # The four upstream-covered tab files must NOT be targets anymore
+    # (#1271 carries their toasts; a re-added sub-patcher would double-toast).
+    targeted = {rel for rel, _, _ in toasts.TARGETS}
+    assert not targeted & {
+        "tabs/inference/inference.py",
+        "tabs/tts/tts.py",
+        "tabs/train/train.py",
+        "tabs/download/download.py",
+    }, "upstream-toasted targets must stay out of patch_job_toasts.TARGETS"
+
+
 def run_all():
     test_history_written_before_untrack()
     test_upload_scan_bounded_to_function_body()
     test_progress_routes_patch()
     test_browse_buttons_patch()
     test_web_payload_patch()
-    print("All patch fixture tests passed (5).")
+    test_job_toasts_patch()
+    print("All patch fixture tests passed (6).")
 
 
 if __name__ == "__main__":

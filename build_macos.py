@@ -918,6 +918,36 @@ def pre_build_patch():
             "app.py - inject a11y web payload",
             "file",
         ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/voice_blender/voice_blender.py",
+            "voice_blender.py - lifecycle toasts (blend, drop confirm)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/plugins/plugins.py",
+            "plugins.py - lifecycle toasts (plugin install)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/realtime/realtime.py",
+            "realtime.py - lifecycle toasts (engine start/failure)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/extra/sections/processing.py",
+            "processing.py - lifecycle toasts (model information)",
+            "dir",
+        ),
+        (
+            "patches/patch_job_toasts.py",
+            "tabs/tensorboard/tensorboard.py",
+            "tensorboard.py - lifecycle toasts (TensorBoard ready)",
+            "dir",
+        ),
     ]
 
     # Validate patch order matches dependencies

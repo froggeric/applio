@@ -11,12 +11,12 @@ All notable changes to this macOS-native fork of Applio. Versions follow
   toggle wired to the batch checkbox), #1271 (job lifecycle toasts), #1275 (batch conversion
   milestone toasts) — plus a formatter run and an upstream preprocess int→float fix.
   Patch-surface consequences:
-  - `patches/patch_job_toasts.py` is deleted with its 9 build registrations and test coverage:
-    upstream #1271 now carries the inference/tts/train/download toasts natively, so the fork
-    patcher would have double-toasted and its anchors there miss (build-fatal by design).
-    The five targets upstream did not take (voice blender, plugin install, realtime start,
-    model information, TensorBoard ready) lose their toasts with it; they remain candidates
-    for a follow-up upstream PR.
+  - `patches/patch_job_toasts.py` is slimmed from 9 targets to the 5 upstream does NOT
+    toast (voice blender blend + drop confirmations, plugin install start/error, realtime
+    start/failure, model information, TensorBoard ready), restored verbatim pending a
+    follow-up upstream PR: upstream #1271 now carries the inference/tts/train/download
+    toasts natively, so the fork patcher would have double-toasted there and its anchors
+    on those four targets miss (build-fatal by design).
   - `patches/patch_inference_progress.py` is re-pointed onto upstream's rewritten
     `convert_audio_batch`: it now keeps upstream's `_toast` announcements verbatim and injects
     only the fork machinery (progress file, cooperative cancel, process history, output-dir
