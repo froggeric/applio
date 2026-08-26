@@ -2,20 +2,20 @@
 
 ## Title
 
-Add section headings so screen readers can navigate the tabs
+Accessibility improvements: add section headings, for screen readers to be able to navigate tabs more easily
 
 ## Body
 
-VoiceOver and NVDA let you jump between the sections of a page with a headings rotor, but that only works if the page has headings. Applio's inference, TTS and real-time tabs had none: each is a long run of controls with no way to skip from "pick a model" to "run the job" without tabbing through everything in between.
+Accessibility tools let you jump between sections of a page by iterating through the list of headings. But that only works if the page contains headings, which were missing from some tabs.
 
-The download tab already marks its sections with `gr.Markdown("## ...")`, so this follows the same pattern where it is missing:
+The download tab already used `gr.Markdown("## ...")` to mark its sections. This follows the same pattern.
 
 - inference: "Model Selection" at the top, "Conversion" above the run controls, in both the single and the batch tab
 - TTS: "Model Selection", "TTS Settings", "Conversion"
 - real-time: "Model Selection" and "Advanced Settings" inside the model settings tab
 
-The other tabs were left alone on purpose. Training is five top-level accordions that already carry their own titles, and the settings and extras tabs are small, labeled clusters; a heading right above a titled accordion or a named group would just say the same thing twice.
+The other tabs were left alone on purpose. Training is five top-level accordions that already have their own titles. The Settings and Extras tabs are small, labeled clusters with named groups.
 
-The new strings are in en_US.json as well, following the note on #1277.
+I have added the new strings in en_US.json as well.
 
-Verified with VoiceOver: the rotor lists the sections and jumping works.
+Verified on macos with voiceover.
