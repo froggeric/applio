@@ -1070,3 +1070,8 @@ boot smoke green. Counting notes: patches_to_apply = 38 tuples; full-chain total
 #1270/#1271/#1275/#1276 all merged, no changes requested across the series. Consequence for the
 NEXT fork sync: the slim 5-target patch_job_toasts is now fully redundant (upstream carries all
 nine toast surfaces) — drop it + registrations + fixtures at sync, after anchor verification.
+
+### Upstream program: PR #1277 MERGED (2026-08-26) — label clarity in
+Five for five (#1270/#1271/#1275/#1276/#1277). Learned rule for the series: new user-visible
+strings ship WITH their en_US.json keys in the same PR (maintainer automation propagates English
+to all locales). Next: PR 6 headings (7 tabs, gr.Markdown "## Section", i18n + en_US keys).
