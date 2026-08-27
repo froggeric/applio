@@ -635,16 +635,19 @@ def get_active_processes():
         ]
 
 
-def _read_inference_progress():
+def _read_inference_progress(path=None):
     """Read ~/Applio/.applio/inference_progress.json, or None if missing/corrupt.
 
     Reuses the launcher's own get_process_state_path 3-tier resolver so this is
     guaranteed to read from the SAME .applio dir the launcher reads history and
     active-process state from (env > runtime_paths.json > ~/Applio).
+    ``path`` overrides the resolved location — the quit-gate helpers' test
+    seam; production callers leave it None.
     """
-    path = os.path.join(
-        os.path.dirname(get_process_state_path()), "inference_progress.json"
-    )
+    if path is None:
+        path = os.path.join(
+            os.path.dirname(get_process_state_path()), "inference_progress.json"
+        )
     if not os.path.exists(path):
         return None
     try:
@@ -694,6 +697,62 @@ def inference_job_type(scope):
     jobLabel mirrors this mapping from the payload's scope field.
     """
     return "conversion" if scope == "single" else "batch inference"
+
+
+def _inference_running(progress_path=None):
+    """Quit-gate predicate: True while the in-process conversion worker is live.
+
+    Same source and active-status set as _synthesize_inference_proc — a
+    conversion is live while status is "running" OR "cancelling" ("cancelling"
+    means the worker saw the cancel flag but is still winding down between
+    files, i.e. its thread is still inside torch). ``progress_path`` is the
+    test seam; production leaves it None so the reader's own resolver picks
+    the location. Never raises.
+    """
+    try:
+        inf = _read_inference_progress(progress_path)
+        return bool(inf and inf.get("status") in ("running", "cancelling"))
+    except Exception:
+        return False
+
+
+def _cancel_inference_and_join(timeout=2.5, data_dir=None, _sleep=None, _now=None):
+    """Cooperatively cancel a live in-process conversion, then wait (bounded).
+
+    Writes the same inference_cancel.flag the patched stop_infer and the
+    dashboard's Stop write — the per-file checkpoint in the injected loop
+    honors it — then polls the progress file until the status leaves
+    running/cancelling (the worker landed) or ``timeout`` elapses. Called ONLY
+    on a confirmed quit: without this, AppKit's exit(0) finalizes pybind while
+    the gradio worker thread is still inside torch (the garbled
+    set_grad_enabled TypeError, repro 2026-08-27). Bounded — the quit path
+    never blocks more than ``timeout`` seconds. ``data_dir``/``_sleep``/``_now``
+    are test seams; production leaves them default. Never raises.
+    """
+    _sleep = _sleep or time.sleep
+    _now = _now or time.time
+    try:
+        if data_dir is None:
+            data_dir = os.path.dirname(get_process_state_path())
+        flag = os.path.join(data_dir, "inference_cancel.flag")
+        os.makedirs(data_dir, exist_ok=True)
+        Path(flag).touch()
+        logging.info("[Launcher] Quit: wrote inference cancel flag")
+    except Exception as e:
+        logging.warning(f"[Launcher] Quit: inference cancel-flag write failed: {e}")
+        return False
+    progress_path = os.path.join(data_dir, "inference_progress.json")
+    deadline = _now() + timeout
+    while _now() < deadline:
+        _sleep(0.1)
+        if not _inference_running(progress_path):
+            logging.info("[Launcher] Quit: conversion worker landed at its checkpoint")
+            return True
+    logging.info(
+        f"[Launcher] Quit: conversion worker still live after {timeout:.1f}s "
+        "grace; proceeding with terminate"
+    )
+    return False
 
 
 def voice_over_enabled():
@@ -5190,6 +5249,21 @@ class ApplioAppDelegate(NSObject):
         except Exception:
             active = []
 
+        # In-process conversions (single or batch) run on a gradio worker
+        # thread, NOT a subprocess, so get_active_processes() never sees them
+        # — they live only in inference_progress.json. Synthesize the same
+        # proc the dashboard builds so a mid-conversion quit gets this prompt
+        # too; without it AppKit exit(0) tears Python down under the worker
+        # (pybind finalize race, repro 2026-08-27). Confirmed window-close
+        # quits skip this (their own dialog just ran — see on_window_closing).
+        if not confirmed:
+            try:
+                inference_proc = _synthesize_inference_proc()
+            except Exception:
+                inference_proc = None
+            if inference_proc:
+                active.append(inference_proc)
+
         if active and not confirmed:
             from AppKit import (
                 NSAlert,
@@ -5202,7 +5276,11 @@ class ApplioAppDelegate(NSObject):
 
                 _t = applio_i18n.native_tr
                 info = ", ".join(
-                    f"{p.get('type', '?')}:{p.get('model_name', '?')}"
+                    (
+                        f"{inference_job_type(p.get('scope'))}:{p.get('model_name', '?')}"
+                        if p.get("_is_inference")
+                        else f"{p.get('type', '?')}:{p.get('model_name', '?')}"
+                    )
                     for p in active[:3]
                 )
                 if len(active) > 3:
@@ -5233,6 +5311,17 @@ class ApplioAppDelegate(NSObject):
         _applio = getattr(launcher, "_applio_app", None)
         if _applio is not None:
             _applio._stopping = True
+        # A confirmed quit with a live in-process conversion must land the
+        # worker at its per-file checkpoint BEFORE termination: exit(0) would
+        # otherwise finalize pybind while the gradio worker thread is still
+        # inside torch (repro 2026-08-27). Runs even when ``confirmed`` skipped
+        # the prompt (the window-close path sets _user_confirmed_quit after its
+        # own dialog). Bounded at ~2.5s — never blocks the quit path longer.
+        try:
+            if _inference_running():
+                _cancel_inference_and_join()
+        except Exception as e:
+            logging.warning(f"[AppDelegate] inference cancel-on-quit failed: {e}")
         try:
             launcher._terminate_children()
         except Exception as e:
@@ -5497,6 +5586,20 @@ class ApplioLauncher:
             )
         return
 
+    def inference_proc(self):
+        """Quit-gate hook for macos_wrapper: the live in-process conversion.
+
+        Delegates to _synthesize_inference_proc (the dashboard's own reader)
+        so the wrapper's window-close dialog and this module's Cmd+Q gate see
+        the SAME job. The wrapper cannot import applio_launcher (circular +
+        it runs as __main__ frozen), so it reaches the reader through this
+        instance. Returns None when no conversion is live; never raises.
+        """
+        try:
+            return _synthesize_inference_proc()
+        except Exception:
+            return None
+
     def _terminate_children(self, timeout: float = 5.0):
         """Terminate all child processes gracefully with escalation.
 
@@ -5506,6 +5609,16 @@ class ApplioLauncher:
         # Mark teardown so signal handlers don't re-enter mid-cascade.
         self._terminating = True
         if _LAUNCHER_PGID is None:
+            # Normal for every LaunchServices launch (double-click / `open`):
+            # those processes are already session leaders, so the boot-time
+            # setsid failed and there is no group WE created to signal. DEBUG,
+            # not warning — this is the standard path for a Finder-launched
+            # app, and the module-level _setup_process_group already logged
+            # the original setsid failure.
+            logging.debug(
+                "[Launcher] No launcher process group (setsid failed at "
+                "boot); skipping group cascade"
+            )
             return
 
         try:

@@ -247,7 +247,14 @@ def update_process_status(process_type: str, status: str):
 
 
 def has_active_processes() -> bool:
-    """Check if any processes are currently active."""
+    """Check if any processes are currently active (incl. in-process conversion).
+
+    The quit/close gate in on_window_closing consults this; a live conversion
+    must count as active or a window-close mid-conversion quits without a
+    prompt and tears Python down under the worker thread (repro 2026-08-27).
+    """
+    if _launcher_inference_proc():
+        return True
     state = read_active_processes()
     for ptype, info in state.get("processes", {}).items():
         if info and info.get("pid"):
@@ -267,8 +274,27 @@ def has_active_processes() -> bool:
     return False
 
 
+def _launcher_inference_proc():
+    """The launcher's synthesized in-process conversion proc, or None.
+
+    An in-process conversion (single or batch) runs on a gradio worker thread,
+    not a subprocess, so it is invisible to active_processes.json — the
+    launcher's _synthesize_inference_proc reader (inference_progress.json) is
+    the single source of truth. The wrapper cannot import applio_launcher
+    (circular; it runs as __main__ frozen), so reach it through the instance
+    start_gui exposed. Standalone runs (_launcher_ref None) have no launcher
+    to ask — None. Never raises.
+    """
+    if _launcher_ref is None:
+        return None
+    try:
+        return _launcher_ref.inference_proc()
+    except Exception:
+        return None
+
+
 def get_active_process_list() -> list:
-    """Get list of active processes with their info."""
+    """Get list of active processes with their info (incl. in-process conversion)."""
     state = read_active_processes()
     active = []
     for ptype, info in state.get("processes", {}).items():
@@ -280,6 +306,9 @@ def get_active_process_list() -> list:
                     active.append({"type": ptype, **info})
             except (ImportError, ProcessLookupError):
                 pass
+    inference = _launcher_inference_proc()
+    if inference:
+        active.append(inference)
     return active
 
 
