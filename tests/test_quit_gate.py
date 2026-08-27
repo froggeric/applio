@@ -146,6 +146,66 @@ def test_launcher_delegation_matches_predicate():
         applio_launcher.get_process_state_path = orig
 
 
+def _pin_state_dir(td):
+    """Pin the launcher's 3-tier resolver into <td>/.applio for one test.
+
+    Returns the original get_process_state_path for the mandatory finally
+    restore (both the progress file and process_history.json derive from it).
+    """
+    orig = applio_launcher.get_process_state_path
+    applio_launcher.get_process_state_path = lambda: os.path.join(
+        td, ".applio", "active_processes.json"
+    )
+    os.makedirs(os.path.join(td, ".applio"), exist_ok=True)
+    return orig
+
+
+def test_stale_cancelling_record_swept():
+    # A crash in the tiny cancelling->cancelled window leaves a phantom
+    # "cancelling" record that reads as live (quit gate + dashboard) until a
+    # new conversion overwrites it — the boot sweep must interrupt it too.
+    with tempfile.TemporaryDirectory() as td:
+        orig = _pin_state_dir(td)
+        try:
+            _write_progress(
+                os.path.join(td, ".applio", "inference_progress.json"), "cancelling"
+            )
+            # a stale cancel flag from the interrupted cancel must go too
+            flag = os.path.join(td, ".applio", "inference_cancel.flag")
+            open(flag, "w").close()
+            applio_launcher._sweep_stale_inference_progress()
+            with open(os.path.join(td, ".applio", "inference_progress.json")) as f:
+                rec = json.load(f)
+            assert rec["status"] == "interrupted", rec
+            assert rec["error"] == "interrupted by app restart"
+            assert not os.path.exists(flag)
+            with open(os.path.join(td, ".applio", "process_history.json")) as f:
+                hist = json.load(f)
+            assert hist["history"], hist
+            assert hist["history"][0]["status"] == "interrupted"
+            assert hist["history"][0]["type"] == "inference"
+        finally:
+            applio_launcher.get_process_state_path = orig
+
+
+def test_sweep_leaves_terminal_records_alone():
+    # Terminal records are NOT swept: no rewrite, no history entry.
+    with tempfile.TemporaryDirectory() as td:
+        orig = _pin_state_dir(td)
+        try:
+            prog = _write_progress(
+                os.path.join(td, ".applio", "inference_progress.json"), "completed"
+            )
+            applio_launcher._sweep_stale_inference_progress()
+            with open(prog) as f:
+                assert json.load(f)["status"] == "completed"
+            assert not os.path.exists(
+                os.path.join(td, ".applio", "process_history.json")
+            )
+        finally:
+            applio_launcher.get_process_state_path = orig
+
+
 if __name__ == "__main__":
     fns = [
         v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)

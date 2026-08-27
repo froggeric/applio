@@ -1014,13 +1014,17 @@ def _row_display_text(proc, word, summary=""):
 
 
 def _sweep_stale_inference_progress():
-    """Mark a stale 'running' inference record (app crashed/quit mid-batch) as
-    'interrupted' so the dashboard never shows a phantom running job. Appends a
-    schema-compatible history entry and removes any stale cancel flag. Safe to
-    call when no record exists (no-op) and to call multiple times. Never raises
-    — every I/O path is wrapped so the sweep cannot crash startup."""
+    """Mark a stale live inference record (app crashed/quit mid-conversion) as
+    'interrupted' so the dashboard never shows a phantom job. BOTH live
+    statuses sweep: 'running', and 'cancelling' — a crash in the tiny
+    cancelling->cancelled window would otherwise leave a phantom 'cancelling'
+    record that reads as live (dashboard job + quit-gate prompt) until a new
+    conversion overwrites it. Appends a schema-compatible history entry and
+    removes any stale cancel flag. Safe to call when no record exists (no-op)
+    and to call multiple times. Never raises — every I/O path is wrapped so
+    the sweep cannot crash startup."""
     inf = _read_inference_progress()
-    if not inf or inf.get("status") != "running":
+    if not inf or inf.get("status") not in ("running", "cancelling"):
         return
     import time as _t, datetime as _dt
 
