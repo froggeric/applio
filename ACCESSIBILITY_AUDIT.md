@@ -1080,3 +1080,14 @@ to all locales). Next: PR 6 headings (7 tabs, gr.Markdown "## Section", i18n + e
 Six for six. Next: PR 7 tuple choices (fs-4 — friendly names in file dropdowns; behavioral:
 choices become (label, value) tuples, value stays the path for the backend, refresh handlers
 re-map; display names are dynamic file data, no i18n keys needed).
+
+### Quit-gate fix (2026-08-27, 9ec7c3b6+a4dcae98, review clean, pushed)
+Root cause of the "crash": quit raced the in-process inference thread (the gate saw only
+subprocess jobs; Py_Finalize tore down pybind under a live torch worker — the empty-overload
+set_grad_enabled error was teardown fallout, proven with ms timestamps + deterministic repro).
+Fix: BOTH quit gates (menu terminate + wrapper X-close, whose silent-no-op trap the review
+dodged) detect in-process inference via the existing reader and show the existing confirm;
+confirmed quit writes the cancel flag + bounded 2.5s grace; stale "cancelling" records swept
+on startup. Conversions in the test build proven clean (48k→40k incl. the owner's own file);
+the owner's second-test failure was free text typed into the Select Audio field (UX follow-up
+pending owner decision). Frozen Cmd+Q validation rides the next build + manual pass.
