@@ -101,6 +101,39 @@ assets/
 - **Import cleanup**: autoflake
 - **Encoding**: UTF-8 for all file operations
 - **No formal test suite** - manual testing through Gradio UI
+- black 26.5.1 is pip-installed in venv_macos (since 2026-08-27): `venv_macos/bin/python -m
+  black` works; older "no local black" notes are obsolete.
+- pytest with a path-first argv (e.g. `pytest tests/x.py`) trips the launcher's frozen
+  script-dispatch — lead with `-q` or use per-file `venv_macos/bin/python tests/x.py` runners.
+- Test requests to the OWNER: always inline the complete checklist in the message (VoiceOver
+  user; scrolling/back-referencing is unusable) — never "see the checklist above/earlier".
+
+## Upstream PR Program (owner-directed, 2026-08)
+
+- **Branches off `upstream/main`**, NEVER fork `main` (fork lags after merges; a fork-based
+  diff reverses our own merged PRs). Push to `origin`, PR against IAHispano/Applio.
+- **Owner gate on every PR**: draft text to `docs/upstream-prs/NN-*.md` → owner edits/reviews →
+  explicit submit command. Default to `--draft`; "actually submit" means ready. Never alter the
+  owner's wording (typos included). Series to date: #1270-#1281 (wiring, toasts ×4, labels,
+  headings, tuple choices, i18n strings + native language names).
+- **en_US.json rule** (maintainer, learned on #1277): new user-visible strings ship WITH their
+  en_US.json keys in the same PR (key=value, alphabetical; their automation syncs all locales).
+- **PR-text discipline**: verify every claim against LIVE upstream (counts, cited pre-existing
+  labels); no AI tells — the owner wants PRs to read human and edits them personally.
+- **CRLF trap**: `tabs/inference/inference.py` is CRLF upstream — rewrites must preserve it or
+  the diff explodes to whole-file.
+- **Owner test builds**: `test/NN-app` branch = fork main + merge the PR branch + re-drop the
+  now-redundant toast patcher (template commits 5e634319/bd9e6115); doubles as pre-sync check.
+- **Headless gradio driver**: POST `/gradio_api/queue/join` BEFORE opening the SSE
+  `/gradio_api/queue/data` stream; `/gradio_api/config` for component/event discovery; tuple
+  dropdowns take the VALUE (raw path).
+- **Quit gate for in-process inference** (a4dcae98): BOTH quit paths (menu terminate + wrapper
+  X-close) detect running/cancelling conversions via the progress file and prompt; confirmed
+  quit writes the cancel flag + ≤2.5 s grace; stale `cancelling` swept at startup
+  (tests/test_quit_gate.py, 10 tests).
+- **Diagnosis pattern**: a pybind error with an EMPTY overload list (`set_grad_enabled() … got
+  (bool)`) is Py_Finalize tearing down under a live worker — a quit RACED the thread, not
+  corrupt torch. Check quit timing in the log first.
 
 ## Fork Maintenance
 
@@ -519,7 +552,8 @@ Fork-owned modules (all lazy-importing AppKit or nothing; all in HIDDEN_IMPORTS)
   `test_patch_fixtures.py`, `test_applio_i18n.py`, `test_a11y_js_invariants.py` (Phase 3: payload-JS
   invariants), `test_patcher_exit_codes.py` (Phase 3: patcher exit-code contract),
   `test_menu_jobs.py` (Phase 4: live menu titles), `test_dashboard_ax.py` (Phase 4: dashboard AX
-  summaries), `test_a11y_auto_speech.py` (Phase 4c: `effective_speech` + hidden-keys plumbing) —
+  summaries), `test_a11y_auto_speech.py` (Phase 4c: `effective_speech` + hidden-keys plumbing),
+  `test_quit_gate.py` (quit-gate for in-process inference) —
   suite counts after Phase 4e: `test_menu_spec.py` 14 (incl. the a11y-submenu-GONE guard),
   `test_progress_api.py` 13 (echo without announce_mode + scope forwarding),
   `test_a11y_js_invariants.py` 5 (scope-aware jobLabel, output-change-speech-removed, one
