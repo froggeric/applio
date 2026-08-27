@@ -5,6 +5,15 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+
+- **Quitting during an in-process conversion no longer tears the app down under the worker.**
+  Both quit paths (menu ⌘Q and window close) now detect a running or cancelling conversion and
+  show the existing confirmation prompt; a confirmed quit cancels cooperatively (cancel flag +
+  up to 2.5 s grace) instead of finalizing Python under a live torch thread — the cause of the
+  "crash" seen on 2026-08-27 (pybind `set_grad_enabled` teardown error). Stale `cancelling`
+  records are swept to `interrupted` at startup.
+
 ### Changed
 
 - **Upstream sync 2026-08-25 (within 3.6.4).** Merged our upstreamed PRs — #1270 (batch formant
