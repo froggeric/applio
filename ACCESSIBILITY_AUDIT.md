@@ -1091,3 +1091,11 @@ confirmed quit writes the cancel flag + bounded 2.5s grace; stale "cancelling" r
 on startup. Conversions in the test build proven clean (48k→40k incl. the owner's own file);
 the owner's second-test failure was free text typed into the Select Audio field (UX follow-up
 pending owner decision). Frozen Cmd+Q validation rides the next build + manual pass.
+
+### Track B COMPLETE: PR #1281 submitted (2026-08-27, owner-edited + reviewed, ready)
+The full Applio §5[U] accessibility program is now upstream: #1270 wiring, #1271 lifecycle
+toasts, #1275 batch milestones, #1276 extra job toasts, #1277 label clarity (+ en_US.json keys
+rule learned), #1278 section headings, #1280 tuple choices (pending), #1281 i18n strings +
+native language names (owner chose to drop the technical-detail paragraphs from the PR body —
+maintainers can ask). Remaining program: Track C (gradio statustracker ARIA) after #1280 merges;
+optional tail (Select-Audio free text, status contract, record-button non-English bug).
