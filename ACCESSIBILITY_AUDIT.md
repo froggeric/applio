@@ -1075,3 +1075,8 @@ nine toast surfaces) — drop it + registrations + fixtures at sync, after ancho
 Five for five (#1270/#1271/#1275/#1276/#1277). Learned rule for the series: new user-visible
 strings ship WITH their en_US.json keys in the same PR (maintainer automation propagates English
 to all locales). Next: PR 6 headings (7 tabs, gr.Markdown "## Section", i18n + en_US keys).
+
+### Upstream program: PR #1278 MERGED (2026-08-27) — headings in
+Six for six. Next: PR 7 tuple choices (fs-4 — friendly names in file dropdowns; behavioral:
+choices become (label, value) tuples, value stays the path for the backend, refresh handlers
+re-map; display names are dynamic file data, no i18n keys needed).
