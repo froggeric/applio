@@ -1099,3 +1099,15 @@ rule learned), #1278 section headings, #1280 tuple choices (pending), #1281 i18n
 native language names (owner chose to drop the technical-detail paragraphs from the PR body —
 maintainers can ask). Remaining program: Track C (gradio statustracker ARIA) after #1280 merges;
 optional tail (Select-Audio free text, status contract, record-button non-English bug).
+
+### Upstream sync 2026-09-02 — gated, pushed (main @ ffd43fc9)
+20 upstream commits in (our #1281, multi-speaker training, allowed_paths native, fixes).
+Consequences landed: slim patch_job_toasts DELETED for good (5 surfaces native upstream);
+patch_progress_routes re-pointed to EXTEND upstream's allowed_paths=["logs"] (the duplicate-kwarg
+variant = SyntaxError while patchers exit 0 — compile the patched file, never trust exit codes
+alone; CLAUDE.md lesson added). Gate: 114/114, build 33/33, bundle verified (single allowed_paths,
+native language names live, zero toast markers), boot smoke green. Reviewer-found upstream cosmetic
+bug: en_US key "Language automatically detected in the system" dropped by 0724dd77 while lang.py
+still references it (key-fallback makes English identical; non-English loses one string) — worth a
+one-line upstream note. Smoke notes: /gradio_api/config 404s in 6.20 (component config at /config);
+first poll can hit pre-route-registration 404 — poll for payload shape.
