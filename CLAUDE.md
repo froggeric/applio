@@ -147,13 +147,26 @@ git merge upstream/main
 ```
 
 The fork keeps macOS work in separate files, so the git merge is nearly conflict-free
-(last sync within 3.6.4 on 2026-08-25: **conflict-free** — merged our own upstreamed PRs
-#1270 formant-batch wiring, #1271 job-lifecycle toasts, #1275 batch-milestone toasts, a formatter
-run, and an upstream preprocess int→float fix; consequence: `patches/patch_job_toasts.py` DELETED
-— upstream now toasts natively in inference/tts/train/download (the patcher's anchors there
-missed, exit 2) and same-day RESTORED as a slim 5-target patcher for the surfaces upstream
-did NOT take (voice_blender, plugins, realtime, model-info, tensorboard — `patch_job_toasts.py`,
-pending the Track B upstream PR) — and `patches/patch_inference_progress.py` re-pointed onto upstream's post-#1275
+(last sync within 3.6.4 on 2026-09-02, 20 commits: **conflict-free** — brought in our own
+upstreamed a11y PRs #1281 (i18n strings + language names), #1276 (extra job toasts), #1277
+(label clarity), #1278 (section headings), plus fd7c034a multi-speaker training, #1274 rmvpe
+high-register, TF32, TensorBoard/model-info/model-blend fixes, and "Update translations";
+consequences: the slim `patches/patch_job_toasts.py` DELETED for good — upstream #1276 now
+carries all five remaining toast surfaces (model-info's toast lives in
+`tabs/extra/sections/processing.py`, NOT model_information.py) — and
+`patches/patch_progress_routes.py` re-pointed because upstream 3ea5259b ships its own
+`allowed_paths = ["logs"]` in app.py's launch call: the patcher now EXTENDS that list with
+the fork's launch-time entries instead of injecting a second `allowed_paths` kwarg (a second
+kwarg = SyntaxError "keyword argument repeated" in the patched app.py while every patcher
+still exits 0 — compile the patched file, don't trust exit codes alone). No other anchors
+moved; multi-speaker's rewrite of `rvc/train/train.py` + the i18n pass over
+`tabs/train/train.py` left all three train.py patchers intact. Prior sync 2026-08-25:
+**conflict-free** — merged our own upstreamed PRs #1270 formant-batch wiring, #1271
+job-lifecycle toasts, #1275 batch-milestone toasts, a formatter run, and an upstream
+preprocess int→float fix; consequence: `patches/patch_job_toasts.py` first DELETED (upstream
+toasts natively in inference/tts/train/download; the patcher's anchors there missed, exit 2)
+then same-day RESTORED as a slim 5-target patcher for the surfaces upstream did NOT take —
+and `patches/patch_inference_progress.py` re-pointed onto upstream's post-#1275
 `convert_audio_batch`: it now KEEPS upstream's `_toast` calls verbatim and injects only the
 fork machinery (progress file, cancel, history, makedirs); `_infer_toast` is gone. Prior sync
 3.6.3 → 3.6.4 on 2026-08-13: **conflict-free** — all 12 upstream-changed files were
@@ -608,9 +621,12 @@ The 2026-08-25 sync slimmed the patcher to those five targets: upstream #1271 no
 inference/tts/train/download toasts natively (the patcher's anchors there missed → build-fatal
 exit 2; re-adding them would double-toast), so voice_blender (blend mix + both drop
 confirmations), plugins (start/error), realtime (start/failure, broadened yield predicate),
-model-info (finish) and tensorboard (ready) remain fork-patched — RESTORED pending the Track B
-upstream PR (their sub-patchers/markers kept verbatim; `tabs/train/train.py` is no longer a
-target, so `post_build_restore`'s train.py patcher count stays 3).
+model-info (finish) and tensorboard (ready) remainED fork-patched — pending the Track B
+upstream PR. The 2026-09-02 sync DELETED the slim patcher for good (template commits
+5e634319/bd9e6115): upstream #1276 took all five surfaces natively (model-info's toast lives
+in `tabs/extra/sections/processing.py`); `test_patch_fixtures` is 5, the voice_blender CASES
+entry is gone from `test_patcher_exit_codes`, and `tabs/train/train.py` was never re-added as
+a target (its patcher count stays 3: dataset_paths, train_44100, browse_buttons).
 ENGINE-side toasts: since the same merge, upstream #1275 provides them natively
 (module-level `_toast`, lazy gradio import) and the re-pointed
 `patches/patch_inference_progress.py` KEEPS those calls verbatim — batch start / 25-50-75 % milestones (total≥8,

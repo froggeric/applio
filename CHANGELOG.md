@@ -16,6 +16,33 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ### Changed
 
+- **Upstream sync 2026-09-02 (within 3.6.4, 20 commits).** Conflict-free merge. Headline
+  upstream changes: our upstreamed a11y PRs #1281 (translate the remaining user-facing strings
+  + name the languages properly), #1276 (toasts for the remaining long-running jobs), #1277
+  (label clarity), #1278 (section headings); fd7c034a multi-speaker training (finetuning uses
+  a randomized speaker embedding, sid 1+ helper datasets); 3ea5259b ships
+  `allowed_paths = ["logs"]` in `app.py`'s launch call; 383eebec TensorBoard wrong-URL fix;
+  9b70d059 model-info output fix; 69b298e6 model-blend fix; 3d989f16 TF32 enabled for the
+  training script; #1274 rmvpe high-register corrector (new settings section + `f0.py`
+  rework); 0724dd77 "Update translations" (locale regeneration + `assets/i18n/scan.py`
+  rewrite — note it dropped the `Language automatically detected in the system` key while
+  `lang.py` still references it; i18n falls back to the key text, no visible regression).
+  Patch-surface consequences:
+  - `patches/patch_job_toasts.py` is DELETED (per template commits 5e634319/bd9e6115):
+    upstream #1276 now carries all five remaining toast surfaces natively (voice blender,
+    plugins, realtime, model information — the toast lives in
+    `tabs/extra/sections/processing.py`, not model_information.py — and TensorBoard).
+    `test_patch_fixtures` 6→5; the voice_blender CASES entry left `test_patcher_exit_codes`.
+  - `patches/patch_progress_routes.py` is re-pointed: it now EXTENDS upstream's
+    `allowed_paths = ["logs"]` list with the fork's launch-time-resolved entries
+    (`expanduser("~")` + `APPLIO_DATA_PATH` env, `if p`-filtered) instead of injecting a
+    second `allowed_paths` kwarg — post-merge that duplicate was a SyntaxError (keyword
+    argument repeated) in the patched `app.py` while every patcher still exited 0. The
+    `prevent_thread_lock` flip, route registration, and infinite-sleep parking are unchanged.
+  - Every other patcher applied cleanly against the merged sources (verified by running the
+    full in-order patch loop + `py_compile` on every touched file) — the multi-speaker
+    rewrite of `rvc/train/train.py` and the `tabs/train/train.py` i18n pass moved no anchors.
+
 - **Upstream sync 2026-08-25 (within 3.6.4).** Merged our upstreamed PRs — #1270 (batch formant
   toggle wired to the batch checkbox), #1271 (job lifecycle toasts), #1275 (batch conversion
   milestone toasts) — plus a formatter run and an upstream preprocess int→float fix.
