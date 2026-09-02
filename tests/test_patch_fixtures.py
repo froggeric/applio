@@ -103,15 +103,20 @@ def test_progress_routes_patch():
     # covers a data location chosen OUTSIDE home (macos_wrapper sets
     # APPLIO_DATA_PATH in-process before Gradio). The `if p` filter matters:
     # gradio's abspath stringifies a None into a bogus `<cwd>/None` entry
-    # (no crash; hygiene).
-    assert "allowed_paths=[" in patched
+    # (no crash; hygiene). Since upstream 3ea5259b ships its own
+    # allowed_paths = ["logs"], the patcher EXTENDS that list — a second
+    # kwarg would be a SyntaxError (keyword repeated), so pin: exactly one
+    # allowed_paths occurrence, upstream's "logs" entry preserved inside it,
+    # and both kwargs inside the launch call (upstream order: ptl first).
+    assert patched.count("allowed_paths") == 1, "duplicate allowed_paths kwarg"
+    assert 'allowed_paths=["logs"]' in patched
     assert 'os.path.expanduser("~")' in patched
     assert 'os.environ.get("APPLIO_DATA_PATH")' in patched
     launch = patched.find("Applio.launch(")
-    kw = patched.find("allowed_paths=[")
     ptl = patched.find("prevent_thread_lock=True,")
-    assert launch != -1 and launch < kw < ptl, (
-        "allowed_paths kwarg not inside the launch kwargs"
+    kw = patched.find("allowed_paths=[")
+    assert launch != -1 and launch < ptl < kw, (
+        "launch kwargs not ordered inside the launch call"
     )
     block = patched.find("applio_progress_api.register_routes(app)")
     tb = patched.find("from rvc.lib.tools.launch_tensorboard import get_tb_url")
