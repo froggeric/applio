@@ -1,10 +1,35 @@
-# PR 9 (gradio) — branch `a11y/statustracker-aria` @ b0defee66 on froggeric/gradio — DRAFT, NOT SUBMITTED
+# PR 9 (gradio) — branch `a11y/statustracker-aria` @ b0defee66 on froggeric/gradio — NO PR POSSIBLE; ISSUE #13813 IS THE VEHICLE
 
 Target repo: **gradio-app/gradio** (not IAHispano/Applio). Branch is off their
 `main` @ 7e839990a, committed and pushed to the fork `froggeric/gradio`.
 **Issue #13813 POSTED 2026-09-02** (owner text, verbatim; owner confirmed the
-silence live on stock 6.20.0 before posting). PR not opened yet — next owner
-gate.
+silence live on stock 6.20.0 before posting).
+
+**PR submission is OFF THE TABLE (2026-09-02):** gradio has PAUSED accepting
+pull requests from outside the maintainer team — CONTRIBUTING.md
+(2ae6f97d): "As AI coding agents have become widespread, the volume of
+community PRs has grown to the point where reviewing them carefully takes
+more maintainer time than the alternative: pointing our own coding agents at
+a well-described issue and solving it ourselves." Enforced via the
+collaborators-only PR restriction (API: 404 / GraphQL permission error; web:
+explicit banner). API attempts + scheduled retry were all withdrawn.
+**Resolution (owner, Option A):** a comment on issue #13813 pointing at the
+branch as material their agents may take or leave — posted manually by the
+owner. The PR text below is SHELVED for the record (or for a future lift of
+the pause / maintainer invitation).
+
+## Final issue comment (owner text, posted manually 2026-09-02)
+
+I also have a complete fix on my fork, in case it is useful:
+https://github.com/froggeric/gradio/tree/a11y/statustracker-aria
+
+It adds the progressbar role and aria-value attributes to the bar, a rate-limited "polite" live region that announces milestones, queue position and completion, and an alert role on the validation error block.
+
+It also adds unit tests in js/statustracker/StatusTracker.test.ts.
+
+I verified it with voiceover on macos, both before and after my patch, to confirm the problem exists before my patch, and is fixed after.
+
+Since pull requests are paused, feel free to take whatever is useful from the branch.
 
 Two process flags before the texts:
 
