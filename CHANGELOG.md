@@ -5,6 +5,12 @@ All notable changes to this macOS-native fork of Applio. Versions follow
 
 ## [Unreleased]
 
+## [3.6.4.1] — 2026-09-02
+
+First fork release on upstream 3.6.4: the full accessibility program (four manual VoiceOver
+rounds of fixes, all of it upstreamed as IAHispano/Applio PRs #1270–#1281), the quit gate, and
+two upstream syncs.
+
 ### Fixed
 
 - **Quitting during an in-process conversion no longer tears the app down under the worker.**

@@ -89,7 +89,7 @@ import PyInstaller.__main__
 # Configuration
 # =================================================================
 APP_NAME = "Applio"
-BUILD_NUMBER = 0  # Reset for 3.6.4 (first fork release on upstream 3.6.4)
+BUILD_NUMBER = 1  # 3.6.4.1: a11y phases 3-4f, quit gate, syncs 2026-08-25 + 2026-09-02
 
 
 # Read version from the tracked assets/config_template.json first (the source of

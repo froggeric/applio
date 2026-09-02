@@ -614,6 +614,10 @@ defaults write com.iahispano.applio a11y.speech -string auto
 defaults write com.iahispano.applio a11y.sound_cues -bool false
 ```
 
+The language picker shows each language in its own spelling (Français, 日本語, …) while the
+saved setting stays the raw locale code — part of the same accessibility work, contributed
+upstream as IAHispano/Applio #1281.
+
 ## Architecture
 
 ### Bundle layout
@@ -685,6 +689,9 @@ run while it runs, and keeps finished runs so you can review them later.
 - **Batch inference:** converting a folder of audio shows the same live card (files converted / total,
   current file, ETA, speed), auto-opens on start, and finished or cancelled batches appear in history
   with their counts. Stop cancels at the next file without quitting the app.
+- **Quit protection:** quitting (⌘Q or closing the window) while a conversion runs asks for
+  confirmation first; a confirmed quit cancels the job cooperatively instead of killing it
+  mid-file.
 
 The dashboard runs in the app process and parses the training log directly (no RVC import), so it
 works identically in dev mode and the frozen app.
