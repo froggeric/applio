@@ -1,8 +1,10 @@
 # PR 9 (gradio) — branch `a11y/statustracker-aria` @ b0defee66 on froggeric/gradio — DRAFT, NOT SUBMITTED
 
 Target repo: **gradio-app/gradio** (not IAHispano/Applio). Branch is off their
-`main` @ 7e839990a, committed and pushed to the fork `froggeric/gradio`
-(fork created 2026-09-02; nothing opened against upstream yet).
+`main` @ 7e839990a, committed and pushed to the fork `froggeric/gradio`.
+**Issue #13813 POSTED 2026-09-02** (owner text, verbatim; owner confirmed the
+silence live on stock 6.20.0 before posting). PR not opened yet — next owner
+gate.
 
 Two process flags before the texts:
 
@@ -74,7 +76,7 @@ This adds the missing accessibility semantics to `js/statustracker/static/index.
 
 The visible markup is unchanged apart from the added attributes.
 
-Closes: #NNN
+Closes: #13813
 
 ## Testing
 
