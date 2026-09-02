@@ -40,10 +40,10 @@ def process_input(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as file:
             file.read()
-        gr.Info(f"The file has been loaded!")
+        gr.Info(i18n("The file has been loaded!"))
         return file_path, file_path
     except UnicodeDecodeError:
-        gr.Info(f"The file has to be in UTF-8 encoding.")
+        gr.Info(i18n("The file has to be in UTF-8 encoding."))
         return None, None
 
 
@@ -51,6 +51,7 @@ def process_input(file_path):
 def tts_tab():
     trigger = get_filter_trigger()
     with gr.Column():
+        gr.Markdown(value=i18n("## Model Selection"))
         with gr.Row():
             model_file = gr.Dropdown(
                 label=i18n("Voice Model"),
@@ -90,7 +91,7 @@ def tts_tab():
             )
         with gr.Row():
             unload_button = gr.Button(i18n("Unload Voice"))
-            refresh_button = gr.Button(i18n("Refresh"))
+            refresh_button = gr.Button(i18n("Refresh models and indexes"))
 
             unload_button.click(
                 fn=lambda: (
@@ -107,6 +108,7 @@ def tts_tab():
                 outputs=[index_file],
             )
 
+    gr.Markdown(value=i18n("## TTS Settings"))
     gr.Markdown(
         i18n(
             f"Applio is a Speech-to-Speech conversion software, utilizing EdgeTTS as middleware for running the Text-to-Speech (TTS) component. Read more about it [here!](https://docs.applio.org/applio/getting-started/tts)"
@@ -355,7 +357,7 @@ def tts_tab():
 
     def enforce_terms(terms_accepted, *args):
         if not terms_accepted:
-            message = "You must agree to the Terms of Use to proceed."
+            message = i18n("You must agree to the Terms of Use to proceed.")
             gr.Info(message)
             return message, None
         try:
@@ -371,9 +373,13 @@ def tts_tab():
                 )
             )
             return (
-                "An error occurred during TTS conversion. Please check the console logs for more details.",
+                i18n(
+                    "An error occurred during TTS conversion. Please check the console logs for more details."
+                ),
                 None,
             )
+
+    gr.Markdown(value=i18n("## Conversion"))
 
     terms_checkbox = gr.Checkbox(
         label=i18n("I agree to the terms of use"),
@@ -387,7 +393,7 @@ def tts_tab():
 
     with gr.Row():
         vc_output1 = gr.Textbox(
-            label=i18n("Output Information"),
+            label=i18n("TTS output"),
             info=i18n("The output information will be displayed here."),
         )
         vc_output2 = gr.Audio(label=i18n("Export Audio"))

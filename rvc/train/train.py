@@ -119,6 +119,13 @@ config.data.training_files = os.path.join(experiment_dir, "filelist.txt")
 
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = True
+# TF32 settings, should improve performance in some cases
+try:
+    torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+except Exception as e:
+    print(f'Torch tf32: {e}')
 
 global_step = 0
 last_loss_gen_all = 0
@@ -358,17 +365,15 @@ def run(
             spk_dim = model_info["speakers_id"]
     except Exception as e:
         print(f"Could not load model info file: {e}. Using defaults.")
-
-    # Try to load speaker dim from latest checkpoint or pretrainG
+    print(f"Dataset has {spk_dim} speakers.")
+    # Try to load speaker dim from latest checkpoint
     try:
-        last_g = latest_checkpoint_path(experiment_dir, "G_*.pth")
-        chk_path = (
-            last_g if last_g else (pretrainG if pretrainG not in ("", "None") else None)
-        )
-
+        chk_path = latest_checkpoint_path(experiment_dir, "G_*.pth")
+        
         if chk_path:
             ckpt = torch.load(chk_path, map_location="cpu", weights_only=True)
             spk_dim = ckpt["model"]["emb_g.weight"].shape[0]
+            print(f"Saved generator has {spk_dim} speakers.")
             del ckpt
     except Exception as e:
         print(f"Failed to load checkpoint: {e}. Using default number of speakers.")
@@ -467,9 +472,12 @@ def run(
                 ckpt = torch.load(pretrainG, map_location="cpu", weights_only=True)[
                     "model"
                 ]
+                print(f"Overriding the pretrain speaker embedding size to {spk_dim} speakers.")
                 if hasattr(net_g, "module"):
+                    ckpt["emb_g.weight"] = net_g.module.emb_g.weight.detach().clone()
                     net_g.module.load_state_dict(ckpt)
                 else:
+                    ckpt["emb_g.weight"] = net_g.emb_g.weight.detach().clone()
                     net_g.load_state_dict(ckpt)
                 del ckpt
             except Exception as e:

@@ -159,12 +159,16 @@ def save_drop_model(dropbox):
 # Drop Dataset
 def save_drop_dataset_audio(dropbox, dataset_name):
     if not dataset_name:
-        gr.Info("Please enter a valid dataset name. Please try again.")
+        gr.Info(i18n("Please enter a valid dataset name. Please try again."))
         return None, None
     else:
         file_extension = os.path.splitext(dropbox)[1][1:].lower()
         if file_extension not in sup_audioext:
-            gr.Info("The file you dropped is not a valid audio file. Please try again.")
+            gr.Info(
+                i18n(
+                    "The file you dropped is not a valid audio file. Please try again."
+                )
+            )
         else:
             dataset_name = format_title(dataset_name)
             audio_file = format_title(os.path.basename(dropbox))
@@ -278,12 +282,12 @@ def export_index(index_path):
 # Upload to Google Drive
 def upload_to_google_drive(pth_path, index_path, model_name):
     if not os.path.exists(os.path.join(models_path, model_name)):
-        return gr.Info("Model folder not found.")
+        return gr.Info(i18n("Model folder not found."))
     if not pth_path or not os.path.exists(pth_path):
-        return gr.Info(".pth not found.")
+        return gr.Info(i18n(".pth not found."))
     try:
         zip_path = f"{model_name}.zip"
-        gr.Info("Uploading...")
+        gr.Info(i18n("Uploading..."))
         with zipfile.ZipFile(zip_path, "w") as zipf:
             zipf.write(pth_path, os.path.basename(pth_path))
             if index_path and os.path.exists(index_path):
@@ -294,10 +298,10 @@ def upload_to_google_drive(pth_path, index_path, model_name):
         if os.path.exists(dest):
             os.remove(dest)
         shutil.move(zip_path, dest)
-        gr.Info("Uploaded.")
+        gr.Info(i18n("Uploaded."))
     except Exception as error:
         print(f"An error occurred uploading to Google Drive: {error}")
-        gr.Info("Upload failed.")
+        gr.Info(i18n("Upload failed."))
 
 
 def auto_enable_checkpointing():
@@ -432,7 +436,7 @@ def train_tab():
                     type="filepath",
                     interactive=True,
                 )
-        refresh = gr.Button(i18n("Refresh"))
+        refresh = gr.Button(i18n("Refresh models and datasets"))
 
         with gr.Accordion(i18n("Advanced Settings"), open=False):
             cut_preprocess = gr.Radio(
@@ -509,7 +513,7 @@ def train_tab():
                 interactive=True,
             )
         preprocess_output_info = gr.Textbox(
-            label=i18n("Output Information"),
+            label=i18n("Preprocess output"),
             info=i18n("The output information will be displayed here."),
             value="",
             max_lines=8,
@@ -606,7 +610,7 @@ def train_tab():
                 )
 
         extract_output_info = gr.Textbox(
-            label=i18n("Output Information"),
+            label=i18n("Feature extraction output"),
             info=i18n("The output information will be displayed here."),
             value="",
             max_lines=8,
@@ -773,7 +777,7 @@ def train_tab():
 
         def enforce_terms(terms_accepted, *args):
             if not terms_accepted:
-                message = "You must agree to the Terms of Use to proceed."
+                message = i18n("You must agree to the Terms of Use to proceed.")
                 gr.Info(message)
                 return message
             gr.Info(i18n("Training started..."))
@@ -788,7 +792,7 @@ def train_tab():
             interactive=True,
         )
         train_output_info = gr.Textbox(
-            label=i18n("Output Information"),
+            label=i18n("Training output"),
             info=i18n("The output information will be displayed here."),
             value="",
             max_lines=8,
@@ -853,7 +857,7 @@ def train_tab():
                 )
         with gr.Row():
             with gr.Column():
-                refresh_export = gr.Button(i18n("Refresh"))
+                refresh_export = gr.Button(i18n("Refresh trained models and indexes"))
                 if os.getenv("COLAB_RELEASE_TAG"):
                     upload_exported = gr.Button(i18n("Upload"))
                     upload_exported.click(
@@ -881,7 +885,9 @@ def train_tab():
 
             def download_prerequisites():
                 gr.Info(
-                    "Checking for prerequisites with pitch guidance... Missing files will be downloaded. If you already have them, this step will be skipped."
+                    i18n(
+                        "Checking for prerequisites with pitch guidance... Missing files will be downloaded. If you already have them, this step will be skipped."
+                    )
                 )
                 run_prerequisites_script(
                     pretraineds_hifigan=True,
@@ -889,7 +895,9 @@ def train_tab():
                     exe=False,
                 )
                 gr.Info(
-                    "Prerequisites check complete. Missing files were downloaded, and you may now start preprocessing."
+                    i18n(
+                        "Prerequisites check complete. Missing files were downloaded, and you may now start preprocessing."
+                    )
                 )
 
             def toggle_visible_embedder_custom(embedder_model):

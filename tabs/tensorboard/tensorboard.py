@@ -9,9 +9,11 @@ def tensorboard_tab():
     def launch_and_get_url():
         url = launch_tensorboard()
         if url and not url.startswith("Error"):
+            gr.Info(i18n("TensorBoard ready."))
+            iframe = f"""<iframe src="{url}" width="100%" height="800" frameborder="0" title="TensorBoard"></iframe>"""
             return (
                 url,
-                '<iframe src="/tensorboard/" width="100%" height="800" frameborder="0"></iframe>',
+                iframe
             )
         return url or "Failed to start", "<p>Failed to launch TensorBoard</p>"
 

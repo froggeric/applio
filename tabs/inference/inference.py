@@ -298,7 +298,7 @@ def save_to_wav2(upload_audio):
 
 
 def delete_outputs():
-    gr.Info(f"Outputs cleared!")
+    gr.Info(i18n("Outputs cleared!"))
     for root, _, files in os.walk(audio_root_relative, topdown=False):
         for name in files:
             if name.endswith(tuple(sup_audioext)) and name.__contains__("_output"):
@@ -500,6 +500,7 @@ def update_filter_visibility(_):
 def inference_tab():
     trigger = get_filter_trigger()
     with gr.Column():
+        gr.Markdown(value=i18n("## Model Selection"))
         with gr.Row():
             model_file = gr.Dropdown(
                 label=i18n("Voice Model"),
@@ -538,7 +539,7 @@ def inference_tab():
         )
         with gr.Row():
             unload_button = gr.Button(i18n("Unload Voice"))
-            refresh_button = gr.Button(i18n("Refresh"))
+            refresh_button = gr.Button(i18n("Refresh models and indexes"))
 
             unload_button.click(
                 fn=lambda: (
@@ -697,7 +698,7 @@ def inference_tab():
                         interactive=True,
                     )
                     formant_refresh_button = gr.Button(
-                        value=i18n("Refresh"),
+                        value=i18n("Refresh formant presets"),
                         visible=False,
                     )
                 formant_qfrency = gr.Slider(
@@ -1165,7 +1166,7 @@ def inference_tab():
 
         def enforce_terms(terms_accepted, *args):
             if not terms_accepted:
-                message = "You must agree to the Terms of Use to proceed."
+                message = i18n("You must agree to the Terms of Use to proceed.")
                 gr.Info(message)
                 return message, None
             try:
@@ -1181,20 +1182,26 @@ def inference_tab():
                     )
                 )
                 return (
-                    "An error occurred during audio conversion. Please check the console logs for more details.",
+                    i18n(
+                        "An error occurred during audio conversion. Please check the console logs for more details."
+                    ),
                     None,
                 )
 
         def enforce_terms_batch(terms_accepted, *args):
             if not terms_accepted:
-                message = "You must agree to the Terms of Use to proceed."
+                message = i18n("You must agree to the Terms of Use to proceed.")
                 gr.Info(message)
                 return message
             try:
                 return run_batch_infer_script(*args)
             except Exception:
                 traceback.print_exc()
-                return "An error occurred during audio batch conversion. Please check the console logs for more details."
+                return i18n(
+                    "An error occurred during audio batch conversion. Please check the console logs for more details."
+                )
+
+        gr.Markdown(value=i18n("## Conversion"))
 
         terms_checkbox = gr.Checkbox(
             label=i18n("I agree to the terms of use"),
@@ -1209,7 +1216,7 @@ def inference_tab():
 
         with gr.Row():
             vc_output1 = gr.Textbox(
-                label=i18n("Output Information"),
+                label=i18n("Conversion output"),
                 info=i18n("The output information will be displayed here."),
             )
             vc_output2 = gr.Audio(label=i18n("Export Audio"))
@@ -1348,7 +1355,7 @@ def inference_tab():
                         interactive=True,
                     )
                     formant_refresh_button_batch = gr.Button(
-                        value=i18n("Refresh"),
+                        value=i18n("Refresh formant presets"),
                         visible=False,
                     )
                 formant_qfrency_batch = gr.Slider(
@@ -1816,6 +1823,8 @@ def inference_tab():
                             i18n("Move files to custom embedder folder")
                         )
 
+        gr.Markdown(value=i18n("## Conversion"))
+
         terms_checkbox_batch = gr.Checkbox(
             label=i18n("I agree to the terms of use"),
             info=i18n(
@@ -1830,7 +1839,7 @@ def inference_tab():
 
         with gr.Row():
             vc_output3 = gr.Textbox(
-                label=i18n("Output Information"),
+                label=i18n("Batch conversion output"),
                 info=i18n("The output information will be displayed here."),
             )
 
