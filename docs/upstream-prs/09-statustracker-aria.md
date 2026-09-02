@@ -1,4 +1,4 @@
-# PR 9 (gradio) — branch `a11y/statustracker-aria` @ d026117ac on froggeric/gradio — DRAFT, NOT SUBMITTED
+# PR 9 (gradio) — branch `a11y/statustracker-aria` @ b0defee66 on froggeric/gradio — DRAFT, NOT SUBMITTED
 
 Target repo: **gradio-app/gradio** (not IAHispano/Applio). Branch is off their
 `main` @ 7e839990a, committed and pushed to the fork `froggeric/gradio`
@@ -69,6 +69,7 @@ This adds the missing accessibility semantics to `js/statustracker/static/index.
 
 - The bar now has `role="progressbar"` with `aria-valuemin`/`aria-valuemax`/ `aria-valuenow`/`aria-valuetext`. This means it reads like any native progress bar. The value text uses the last progress tuple when there is one (eg: "processing files: 3 / 4 steps") and falls back to a percentage.
 - A visually hidden "polite" live region announces milestone changes (every 10%, but never more than one announcement every five seconds), the queue position while actually waiting in line, and "Processing" when nothing more specific is known. The rate limit matters because every live region update interrupts what the screen reader is currently saying: without it a short run restarts the same sentence several times a second and the numbers are never reached. Hidden trackers stay silent, so the inputs tracking the same run do not double the messages. The visible text itself cannot serve as the live region: it updates every animation frame because of the running timer.
+- When the run finishes, a "Complete" announcement plays. It bypasses the rate limit (the run may have crossed a milestone moments earlier), but input side trackers and apps that set show_progress to hidden stay silent. Errors are left alone: the toast live region already speaks them.
 - The validation error block gets `role="alert"` so component-level validation errors are spoken when they appear.
 
 The visible markup is unchanged apart from the added attributes.
